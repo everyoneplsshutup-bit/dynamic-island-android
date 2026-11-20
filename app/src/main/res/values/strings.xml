@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">Dynamic Island</string>
+    <string name="accessibility_service_description">Hosts the Dynamic Island overlay around your front camera and provides opt-in single-node text selection when Select Mode is enabled by you.</string>
+    <string name="notification_listener_label">Dynamic Island Previews</string>
+    <string name="action_save_to_vault">Save to Vault</string>
+    <string name="action_save_link">Save link</string>
+    <string name="action_add_to_island">Add to island</string>
+</resources>
