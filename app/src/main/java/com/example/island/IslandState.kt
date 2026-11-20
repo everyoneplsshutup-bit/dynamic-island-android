@@ -91,6 +91,8 @@ data class IslandState(
     val isFloatingSidebarOpen: Boolean = false,
     val isDeviceLocked: Boolean = false,
     val isCalibrationPreview: Boolean = false,
+    val isDragOverIsland: Boolean = false,
+    val activeFloatingMiniTab: IslandTab? = null,
     val needsKeyboardFocus: Boolean = false,
     val statusBanner: String? = null
 ) {

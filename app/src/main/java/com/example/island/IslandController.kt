@@ -94,7 +94,8 @@ class IslandController(
             current.copy(
                 mode = IslandMode.EXPANDED,
                 activeTab = resolvedTab,
-                isMoreRowOpen = !resolvedTab.isMainRow
+                isMoreRowOpen = !resolvedTab.isMainRow,
+                needsKeyboardFocus = (resolvedTab == IslandTab.SEARCH || resolvedTab == IslandTab.NOTES)
             )
         }
         if (!wasExpanded) {
@@ -139,7 +140,11 @@ class IslandController(
                 needsKeyboardFocus = (tab == IslandTab.SEARCH || tab == IslandTab.NOTES)
             )
         }
-        onSoundEvent(IslandSoundEvent.TAP)
+        if (tab == IslandTab.SEARCH) {
+            onSoundEvent(IslandSoundEvent.SEARCH_OPEN)
+        } else {
+            onSoundEvent(IslandSoundEvent.TAP)
+        }
     }
 
     fun toggleMoreRow() {
@@ -162,6 +167,20 @@ class IslandController(
 
     fun setFloatingSidebarOpen(open: Boolean) {
         _state.update { it.copy(isFloatingSidebarOpen = open) }
+    }
+
+    fun setFloatingMiniTab(tab: IslandTab?) {
+        _state.update {
+            it.copy(
+                activeFloatingMiniTab = tab,
+                isFloatingSidebarOpen = false,
+                needsKeyboardFocus = (tab == IslandTab.SEARCH || tab == IslandTab.NOTES)
+            )
+        }
+    }
+
+    fun setDragOverIsland(active: Boolean) {
+        _state.update { it.copy(isDragOverIsland = active) }
     }
 
     fun setCalibrationPreview(active: Boolean) {

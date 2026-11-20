@@ -1,8 +1,12 @@
 package com.example.setup
 
 import android.content.Intent
+import android.os.Build
+import android.provider.DocumentsContract
 import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -268,6 +272,21 @@ fun SettingsGroupDetailScreen(
     var backupText by remember { mutableStateOf("") }
     var showAppMultiPickerFor by remember { mutableStateOf<String?>(null) } // "FLOATING" or "PINNED"
 
+    val screenshotsFolderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { treeUri ->
+        if (treeUri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    treeUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            scope.launch {
+                app.settingsRepository.update { it.copy(vaultScreenshotsTreeUri = treeUri.toString()) }
+                Toast.makeText(context, "Screenshots folder linked for 10-min Auto-Vault", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -418,9 +437,12 @@ fun SettingsGroupDetailScreen(
                                 Switch(
                                     checked = settings.soundEnabled,
                                     onCheckedChange = { enabled ->
-                                        app.soundManager.updateCachedAudioSettings(enabled, settings.soundVolume)
                                         if (enabled) {
-                                            app.soundManager.playToggle()
+                                            app.soundManager.updateCachedAudioSettings(true, settings.soundVolume)
+                                            app.soundManager.playToggle(isOn = true)
+                                        } else {
+                                            app.soundManager.playToggle(isOn = false)
+                                            app.soundManager.updateCachedAudioSettings(false, settings.soundVolume)
                                         }
                                         scope.launch { app.settingsRepository.update { it.copy(soundEnabled = enabled) } }
                                     },
@@ -611,7 +633,7 @@ fun SettingsGroupDetailScreen(
                                     Switch(
                                         checked = settings.screenReadingEnabled,
                                         onCheckedChange = { wantsOn ->
-                                            app.soundManager.playToggle()
+                                            app.soundManager.playToggle(isOn = wantsOn)
                                             if (wantsOn) {
                                                 showOcrDisclosure = true
                                             } else {
@@ -643,6 +665,26 @@ fun SettingsGroupDetailScreen(
                             helper = "Auto-store new screenshots in app-private Vault for 10 min (24h Trash).",
                             checked = settings.vaultAutoCapture3Finger,
                             onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(vaultAutoCapture3Finger = c) } } }
+                        )
+                    }
+                    item {
+                        ActionRow(
+                            title = "Screenshots Folder (SAF Access)",
+                            helper = if (settings.vaultScreenshotsTreeUri.isNullOrBlank()) {
+                                "Not linked yet · Tap to select DCIM/Screenshots for automatic 10m Vault capture"
+                            } else {
+                                "Linked · Automatic screenshot Vault capture active"
+                            },
+                            onClick = {
+                                app.soundManager.playTap()
+                                val initial = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                    DocumentsContract.buildDocumentUri(
+                                        "com.android.externalstorage.documents",
+                                        "primary:DCIM/Screenshots"
+                                    )
+                                } else null
+                                screenshotsFolderPicker.launch(initial)
+                            }
                         )
                     }
                     item {
@@ -739,7 +781,7 @@ fun SettingsGroupDetailScreen(
             confirmButton = {
                 Button(onClick = {
                     showOcrDisclosure = false
-                    app.soundManager.playToggle()
+                    app.soundManager.playToggle(isOn = true)
                     scope.launch { app.settingsRepository.update { it.copy(screenReadingEnabled = true) } }
                 }) {
                     Text("I Understand, Turn ON")
@@ -903,7 +945,7 @@ private fun SwitchRow(
                 checked = checked,
                 enabled = enabled,
                 onCheckedChange = { next ->
-                    app?.soundManager?.playToggle()
+                    app?.soundManager?.playToggle(isOn = next)
                     onCheckedChange(next)
                 }
             )

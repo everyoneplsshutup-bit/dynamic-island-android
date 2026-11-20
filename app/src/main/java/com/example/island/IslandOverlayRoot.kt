@@ -1,19 +1,28 @@
 package com.example.island
 
 import android.provider.Settings
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,10 +46,12 @@ import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -54,25 +65,28 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.core.graphics.drawable.toBitmap
 import com.example.DynamicIslandApp
 import com.example.floating.FloatingSidebarOverlay
 import com.example.media.MusicCompactWaveform
@@ -80,7 +94,6 @@ import com.example.media.MusicExpandedView
 import com.example.search.LaunchableApp
 import com.example.system.AccentTheme
 import com.example.system.CalculatorIslandView
-import com.example.system.IdleWidgetType
 import com.example.system.IslandSettings
 import com.example.system.IslandTab
 import com.example.system.LockScreenPreset
@@ -89,9 +102,8 @@ import com.example.system.SpringFeel
 import com.example.system.TimerEngine
 import com.example.system.TimerStopwatchPanel
 import com.example.ui.theme.IslandColors
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -105,7 +117,6 @@ fun IslandOverlayRoot(
     val mediaState by app.mediaHub.state.collectAsState()
     val timerState by app.timerEngine.state.collectAsState()
     val batteryState by app.batteryMonitor.state.collectAsState()
-    val calcState by app.calculatorEngine.state.collectAsState()
 
     val context = LocalContext.current
     val systemAnimScale = remember {
@@ -127,7 +138,6 @@ fun IslandOverlayRoot(
         return
     }
 
-    // Spring parameters tuned for 120 Hz on Snapdragon 732G (no full-screen blur)
     val damping = when {
         reduceMotion -> Spring.DampingRatioNoBouncy
         state.mode == IslandMode.EXPANDED -> when (settings.springFeel) {
@@ -135,27 +145,73 @@ fun IslandOverlayRoot(
             SpringFeel.BALANCED -> 0.78f
             SpringFeel.GENTLE -> 0.86f
         }
-        else -> Spring.DampingRatioNoBouncy // critically-damped settling for collapse
+        else -> Spring.DampingRatioNoBouncy
     }
-    val stiffness = if (reduceMotion) 1200f else (440f * settings.animationSpeed)
+    val stiffness = if (reduceMotion) 1400f else (460f * settings.animationSpeed)
 
-    val expandScale by animateFloatAsState(
-        targetValue = if (state.mode == IslandMode.EXPANDED) 1f else 0.96f,
+    // Stage 1 + Stage 2 Apple-style choreography strictly via GPU graphicsLayer
+    var showExpandedCard by remember { mutableStateOf(state.mode == IslandMode.EXPANDED) }
+    val pillPreStretchX = remember { Animatable(1f) }
+    val cardScaleX = remember { Animatable(if (state.mode == IslandMode.EXPANDED) 1f else 0.45f) }
+    val cardScaleY = remember { Animatable(if (state.mode == IslandMode.EXPANDED) 1f else 0.25f) }
+    val cardAlpha = remember { Animatable(if (state.mode == IslandMode.EXPANDED) 1f else 0f) }
+
+    LaunchedEffect(state.mode, reduceMotion, settings.animationSpeed, settings.springFeel) {
+        if (state.mode == IslandMode.EXPANDED) {
+            if (reduceMotion) {
+                showExpandedCard = true
+                pillPreStretchX.snapTo(1f)
+                cardScaleX.snapTo(1f)
+                cardScaleY.snapTo(1f)
+                cardAlpha.snapTo(1f)
+            } else {
+                // Stage 1: Pill widens sideways briefly around the punch-hole camera
+                pillPreStretchX.animateTo(
+                    targetValue = 1.24f,
+                    animationSpec = spring(dampingRatio = 0.65f, stiffness = stiffness * 1.4f)
+                )
+                // Stage 2: Smooth spring expansion from camera anchor
+                showExpandedCard = true
+                launch { pillPreStretchX.snapTo(1f) }
+                launch { cardScaleX.animateTo(1f, spring(dampingRatio = damping, stiffness = stiffness)) }
+                launch { cardScaleY.animateTo(1f, spring(dampingRatio = damping, stiffness = stiffness)) }
+                cardAlpha.animateTo(1f, tween(durationMillis = 120))
+            }
+        } else {
+            if (reduceMotion) {
+                showExpandedCard = false
+                cardAlpha.snapTo(0f)
+                cardScaleX.snapTo(0.45f)
+                cardScaleY.snapTo(0.25f)
+                pillPreStretchX.snapTo(1f)
+            } else if (showExpandedCard) {
+                // Stage 1 Collapse: Card springs inward smoothly toward camera hole
+                launch { cardScaleX.animateTo(0.46f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = stiffness * 1.15f)) }
+                launch { cardScaleY.animateTo(0.26f, spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = stiffness * 1.15f)) }
+                cardAlpha.animateTo(0f, tween(durationMillis = 110))
+                showExpandedCard = false
+                // Stage 2 Collapse: Sideways pill settles back cleanly around camera ring
+                pillPreStretchX.snapTo(1.18f)
+                pillPreStretchX.animateTo(
+                    targetValue = 1f,
+                    animationSpec = spring(dampingRatio = 0.76f, stiffness = stiffness)
+                )
+            }
+        }
+    }
+
+    val compactScale by animateFloatAsState(
+        targetValue = if (state.mode == IslandMode.COMPACT || state.mode == IslandMode.SPLIT) 1f else 0.94f,
         animationSpec = spring(dampingRatio = damping, stiffness = stiffness),
-        label = "island_scale"
-    )
-    val expandAlpha by animateFloatAsState(
-        targetValue = 1f,
-        animationSpec = spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = stiffness),
-        label = "island_alpha"
+        label = "compact_scale"
     )
 
     val useGlass = settings.pillStyle == PillStyle.GLASS && !settings.solidFallback
-    val glassAlpha = (0.58f + settings.glassDensity * 0.32f).coerceIn(0.55f, 0.92f)
+    val glassAlpha = (0.60f + settings.glassDensity * 0.30f).coerceIn(0.56f, 0.92f)
     val cardBackground = if (useGlass) {
         Brush.verticalGradient(
             colors = listOf(
-                Color(0xFF1A1B22).copy(alpha = glassAlpha),
+                Color(0xFF1C1E26).copy(alpha = glassAlpha),
                 Color(0xFF0A0A0E).copy(alpha = (glassAlpha + 0.08f).coerceAtMost(0.95f))
             )
         )
@@ -163,10 +219,19 @@ fun IslandOverlayRoot(
         Brush.verticalGradient(colors = listOf(IslandColors.PillBlack, IslandColors.PillBlack))
     }
 
-    val pillBorderColor = if (useGlass) IslandColors.GlassSpecularBorder else Color.White.copy(alpha = 0.10f)
+    val pillBorderBrush = IslandColors.liquidBorderBrush(
+        useGlass = useGlass,
+        isHighlighted = state.isDragOverIsland,
+        accentColor = accentColor
+    )
+    val pillBorderColor = when {
+        state.isDragOverIsland -> accentColor
+        useGlass -> IslandColors.GlassSpecularBorder
+        else -> Color.White.copy(alpha = 0.14f)
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Select mode active indicator banner at top
+        // Select mode active indicator banner
         if (state.isSelectModeActive) {
             Box(
                 modifier = Modifier
@@ -182,7 +247,7 @@ fun IslandOverlayRoot(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Select Mode ON · Long-press any text to copy",
+                        text = "Select Mode ON · Tap or long-press any text",
                         color = Color.Black,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold
@@ -206,75 +271,110 @@ fun IslandOverlayRoot(
             )
         }
 
-        // Main Island Container positioned around the camera cutout
+        // Main Island Container anchored at camera cutout (RenderThread transforms only)
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .offset(
                     x = settings.cutoutXOffsetDp.dp,
                     y = (settings.cutoutYOffsetDp - 2f).coerceAtLeast(0f).dp
-                )
-                .graphicsLayer {
-                    scaleX = expandScale
-                    scaleY = expandScale
-                    alpha = expandAlpha
-                },
+                ),
             contentAlignment = Alignment.TopCenter
         ) {
-            when (state.mode) {
-                IslandMode.IDLE -> {
-                    IdlePillView(
-                        settings = settings,
-                        batteryPercent = batteryState.levelPercent,
-                        accentColor = accentColor,
-                        isCalibrationPreview = state.isCalibrationPreview
-                    )
-                }
-
-                IslandMode.COMPACT, IslandMode.SPLIT -> {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        CompactPillView(
-                            state = state,
-                            settings = settings,
-                            accentColor = accentColor,
-                            isPlaying = mediaState.isPlaying,
-                            albumArt = mediaState.albumArt,
-                            pillBorderColor = pillBorderColor
-                        )
-                        if (state.mode == IslandMode.SPLIT && state.secondaryActivity != null) {
-                            SplitSecondaryBubble(
-                                activity = state.secondaryActivity!!,
-                                accentColor = accentColor,
-                                borderColor = pillBorderColor
-                            )
-                        }
+            if (showExpandedCard) {
+                Box(
+                    modifier = Modifier.graphicsLayer {
+                        transformOrigin = TransformOrigin(0.5f, 0f)
+                        scaleX = cardScaleX.value
+                        scaleY = cardScaleY.value
+                        alpha = cardAlpha.value
                     }
-                }
-
-                IslandMode.EXPANDED -> {
+                ) {
                     ExpandedIslandCard(
                         app = app,
                         state = state,
                         settings = settings,
                         accentColor = accentColor,
                         cardBackground = cardBackground,
-                        borderColor = pillBorderColor,
+                        borderBrush = pillBorderBrush,
                         useGlass = useGlass,
+                        reduceMotion = reduceMotion,
                         onRequestHaptic = onRequestHaptic,
                         onOpenAppSettings = onOpenAppSettings
                     )
                 }
+            } else {
+                when (state.mode) {
+                    IslandMode.IDLE -> {
+                        Box(
+                            modifier = Modifier.graphicsLayer {
+                                scaleX = pillPreStretchX.value
+                            }
+                        ) {
+                            IdlePillView(
+                                settings = settings,
+                                accentColor = accentColor,
+                                isCalibrationPreview = state.isCalibrationPreview,
+                                isDragOverIsland = state.isDragOverIsland
+                            )
+                        }
+                    }
+
+                    IslandMode.COMPACT, IslandMode.SPLIT, IslandMode.EXPANDED -> {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.graphicsLayer {
+                                scaleX = compactScale * pillPreStretchX.value
+                                scaleY = compactScale
+                            }
+                        ) {
+                            CompactPillView(
+                                state = state,
+                                settings = settings,
+                                accentColor = accentColor,
+                                isPlaying = mediaState.isPlaying,
+                                albumArt = mediaState.albumArt,
+                                pillBorderColor = pillBorderColor
+                            )
+                            if (state.mode == IslandMode.SPLIT && state.secondaryActivity != null) {
+                                SplitSecondaryBubble(
+                                    activity = state.secondaryActivity!!,
+                                    accentColor = accentColor,
+                                    borderColor = pillBorderColor
+                                )
+                            }
+                        }
+                    }
+                }
             }
+        }
+
+        // Draggable Floating Mini-Window inside the overlay (Calc / Notes / Timer / Search)
+        val miniTab = state.activeFloatingMiniTab
+        if (miniTab != null) {
+            DraggableFloatingMiniWindow(
+                app = app,
+                tab = miniTab,
+                settings = settings,
+                accentColor = accentColor,
+                onRequestHaptic = onRequestHaptic,
+                onExpandToIsland = {
+                    app.islandController.setFloatingMiniTab(null)
+                    app.islandController.expand(miniTab)
+                },
+                onClose = {
+                    app.soundManager.playCollapse()
+                    app.islandController.setFloatingMiniTab(null)
+                }
+            )
         }
 
         // MIUI-style Floating Apps Sidebar overlay when opened from Tools
         AnimatedVisibility(
             visible = state.isFloatingSidebarOpen,
-            enter = fadeIn(),
-            exit = fadeOut(),
+            enter = fadeIn(tween(150)) + scaleIn(initialScale = 0.92f),
+            exit = fadeOut(tween(120)),
             modifier = Modifier
                 .align(Alignment.TopEnd)
                 .padding(top = 72.dp, end = 10.dp)
@@ -290,8 +390,8 @@ fun IslandOverlayRoot(
         // Transient status banner
         AnimatedVisibility(
             visible = state.statusBanner != null,
-            enter = fadeIn(),
-            exit = fadeOut(),
+            enter = fadeIn(tween(140)),
+            exit = fadeOut(tween(120)),
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = (settings.cutoutYOffsetDp + settings.cutoutHeightDp + 24f).dp)
@@ -299,8 +399,8 @@ fun IslandOverlayRoot(
             Box(
                 modifier = Modifier
                     .clip(CircleShape)
-                    .background(Color(0xEE18181F))
-                    .border(1.dp, accentColor.copy(alpha = 0.6f), CircleShape)
+                    .background(Color(0xF016171E))
+                    .border(1.dp, accentColor.copy(alpha = 0.65f), CircleShape)
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
                 Text(
@@ -314,45 +414,36 @@ fun IslandOverlayRoot(
     }
 }
 
+/**
+ * Idle Pill is strictly a thin minimal ring around the camera cutout.
+ * Zero text, zero widgets under or beside the camera in IDLE.
+ */
 @Composable
 private fun IdlePillView(
     settings: IslandSettings,
-    batteryPercent: Int,
     accentColor: Color,
-    isCalibrationPreview: Boolean
+    isCalibrationPreview: Boolean,
+    isDragOverIsland: Boolean
 ) {
     val holeW = settings.cutoutWidthDp.dp
     val holeH = settings.cutoutHeightDp.dp
-    val ringBorderColor = if (isCalibrationPreview) accentColor else Color.White.copy(alpha = 0.22f)
+    val ringBorderColor = when {
+        isDragOverIsland -> accentColor
+        isCalibrationPreview -> accentColor
+        else -> Color.White.copy(alpha = 0.22f)
+    }
+    val strokeWidth = if (isDragOverIsland || isCalibrationPreview) 2.dp else 1.dp
 
-    // Idle state is just a thin border around the camera (+ optional idle widget left/right)
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    Box(
+        contentAlignment = Alignment.Center,
         modifier = Modifier
             .clip(CircleShape)
             .background(IslandColors.PillBlack)
-            .border(if (isCalibrationPreview) 1.5.dp else 1.dp, ringBorderColor, CircleShape)
-            .padding(horizontal = if (settings.idleWidget == IdleWidgetType.NONE) 4.dp else 10.dp, vertical = 2.dp)
+            .border(strokeWidth, ringBorderColor, CircleShape)
+            .padding(horizontal = 4.dp, vertical = 3.dp)
+            .testTag("idle_camera_ring")
     ) {
-        if (settings.idleWidget == IdleWidgetType.CLOCK) {
-            val timeStr = remember { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date()) }
-            Text(timeStr, color = IslandColors.TextSecondary, fontSize = 10.sp)
-            Spacer(Modifier.width(6.dp))
-        } else if (settings.idleWidget == IdleWidgetType.SEARCH_SHORTCUT) {
-            Icon(Icons.Filled.Search, contentDescription = null, tint = accentColor, modifier = Modifier.size(12.dp))
-            Spacer(Modifier.width(6.dp))
-        }
-
-        // Exact camera cutout clearance box (never draw text/icons inside this)
         Spacer(modifier = Modifier.size(width = holeW, height = holeH))
-
-        if (settings.idleWidget == IdleWidgetType.BATTERY_RING) {
-            Spacer(Modifier.width(6.dp))
-            Text("$batteryPercent%", color = IslandColors.AccentGreen, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
-        } else if (settings.idleWidget == IdleWidgetType.QUICK_NOTE) {
-            Spacer(Modifier.width(6.dp))
-            Icon(Icons.Filled.Description, contentDescription = null, tint = accentColor, modifier = Modifier.size(12.dp))
-        }
     }
 }
 
@@ -374,7 +465,7 @@ private fun CompactPillView(
             .height((settings.cutoutHeightDp + 10f).coerceAtLeast(36f).dp)
             .clip(CircleShape)
             .background(IslandColors.PillBlack)
-            .border(1.dp, pillBorderColor, CircleShape)
+            .border(if (state.isDragOverIsland) 1.5.dp else 1.dp, pillBorderColor, CircleShape)
             .padding(horizontal = 10.dp)
     ) {
         // LEFT SLOT (strictly left of camera cutout)
@@ -410,7 +501,7 @@ private fun CompactPillView(
             }
         }
 
-        // CAMERA CUTOUT CLEARANCE (nothing sits under the punch-hole)
+        // CAMERA CUTOUT CLEARANCE
         Spacer(Modifier.width((settings.cutoutWidthDp + 10f).dp))
 
         // RIGHT SLOT (strictly right of camera cutout)
@@ -421,17 +512,23 @@ private fun CompactPillView(
             is IslandActivity.Timer -> {
                 Text(
                     text = TimerEngine.formatDuration(activity.remainingMs),
-                    color = accentColor,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold
+                    style = TextStyle(
+                        color = accentColor,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFeatureSettings = "tnum"
+                    )
                 )
             }
             is IslandActivity.Charging -> {
                 Text(
                     text = "${activity.levelPercent}%",
-                    color = IslandColors.AccentGreen,
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.Bold
+                    style = TextStyle(
+                        color = IslandColors.AccentGreen,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFeatureSettings = "tnum"
+                    )
                 )
             }
             is IslandActivity.NotificationPreview -> {
@@ -505,8 +602,9 @@ private fun ExpandedIslandCard(
     settings: IslandSettings,
     accentColor: Color,
     cardBackground: Brush,
-    borderColor: Color,
+    borderBrush: Brush,
     useGlass: Boolean,
+    reduceMotion: Boolean,
     onRequestHaptic: () -> Unit,
     onOpenAppSettings: () -> Unit
 ) {
@@ -529,11 +627,10 @@ private fun ExpandedIslandCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp)
-            .widthIn(max = 420.dp)
-            .shadow(16.dp, RoundedCornerShape(36.dp))
-            .clip(RoundedCornerShape(36.dp))
+            .widthIn(max = 388.dp)
+            .clip(RoundedCornerShape(34.dp))
             .background(cardBackground)
-            .border(1.dp, borderColor, RoundedCornerShape(36.dp))
+            .border(if (state.isDragOverIsland) 1.5.dp else 1.dp, borderBrush, RoundedCornerShape(34.dp))
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -549,8 +646,8 @@ private fun ExpandedIslandCard(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height((settings.cutoutHeightDp + 16f).coerceAtLeast(42f).dp)
-                .padding(horizontal = 14.dp),
+                .height((settings.cutoutHeightDp + 14f).coerceAtLeast(40f).dp)
+                .padding(horizontal = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -579,6 +676,7 @@ private fun ExpandedIslandCard(
                 IconButton(
                     onClick = {
                         onRequestHaptic()
+                        app.soundManager.playTap()
                         app.islandController.collapse()
                         onOpenAppSettings()
                     },
@@ -589,13 +687,13 @@ private fun ExpandedIslandCard(
             }
         }
 
-        // User-pinned App Shortcuts Quick Launch Row (Feature 17)
+        // User-pinned App Shortcuts Quick Launch Row (pre-decoded ImageBitmap icons)
         if (pinnedApps.isNotEmpty()) {
             LazyRow(
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 4.dp)
+                    .padding(horizontal = 12.dp, vertical = 2.dp)
             ) {
                 items(pinnedApps, key = { it.packageName }) { shortcut ->
                     Row(
@@ -605,15 +703,16 @@ private fun ExpandedIslandCard(
                             .background(Color.White.copy(alpha = 0.08f))
                             .clickable {
                                 onRequestHaptic()
+                                app.soundManager.playTap()
                                 app.searchEngine.launchApp(shortcut.packageName)
                                 app.islandController.collapse()
                             }
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                            .padding(horizontal = 9.dp, vertical = 4.dp)
                     ) {
-                        val bmp = remember(shortcut.packageName) { shortcut.icon?.toBitmap(48, 48)?.asImageBitmap() }
+                        val bmp = shortcut.iconBitmap
                         if (bmp != null) {
-                            Image(bitmap = bmp, contentDescription = shortcut.label, modifier = Modifier.size(16.dp).clip(CircleShape))
-                            Spacer(Modifier.width(6.dp))
+                            Image(bitmap = bmp, contentDescription = shortcut.label, modifier = Modifier.size(15.dp).clip(CircleShape))
+                            Spacer(Modifier.width(5.dp))
                         }
                         Text(shortcut.label, color = IslandColors.TextPrimary, fontSize = 11.sp, maxLines = 1)
                     }
@@ -621,89 +720,148 @@ private fun ExpandedIslandCard(
             }
         }
 
-        // Active Module Content
-        when (state.activeTab) {
-            IslandTab.MUSIC -> MusicExpandedView(
-                state = mediaState,
-                accentColor = accentColor,
-                onTogglePlayPause = { onRequestHaptic(); app.mediaHub.togglePlayPause() },
-                onPrevious = { onRequestHaptic(); app.mediaHub.skipPrevious() },
-                onNext = { onRequestHaptic(); app.mediaHub.skipNext() },
-                onSeekTo = { pos -> app.mediaHub.seekTo(pos) },
-                onToggleShuffle = { onRequestHaptic(); app.mediaHub.sendShuffleCommand() },
-                onCycleRepeat = { onRequestHaptic(); app.mediaHub.sendRepeatCommand() },
-                onToggleLike = { onRequestHaptic(); app.mediaHub.sendLikeCommand() },
-                onOpenPlayer = { onRequestHaptic(); app.mediaHub.openPlayerApp(); app.islandController.collapse() }
-            )
+        // Capped 216.dp content box with smooth directional spring AnimatedContent per tab
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(216.dp)
+        ) {
+            AnimatedContent(
+                targetState = state.activeTab,
+                transitionSpec = {
+                    if (reduceMotion) {
+                        fadeIn(tween(80)) togetherWith fadeOut(tween(80))
+                    } else {
+                        val forward = targetState.ordinal >= initialState.ordinal
+                        val enterOffset = if (forward) { fullW: Int -> (fullW * 0.14f).roundToInt() } else { fullW: Int -> -(fullW * 0.14f).roundToInt() }
+                        val exitOffset = if (forward) { fullW: Int -> -(fullW * 0.10f).roundToInt() } else { fullW: Int -> (fullW * 0.10f).roundToInt() }
+                        (slideInHorizontally(spring(dampingRatio = 0.82f, stiffness = 520f), initialOffsetX = enterOffset) +
+                            fadeIn(tween(140)) +
+                            scaleIn(initialScale = 0.96f, animationSpec = spring(dampingRatio = 0.82f, stiffness = 520f)))
+                            .togetherWith(
+                                slideOutHorizontally(tween(110), targetOffsetX = exitOffset) +
+                                    fadeOut(tween(95))
+                            )
+                    }
+                },
+                label = "island_tab_content"
+            ) { tab ->
+                when (tab) {
+                    IslandTab.MUSIC -> MusicExpandedView(
+                        state = mediaState,
+                        accentColor = accentColor,
+                        onTogglePlayPause = {
+                            onRequestHaptic()
+                            if (mediaState.isPlaying) app.soundManager.playMusicPause() else app.soundManager.playMusicPlay()
+                            app.mediaHub.togglePlayPause()
+                        },
+                        onPrevious = {
+                            onRequestHaptic()
+                            app.soundManager.playMusicNext()
+                            app.mediaHub.skipPrevious()
+                        },
+                        onNext = {
+                            onRequestHaptic()
+                            app.soundManager.playMusicNext()
+                            app.mediaHub.skipNext()
+                        },
+                        onSeekTo = { pos -> app.mediaHub.seekTo(pos) },
+                        onToggleShuffle = {
+                            onRequestHaptic()
+                            app.soundManager.playToggle(!mediaState.isShuffled)
+                            app.mediaHub.sendShuffleCommand()
+                        },
+                        onCycleRepeat = {
+                            onRequestHaptic()
+                            app.soundManager.playTap()
+                            app.mediaHub.sendRepeatCommand()
+                        },
+                        onToggleLike = {
+                            onRequestHaptic()
+                            app.soundManager.playToggle(!mediaState.isLiked)
+                            app.mediaHub.sendLikeCommand()
+                        },
+                        onOpenPlayer = {
+                            onRequestHaptic()
+                            app.soundManager.playTap()
+                            app.mediaHub.openPlayerApp()
+                            app.islandController.collapse()
+                        }
+                    )
 
-            IslandTab.CALC -> CalculatorIslandView(
-                state = calcState,
-                onDigit = { app.calculatorEngine.pressDigit(it) },
-                onDecimal = { app.calculatorEngine.pressDecimal() },
-                onClear = { app.calculatorEngine.pressClear() },
-                onToggleSign = { app.calculatorEngine.pressToggleSign() },
-                onPercent = { app.calculatorEngine.pressPercent() },
-                onOperator = { app.calculatorEngine.pressOperator(it) },
-                onEquals = { app.calculatorEngine.pressEquals() },
-                onHaptic = onRequestHaptic,
-                compactMode = true
-            )
+                    IslandTab.CALC -> CalculatorIslandView(
+                        state = calcState,
+                        onDigit = { app.calculatorEngine.pressDigit(it) },
+                        onDecimal = { app.calculatorEngine.pressDecimal() },
+                        onClear = { app.calculatorEngine.pressClear() },
+                        onToggleSign = { app.calculatorEngine.pressToggleSign() },
+                        onPercent = { app.calculatorEngine.pressPercent() },
+                        onOperator = { app.calculatorEngine.pressOperator(it) },
+                        onEquals = { app.calculatorEngine.pressEquals() },
+                        onBackspace = { app.calculatorEngine.pressBackspace() },
+                        onHaptic = onRequestHaptic,
+                        onKeySound = { app.soundManager.playCalcKey() },
+                        compactMode = true
+                    )
 
-            IslandTab.TIMER -> TimerStopwatchPanel(
-                state = timerState,
-                accentColor = accentColor,
-                onPickerChanged = { h, m, s -> app.timerEngine.setPickerDuration(h, m, s) },
-                onStartTimer = { app.timerEngine.startTimer() },
-                onPauseTimer = { app.timerEngine.pauseTimer() },
-                onResumeTimer = { app.timerEngine.resumeTimer() },
-                onCancelTimer = { app.timerEngine.cancelTimer() },
-                onStartStopwatch = { app.timerEngine.startStopwatch() },
-                onPauseStopwatch = { app.timerEngine.pauseStopwatch() },
-                onResetStopwatch = { app.timerEngine.resetStopwatch() },
-                onLapStopwatch = { app.timerEngine.lapStopwatch() },
-                onHaptic = onRequestHaptic
-            )
+                    IslandTab.TIMER -> TimerStopwatchPanel(
+                        state = timerState,
+                        accentColor = accentColor,
+                        onPickerChanged = { h, m, s -> app.timerEngine.setPickerDuration(h, m, s) },
+                        onStartTimer = { app.timerEngine.startTimer() },
+                        onPauseTimer = { app.timerEngine.pauseTimer() },
+                        onResumeTimer = { app.timerEngine.resumeTimer() },
+                        onCancelTimer = { app.timerEngine.cancelTimer() },
+                        onStartStopwatch = { app.timerEngine.startStopwatch() },
+                        onPauseStopwatch = { app.timerEngine.pauseStopwatch() },
+                        onResetStopwatch = { app.timerEngine.resetStopwatch() },
+                        onLapStopwatch = { app.timerEngine.lapStopwatch() },
+                        onHaptic = onRequestHaptic,
+                        onTimerSetSound = { app.soundManager.playTimerSet() }
+                    )
 
-            IslandTab.SEARCH -> SearchIslandPanel(
-                app = app,
-                accentColor = accentColor,
-                onCollapse = { app.islandController.collapse() }
-            )
+                    IslandTab.SEARCH -> SearchIslandPanel(
+                        app = app,
+                        accentColor = accentColor,
+                        onCollapse = { app.islandController.collapse() }
+                    )
 
-            IslandTab.TOOLS -> ToolsIslandPanel(
-                app = app,
-                settings = settings,
-                accentColor = accentColor,
-                onHaptic = onRequestHaptic,
-                onCollapse = { app.islandController.collapse() }
-            )
+                    IslandTab.TOOLS -> ToolsIslandPanel(
+                        app = app,
+                        settings = settings,
+                        accentColor = accentColor,
+                        onHaptic = onRequestHaptic,
+                        onCollapse = { app.islandController.collapse() }
+                    )
 
-            IslandTab.VAULT -> VaultIslandPanel(
-                app = app,
-                accentColor = accentColor,
-                onCollapse = { app.islandController.collapse() }
-            )
+                    IslandTab.VAULT -> VaultIslandPanel(
+                        app = app,
+                        accentColor = accentColor,
+                        onCollapse = { app.islandController.collapse() }
+                    )
 
-            IslandTab.CLIPS -> ClipsIslandPanel(
-                app = app,
-                accentColor = accentColor
-            )
+                    IslandTab.CLIPS -> ClipsIslandPanel(
+                        app = app,
+                        accentColor = accentColor
+                    )
 
-            IslandTab.NOTES -> NotesIslandPanel(
-                app = app,
-                accentColor = accentColor
-            )
+                    IslandTab.NOTES -> NotesIslandPanel(
+                        app = app,
+                        accentColor = accentColor
+                    )
 
-            IslandTab.MEMO -> MemoIslandPanel(
-                app = app,
-                accentColor = accentColor
-            )
+                    IslandTab.MEMO -> MemoIslandPanel(
+                        app = app,
+                        accentColor = accentColor
+                    )
 
-            IslandTab.ALERTS -> AlertsIslandPanel(
-                app = app,
-                state = state,
-                accentColor = accentColor
-            )
+                    IslandTab.ALERTS -> AlertsIslandPanel(
+                        app = app,
+                        state = state,
+                        accentColor = accentColor
+                    )
+                }
+            }
         }
 
         Spacer(Modifier.height(6.dp))
@@ -724,6 +882,97 @@ private fun ExpandedIslandCard(
                 app.islandController.toggleMoreRow()
             }
         )
+    }
+}
+
+@Composable
+private fun DraggableFloatingMiniWindow(
+    app: DynamicIslandApp,
+    tab: IslandTab,
+    settings: IslandSettings,
+    accentColor: Color,
+    onRequestHaptic: () -> Unit,
+    onExpandToIsland: () -> Unit,
+    onClose: () -> Unit
+) {
+    var offsetX by remember { mutableFloatStateOf(20f) }
+    var offsetY by remember { mutableFloatStateOf(160f) }
+    val calcState by app.calculatorEngine.state.collectAsState()
+    val timerState by app.timerEngine.state.collectAsState()
+
+    Column(
+        modifier = Modifier
+            .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
+            .widthIn(max = 356.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(26.dp))
+            .background(Color(0xF50C0D12))
+            .border(1.dp, accentColor.copy(alpha = 0.65f), RoundedCornerShape(26.dp))
+            .padding(bottom = 8.dp)
+            .testTag("floating_mini_window")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .pointerInput(Unit) {
+                    detectDragGestures { change, dragAmount ->
+                        change.consume()
+                        offsetX = (offsetX + dragAmount.x).coerceIn(0f, 380f)
+                        offsetY = (offsetY + dragAmount.y).coerceIn(60f, 1100f)
+                    }
+                }
+                .padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Filled.DragIndicator, contentDescription = "Drag floating window", tint = IslandColors.TextSecondary, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Floating · ${tab.title}", color = accentColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = onExpandToIsland, modifier = Modifier.size(30.dp)) {
+                    Icon(Icons.Filled.OpenInFull, contentDescription = "Dock to Island", tint = IslandColors.TextSecondary, modifier = Modifier.size(15.dp))
+                }
+                IconButton(onClick = onClose, modifier = Modifier.size(30.dp)) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close floating window", tint = IslandColors.TextSecondary, modifier = Modifier.size(16.dp))
+                }
+            }
+        }
+
+        when (tab) {
+            IslandTab.CALC -> CalculatorIslandView(
+                state = calcState,
+                onDigit = { app.calculatorEngine.pressDigit(it) },
+                onDecimal = { app.calculatorEngine.pressDecimal() },
+                onClear = { app.calculatorEngine.pressClear() },
+                onToggleSign = { app.calculatorEngine.pressToggleSign() },
+                onPercent = { app.calculatorEngine.pressPercent() },
+                onOperator = { app.calculatorEngine.pressOperator(it) },
+                onEquals = { app.calculatorEngine.pressEquals() },
+                onBackspace = { app.calculatorEngine.pressBackspace() },
+                onHaptic = onRequestHaptic,
+                onKeySound = { app.soundManager.playCalcKey() },
+                compactMode = true
+            )
+            IslandTab.NOTES -> NotesIslandPanel(app = app, accentColor = accentColor)
+            IslandTab.TIMER -> TimerStopwatchPanel(
+                state = timerState,
+                accentColor = accentColor,
+                onPickerChanged = { h, m, s -> app.timerEngine.setPickerDuration(h, m, s) },
+                onStartTimer = { app.timerEngine.startTimer() },
+                onPauseTimer = { app.timerEngine.pauseTimer() },
+                onResumeTimer = { app.timerEngine.resumeTimer() },
+                onCancelTimer = { app.timerEngine.cancelTimer() },
+                onStartStopwatch = { app.timerEngine.startStopwatch() },
+                onPauseStopwatch = { app.timerEngine.pauseStopwatch() },
+                onResetStopwatch = { app.timerEngine.resetStopwatch() },
+                onLapStopwatch = { app.timerEngine.lapStopwatch() },
+                onHaptic = onRequestHaptic,
+                onTimerSetSound = { app.soundManager.playTimerSet() }
+            )
+            else -> SearchIslandPanel(app = app, accentColor = accentColor, onCollapse = onClose)
+        }
     }
 }
 
@@ -754,7 +1003,7 @@ fun BottomChooserBar(
         IslandTab.ALERTS
     ).filter { it in activeEnabled }
 
-    // Never glass on glass! Use light glass only when main card is solid black, otherwise subtle surface
+    // Never glass on glass! Use translucent floating dock only when main card is solid black
     val chooserBg = if (!useLightGlass) {
         Color(0x22FFFFFF)
     } else {
@@ -765,10 +1014,9 @@ fun BottomChooserBar(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 10.dp)
-            .shadow(6.dp, RoundedCornerShape(22.dp))
             .clip(RoundedCornerShape(22.dp))
             .background(chooserBg)
-            .border(0.75.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(22.dp))
+            .border(0.75.dp, Color.White.copy(alpha = 0.20f), RoundedCornerShape(22.dp))
             .padding(horizontal = 4.dp, vertical = 4.dp)
     ) {
         AnimatedVisibility(visible = isMoreOpen && moreTabs.isNotEmpty()) {
@@ -837,14 +1085,33 @@ private fun ChooserChip(
     accentColor: Color,
     onClick: () -> Unit
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = when {
+            pressed -> 0.90f
+            selected -> 1.05f
+            else -> 1.0f
+        },
+        animationSpec = spring(dampingRatio = 0.68f, stiffness = 620f),
+        label = "chip_scale"
+    )
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .minimumInteractiveComponentSize()
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
             .clip(RoundedCornerShape(14.dp))
             .background(if (selected) accentColor.copy(alpha = 0.24f) else Color.Transparent)
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 6.dp)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
+            .padding(horizontal = 8.dp, vertical = 5.dp)
             .testTag("chooser_tab_${tab.name.lowercase()}")
     ) {
         Icon(
@@ -859,6 +1126,16 @@ private fun ChooserChip(
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             color = if (selected) accentColor else IslandColors.TextSecondary
         )
+        if (selected) {
+            Spacer(Modifier.height(2.dp))
+            Box(
+                modifier = Modifier
+                    .width(12.dp)
+                    .height(2.dp)
+                    .clip(CircleShape)
+                    .background(accentColor)
+            )
+        }
     }
 }
 

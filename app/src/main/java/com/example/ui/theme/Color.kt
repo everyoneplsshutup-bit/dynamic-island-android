@@ -1,5 +1,7 @@
 package com.example.ui.theme
 
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
 object IslandColors {
@@ -10,6 +12,9 @@ object IslandColors {
     val GlassTintLight = Color(0x28FFFFFF)
     val GlassTintDark = Color(0xB80B0B10)
     val GlassSpecularBorder = Color(0x52FFFFFF)
+    val GlassSpecularTop = Color(0x70FFFFFF)
+    val GlassSpecularMid = Color(0x28FFFFFF)
+    val GlassSpecularBottom = Color(0x14FFFFFF)
     val GlassSubtleBorder = Color(0x24FFFFFF)
 
     // Accent & Semantic colors
@@ -40,4 +45,20 @@ object IslandColors {
     val AppBgLight = Color(0xFFF5F6FA)
     val AppSurfaceLight = Color(0xFFFFFFFF)
     val AppSurfaceVariantLight = Color(0xFFEBEEF5)
+
+    fun liquidBorderBrush(useGlass: Boolean, isHighlighted: Boolean, accentColor: Color): Brush {
+        return when {
+            isHighlighted -> Brush.linearGradient(
+                colors = listOf(accentColor, accentColor.copy(alpha = 0.55f), accentColor)
+            )
+            useGlass -> Brush.linearGradient(
+                colors = listOf(GlassSpecularTop, GlassSpecularMid, GlassSpecularBottom),
+                start = Offset(0f, 0f),
+                end = Offset(600f, 600f)
+            )
+            else -> Brush.linearGradient(
+                colors = listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.08f))
+            )
+        }
+    }
 }

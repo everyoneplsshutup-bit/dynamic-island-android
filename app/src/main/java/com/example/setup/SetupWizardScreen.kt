@@ -10,6 +10,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
+import android.provider.DocumentsContract
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -29,8 +30,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
@@ -59,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.example.DynamicIslandApp
 import com.example.island.IslandService
+import com.example.system.IslandSettings
 import com.example.ui.theme.IslandColors
 import kotlinx.coroutines.launch
 
@@ -116,6 +118,7 @@ fun SetupWizardScreen(
     val scope = rememberCoroutineScope()
     var refreshTick by remember { mutableIntStateOf(0) }
     val accessibilityLive by IslandService.isRunning.collectAsState()
+    val settings by app.settingsRepository.settingsFlow.collectAsState(initial = IslandSettings())
     val status = remember(refreshTick, accessibilityLive) { readPermissionStatus(context) }
 
     val notifPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
@@ -123,6 +126,19 @@ fun SetupWizardScreen(
     }
     val micPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         refreshTick++
+    }
+    val screenshotsFolderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { treeUri ->
+        if (treeUri != null) {
+            runCatching {
+                context.contentResolver.takePersistableUriPermission(
+                    treeUri,
+                    Intent.FLAG_GRANT_READ_URI_PERMISSION
+                )
+            }
+            scope.launch {
+                app.settingsRepository.update { it.copy(vaultScreenshotsTreeUri = treeUri.toString()) }
+            }
+        }
     }
 
     Scaffold(
@@ -249,6 +265,23 @@ fun SetupWizardScreen(
                         runCatching { context.startActivity(i) }
                     }
                     refreshTick++
+                }
+            )
+
+            WizardPermissionRow(
+                title = "Screenshots Folder (Auto-Vault)",
+                subtitle = "Lets 10-minute Photo Vault automatically capture new screenshots via SAF (no broad storage permission).",
+                granted = !settings.vaultScreenshotsTreeUri.isNullOrBlank(),
+                buttonLabel = "Select Folder",
+                testTag = "wizard_screenshots_btn",
+                onAction = {
+                    val initial = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        DocumentsContract.buildDocumentUri(
+                            "com.android.externalstorage.documents",
+                            "primary:DCIM/Screenshots"
+                        )
+                    } else null
+                    screenshotsFolderPicker.launch(initial)
                 }
             )
 
@@ -395,7 +428,7 @@ private fun MiuiChecklistCard(
                 OutlinedButton(onClick = onClick) {
                     Text(buttonLabel)
                     Spacer(Modifier.width(4.dp))
-                    Icon(Icons.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
                 }
             }
         }

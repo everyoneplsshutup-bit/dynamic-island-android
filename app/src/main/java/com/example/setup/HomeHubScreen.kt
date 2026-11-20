@@ -5,9 +5,26 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,6 +33,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -47,12 +65,14 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -77,6 +97,7 @@ import com.example.system.IslandTab
 import com.example.system.TimerStopwatchPanel
 import com.example.ui.theme.IslandColors
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -141,6 +162,7 @@ fun HomeHubScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
+                .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
                 .widthIn(max = 600.dp),
@@ -176,23 +198,30 @@ fun HomeHubScreen(
                 }
             }
 
-            // Live Interactive Island Sandbox (allows testing Calculator, Timer, Chooser, etc. inside the app & browser emulator)
+            // Live Interactive Island Sandbox (strictly capped to the same 216.dp height & 388.dp max width as the overlay card)
+            val sandboxBorder = IslandColors.liquidBorderBrush(
+                useGlass = true,
+                isHighlighted = false,
+                accentColor = accentColor
+            )
             Surface(
                 shape = RoundedCornerShape(32.dp),
                 color = IslandColors.PillBlack,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .border(1.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(32.dp))
+                    .widthIn(max = 388.dp)
+                    .align(Alignment.CenterHorizontally)
+                    .border(1.dp, sandboxBorder, RoundedCornerShape(32.dp))
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
                         .background(
                             Brush.verticalGradient(
-                                listOf(Color(0xFF101117), IslandColors.PillBlack)
+                                listOf(Color(0xFF12131A), IslandColors.PillBlack)
                             )
                         )
-                        .padding(vertical = 12.dp),
+                        .padding(vertical = 10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Row(
@@ -218,66 +247,138 @@ fun HomeHubScreen(
                                 fontWeight = FontWeight.SemiBold
                             )
                         }
-                        Text(
-                            text = if (isServiceRunning) "Overlay ON" else "Preview",
-                            color = if (isServiceRunning) IslandColors.AccentGreen else accentColor,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                        val dotPulse = if (isServiceRunning) {
+                            val inf = rememberInfiniteTransition(label = "live_dot")
+                            val a by inf.animateFloat(
+                                initialValue = 0.45f,
+                                targetValue = 1.0f,
+                                animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+                                label = "live_alpha"
+                            )
+                            a
+                        } else 1.0f
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background((if (isServiceRunning) IslandColors.AccentGreen else accentColor).copy(alpha = 0.14f))
+                                .padding(horizontal = 9.dp, vertical = 3.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(6.dp)
+                                    .graphicsLayer { alpha = dotPulse }
+                                    .clip(CircleShape)
+                                    .background(if (isServiceRunning) IslandColors.AccentGreen else accentColor)
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                text = if (isServiceRunning) "Overlay ON" else "Preview",
+                                color = if (isServiceRunning) IslandColors.AccentGreen else accentColor,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
 
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(6.dp))
 
-                    when (islandState.activeTab) {
-                        IslandTab.MUSIC -> MusicExpandedView(
-                            state = mediaState,
-                            accentColor = accentColor,
-                            onTogglePlayPause = { app.mediaHub.togglePlayPause() },
-                            onPrevious = { app.mediaHub.skipPrevious() },
-                            onNext = { app.mediaHub.skipNext() },
-                            onSeekTo = { app.mediaHub.seekTo(it) },
-                            onToggleShuffle = { app.mediaHub.sendShuffleCommand() },
-                            onCycleRepeat = { app.mediaHub.sendRepeatCommand() },
-                            onToggleLike = { app.mediaHub.sendLikeCommand() },
-                            onOpenPlayer = { app.mediaHub.openPlayerApp() }
-                        )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(216.dp)
+                    ) {
+                        AnimatedContent(
+                            targetState = islandState.activeTab,
+                            transitionSpec = {
+                                val forward = targetState.ordinal >= initialState.ordinal
+                                val enterOffset = if (forward) { w: Int -> (w * 0.14f).roundToInt() } else { w: Int -> -(w * 0.14f).roundToInt() }
+                                val exitOffset = if (forward) { w: Int -> -(w * 0.10f).roundToInt() } else { w: Int -> (w * 0.10f).roundToInt() }
+                                (slideInHorizontally(spring(dampingRatio = 0.82f, stiffness = 520f), initialOffsetX = enterOffset) +
+                                    fadeIn(tween(140)) +
+                                    scaleIn(initialScale = 0.96f, animationSpec = spring(dampingRatio = 0.82f, stiffness = 520f)))
+                                    .togetherWith(
+                                        slideOutHorizontally(tween(110), targetOffsetX = exitOffset) + fadeOut(tween(95))
+                                    )
+                            },
+                            label = "sandbox_tab"
+                        ) { tab ->
+                            when (tab) {
+                                IslandTab.MUSIC -> MusicExpandedView(
+                                    state = mediaState,
+                                    accentColor = accentColor,
+                                    onTogglePlayPause = {
+                                        if (mediaState.isPlaying) app.soundManager.playMusicPause() else app.soundManager.playMusicPlay()
+                                        app.mediaHub.togglePlayPause()
+                                    },
+                                    onPrevious = {
+                                        app.soundManager.playMusicNext()
+                                        app.mediaHub.skipPrevious()
+                                    },
+                                    onNext = {
+                                        app.soundManager.playMusicNext()
+                                        app.mediaHub.skipNext()
+                                    },
+                                    onSeekTo = { app.mediaHub.seekTo(it) },
+                                    onToggleShuffle = {
+                                        app.soundManager.playToggle(!mediaState.isShuffled)
+                                        app.mediaHub.sendShuffleCommand()
+                                    },
+                                    onCycleRepeat = {
+                                        app.soundManager.playTap()
+                                        app.mediaHub.sendRepeatCommand()
+                                    },
+                                    onToggleLike = {
+                                        app.soundManager.playToggle(!mediaState.isLiked)
+                                        app.mediaHub.sendLikeCommand()
+                                    },
+                                    onOpenPlayer = {
+                                        app.soundManager.playTap()
+                                        app.mediaHub.openPlayerApp()
+                                    }
+                                )
 
-                        IslandTab.CALC -> CalculatorIslandView(
-                            state = calcState,
-                            onDigit = { app.calculatorEngine.pressDigit(it) },
-                            onDecimal = { app.calculatorEngine.pressDecimal() },
-                            onClear = { app.calculatorEngine.pressClear() },
-                            onToggleSign = { app.calculatorEngine.pressToggleSign() },
-                            onPercent = { app.calculatorEngine.pressPercent() },
-                            onOperator = { app.calculatorEngine.pressOperator(it) },
-                            onEquals = { app.calculatorEngine.pressEquals() },
-                            compactMode = false
-                        )
+                                IslandTab.CALC -> CalculatorIslandView(
+                                    state = calcState,
+                                    onDigit = { app.calculatorEngine.pressDigit(it) },
+                                    onDecimal = { app.calculatorEngine.pressDecimal() },
+                                    onClear = { app.calculatorEngine.pressClear() },
+                                    onToggleSign = { app.calculatorEngine.pressToggleSign() },
+                                    onPercent = { app.calculatorEngine.pressPercent() },
+                                    onOperator = { app.calculatorEngine.pressOperator(it) },
+                                    onEquals = { app.calculatorEngine.pressEquals() },
+                                    onBackspace = { app.calculatorEngine.pressBackspace() },
+                                    onKeySound = { app.soundManager.playCalcKey() },
+                                    compactMode = true
+                                )
 
-                        IslandTab.TIMER -> TimerStopwatchPanel(
-                            state = timerState,
-                            accentColor = accentColor,
-                            onPickerChanged = { h, m, s -> app.timerEngine.setPickerDuration(h, m, s) },
-                            onStartTimer = { app.timerEngine.startTimer() },
-                            onPauseTimer = { app.timerEngine.pauseTimer() },
-                            onResumeTimer = { app.timerEngine.resumeTimer() },
-                            onCancelTimer = { app.timerEngine.cancelTimer() },
-                            onStartStopwatch = { app.timerEngine.startStopwatch() },
-                            onPauseStopwatch = { app.timerEngine.pauseStopwatch() },
-                            onResetStopwatch = { app.timerEngine.resetStopwatch() },
-                            onLapStopwatch = { app.timerEngine.lapStopwatch() }
-                        )
+                                IslandTab.TIMER -> TimerStopwatchPanel(
+                                    state = timerState,
+                                    accentColor = accentColor,
+                                    onPickerChanged = { h, m, s -> app.timerEngine.setPickerDuration(h, m, s) },
+                                    onStartTimer = { app.timerEngine.startTimer() },
+                                    onPauseTimer = { app.timerEngine.pauseTimer() },
+                                    onResumeTimer = { app.timerEngine.resumeTimer() },
+                                    onCancelTimer = { app.timerEngine.cancelTimer() },
+                                    onStartStopwatch = { app.timerEngine.startStopwatch() },
+                                    onPauseStopwatch = { app.timerEngine.pauseStopwatch() },
+                                    onResetStopwatch = { app.timerEngine.resetStopwatch() },
+                                    onLapStopwatch = { app.timerEngine.lapStopwatch() },
+                                    onTimerSetSound = { app.soundManager.playTimerSet() }
+                                )
 
-                        IslandTab.SEARCH -> SearchIslandPanel(app = app, accentColor = accentColor, onCollapse = {})
-                        IslandTab.TOOLS -> ToolsIslandPanel(app = app, settings = settings, accentColor = accentColor, onHaptic = {}, onCollapse = {})
-                        IslandTab.VAULT -> VaultIslandPanel(app = app, accentColor = accentColor, onCollapse = {})
-                        IslandTab.CLIPS -> ClipsIslandPanel(app = app, accentColor = accentColor)
-                        IslandTab.NOTES -> NotesIslandPanel(app = app, accentColor = accentColor)
-                        IslandTab.MEMO -> MemoIslandPanel(app = app, accentColor = accentColor)
-                        IslandTab.ALERTS -> AlertsIslandPanel(app = app, state = islandState, accentColor = accentColor)
+                                IslandTab.SEARCH -> SearchIslandPanel(app = app, accentColor = accentColor, onCollapse = {})
+                                IslandTab.TOOLS -> ToolsIslandPanel(app = app, settings = settings, accentColor = accentColor, onHaptic = {}, onCollapse = {})
+                                IslandTab.VAULT -> VaultIslandPanel(app = app, accentColor = accentColor, onCollapse = {})
+                                IslandTab.CLIPS -> ClipsIslandPanel(app = app, accentColor = accentColor)
+                                IslandTab.NOTES -> NotesIslandPanel(app = app, accentColor = accentColor)
+                                IslandTab.MEMO -> MemoIslandPanel(app = app, accentColor = accentColor)
+                                IslandTab.ALERTS -> AlertsIslandPanel(app = app, state = islandState, accentColor = accentColor)
+                            }
+                        }
                     }
 
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(6.dp))
 
                     BottomChooserBar(
                         settings = settings,
@@ -361,10 +462,26 @@ private fun HubTile(
     modifier: Modifier = Modifier,
     onClick: () -> Unit
 ) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.96f else 1.0f,
+        animationSpec = spring(dampingRatio = 0.68f, stiffness = 620f),
+        label = "hub_tile_scale"
+    )
     Surface(
         shape = RoundedCornerShape(18.dp),
         tonalElevation = 2.dp,
-        modifier = modifier.clickable(onClick = onClick)
+        modifier = modifier
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
             Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)

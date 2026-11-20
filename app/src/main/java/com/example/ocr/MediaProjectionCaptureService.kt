@@ -68,6 +68,8 @@ class MediaProjectionCaptureService : Service() {
             ?: MediaProjectionPromptActivity.MODE_VAULT_SCREENSHOT
         @Suppress("DEPRECATION")
         val bounds = intent?.getParcelableExtra<Rect>(MediaProjectionPromptActivity.EXTRA_BOUNDS)
+        val tapX = intent?.getIntExtra(MediaProjectionPromptActivity.EXTRA_TAP_X, -1) ?: -1
+        val tapY = intent?.getIntExtra(MediaProjectionPromptActivity.EXTRA_TAP_Y, -1) ?: -1
 
         if (resultCode != Activity.RESULT_OK || data == null) {
             cleanupAndStop()
@@ -82,11 +84,11 @@ class MediaProjectionCaptureService : Service() {
         }
         projection = mp
 
-        captureSingleFrame(mp, mode, bounds)
+        captureSingleFrame(mp, mode, bounds, tapX, tapY)
         return START_NOT_STICKY
     }
 
-    private fun captureSingleFrame(mp: MediaProjection, mode: String, bounds: Rect?) {
+    private fun captureSingleFrame(mp: MediaProjection, mode: String, bounds: Rect?, tapX: Int, tapY: Int) {
         val dm = resources.displayMetrics
         val width = dm.widthPixels.coerceAtLeast(1)
         val height = dm.heightPixels.coerceAtLeast(1)
@@ -127,7 +129,7 @@ class MediaProjectionCaptureService : Service() {
                     val croppedScreen = Bitmap.createBitmap(bmp, 0, 0, width, height)
                     if (croppedScreen !== bmp) bmp.recycle()
 
-                    processCapturedBitmap(croppedScreen, mode, bounds)
+                    processCapturedBitmap(croppedScreen, mode, bounds, tapX, tapY)
                 } else {
                     cleanupAndStop()
                 }
@@ -135,13 +137,13 @@ class MediaProjectionCaptureService : Service() {
         }, 180L)
     }
 
-    private fun processCapturedBitmap(frame: Bitmap, mode: String, bounds: Rect?) {
+    private fun processCapturedBitmap(frame: Bitmap, mode: String, bounds: Rect?, tapX: Int, tapY: Int) {
         val app = applicationContext as? DynamicIslandApp
         scope.launch {
             try {
                 if (app != null) {
                     if (mode == MediaProjectionPromptActivity.MODE_OCR_TIER_B) {
-                        val recognized = TierBMlKitOcr.recognizeCroppedElement(frame, bounds)
+                        val recognized = TierBMlKitOcr.recognizeCroppedElement(frame, bounds, tapX, tapY)
                         if (!recognized.isNullOrBlank()) {
                             app.clipboardMonitor.copyToClipboard(recognized)
                             app.islandController.upsertActivity(

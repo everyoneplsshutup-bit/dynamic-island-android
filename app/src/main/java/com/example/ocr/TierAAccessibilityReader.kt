@@ -15,86 +15,110 @@ sealed interface TierAResult {
 
 /**
  * Tier A OCR: Privacy-first Accessibility node reader.
- * Strictly reads ONLY the deepest node containing the user's long-press point (x, y).
+ * Strictly reads ONLY the exact leaf element containing the user's pressed point (x, y).
  * Never invoked unless OcrPrivacyGate.isScreenReadingAllowed() is true.
  */
 object TierAAccessibilityReader {
 
+    private data class CandidateNode(
+        val text: String?,
+        val contentDesc: String?,
+        val bounds: Rect,
+        val area: Long,
+        val depth: Int
+    )
+
     fun readNodeAtPoint(
-        service: AccessibilityService,
+        service: AccessibilityService?,
         screenReadingAllowed: Boolean,
         x: Int,
         y: Int,
         ownPackageName: String
     ): TierAResult {
-        // HARD PRIVACY CONSTRAINT: Never call getRootInActiveWindow() or read any node when OFF
+        // HARD PRIVACY CONSTRAINT: Never inspect nodes when OFF
         if (!screenReadingAllowed) {
             return TierAResult.Refused("Screen reading is OFF in Privacy Settings")
         }
+        if (service == null) {
+            return TierAResult.NoText(null)
+        }
 
-        val windows = runCatching { service.windows }.getOrNull().orEmpty()
-        var targetRoot: AccessibilityNodeInfo? = null
+        val orderedWindows = runCatching { service.windows }
+            .getOrNull()
+            .orEmpty()
+            .filter { it.type != AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY }
+            .sortedByDescending { it.layer }
 
-        for (win in windows) {
-            if (win.type == AccessibilityWindowInfo.TYPE_ACCESSIBILITY_OVERLAY) continue
-            val root = runCatching { win.root }.getOrNull() ?: continue
-            if (root.packageName?.toString() == ownPackageName) continue
+        val targetRoots = mutableListOf<AccessibilityNodeInfo>()
+        for (win in orderedWindows) {
             val winBounds = Rect()
             win.getBoundsInScreen(winBounds)
-            if (winBounds.contains(x, y)) {
-                targetRoot = root
-                break
-            }
+            if (!winBounds.contains(x, y)) continue
+            val root = runCatching { win.root }.getOrNull() ?: continue
+            targetRoots.add(root)
         }
 
-        if (targetRoot == null) {
+        if (targetRoots.isEmpty()) {
             val activeRoot = runCatching { service.rootInActiveWindow }.getOrNull()
                 ?: return TierAResult.NoText(null)
-            if (activeRoot.packageName?.toString() == ownPackageName) {
-                return TierAResult.NoText(null)
+            targetRoots.add(activeRoot)
+        }
+
+        val candidates = mutableListOf<CandidateNode>()
+        var hitSensitive = false
+        var smallestBounds: Rect? = null
+        var smallestArea = Long.MAX_VALUE
+
+        fun visit(node: AccessibilityNodeInfo, depth: Int) {
+            val rect = Rect()
+            node.getBoundsInScreen(rect)
+            if (!rect.contains(x, y)) return
+
+            if (isSensitiveOrPassword(node)) {
+                hitSensitive = true
+                return
             }
-            targetRoot = activeRoot
-        }
 
-        val deepest = findDeepestNodeAt(targetRoot, x, y) ?: return TierAResult.NoText(null)
-        val nodeBounds = Rect()
-        deepest.getBoundsInScreen(nodeBounds)
+            val area = rect.width().toLong().coerceAtLeast(1L) * rect.height().toLong().coerceAtLeast(1L)
+            if (area < smallestArea) {
+                smallestArea = area
+                smallestBounds = Rect(rect)
+            }
 
-        // Deliberately refuse password fields & accessibilityDataSensitive nodes
-        if (isSensitiveOrPassword(deepest)) {
-            return TierAResult.Refused("Refused: protected password or sensitive screen")
-        }
+            val text = node.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+            val desc = node.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+            if (text != null || desc != null) {
+                candidates.add(CandidateNode(text, desc, Rect(rect), area, depth))
+            }
 
-        val extracted = deepest.text?.toString()?.trim()
-            ?.takeIf { it.isNotEmpty() }
-            ?: deepest.contentDescription?.toString()?.trim()
-                ?.takeIf { it.isNotEmpty() }
-
-        return if (extracted != null) {
-            TierAResult.TextFound(extracted, nodeBounds)
-        } else {
-            TierAResult.NoText(nodeBounds)
-        }
-    }
-
-    private fun findDeepestNodeAt(
-        node: AccessibilityNodeInfo,
-        x: Int,
-        y: Int
-    ): AccessibilityNodeInfo? {
-        val rect = Rect()
-        node.getBoundsInScreen(rect)
-        if (!rect.contains(x, y)) return null
-
-        var bestChild: AccessibilityNodeInfo? = null
-        for (i in 0 until node.childCount) {
-            val child = node.getChild(i) ?: continue
-            val candidate = findDeepestNodeAt(child, x, y)
-            if (candidate != null) {
-                bestChild = candidate
+            for (i in 0 until node.childCount) {
+                val child = node.getChild(i) ?: continue
+                visit(child, depth + 1)
+                if (hitSensitive) return
             }
         }
-        return bestChild ?: node
+
+        for (root in targetRoots) {
+            // Do not read our own overlay window if it somehow slipped into rootInActiveWindow
+            if (root.packageName?.toString() == ownPackageName && targetRoots.size > 1) continue
+            visit(root, 0)
+            if (hitSensitive) {
+                return TierAResult.Refused("Refused: protected password or sensitive screen")
+            }
+            if (candidates.isNotEmpty()) break
+        }
+
+        if (candidates.isEmpty()) {
+            return TierAResult.NoText(smallestBounds)
+        }
+
+        // Prefer nodes with explicit text over bare contentDescription, smallest bounding box (deepest leaf)
+        val withText = candidates.filter { it.text != null }
+        val chosen = (if (withText.isNotEmpty()) withText else candidates)
+            .minWithOrNull(compareBy<CandidateNode> { it.area }.thenByDescending { it.depth })!!
+
+        val extracted = chosen.text ?: chosen.contentDesc ?: return TierAResult.NoText(chosen.bounds)
+        return TierAResult.TextFound(extracted, chosen.bounds)
     }
 
     private fun isSensitiveOrPassword(node: AccessibilityNodeInfo): Boolean {

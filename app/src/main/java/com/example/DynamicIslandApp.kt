@@ -81,7 +81,9 @@ class DynamicIslandApp : Application() {
         batteryMonitor = BatteryMonitor(this, islandController)
         quickTogglesManager = QuickTogglesManager(this)
         mediaHub = MediaHub(this, islandController)
-        vaultManager = VaultManager(this, database.vaultDao(), islandController)
+        vaultManager = VaultManager(this, database.vaultDao(), islandController) {
+            soundManager.playVaultAdd()
+        }
         voiceMemoManager = VoiceMemoManager(this, database.voiceMemoDao(), islandController)
         clipboardMonitor = ClipboardMonitor(this, database.clipboardDao())
         floatingWindowManager = FloatingWindowManager(this, settingsRepository)

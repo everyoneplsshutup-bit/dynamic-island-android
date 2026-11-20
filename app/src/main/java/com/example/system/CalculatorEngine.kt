@@ -68,6 +68,20 @@ class CalculatorEngine {
         }
     }
 
+    fun pressBackspace() {
+        val cur = _state.value.display
+        if (startNewEntry || cur == "0" || cur == "Error") return
+        val next = when {
+            cur.length <= 1 -> "0"
+            cur.length == 2 && cur.startsWith("-") -> "0"
+            else -> cur.dropLast(1)
+        }
+        _state.value = _state.value.copy(
+            display = next,
+            canClearEntry = next != "0"
+        )
+    }
+
     fun pressToggleSign() {
         val cur = _state.value.display
         if (cur == "0" || cur == "Error") return

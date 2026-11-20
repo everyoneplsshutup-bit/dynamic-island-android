@@ -15,12 +15,20 @@ enum class IslandSoundEvent {
     EXPAND,
     COLLAPSE,
     TAP,
+    TIMER_SET,
     TIMER_DONE,
-    TOGGLE
+    TOGGLE_ON,
+    TOGGLE_OFF,
+    CALC_KEY,
+    MUSIC_PLAY,
+    MUSIC_PAUSE,
+    MUSIC_NEXT,
+    VAULT_ADD,
+    SEARCH_OPEN
 }
 
 /**
- * Low-latency SoundPool manager for Dynamic Island UI sound effects.
+ * Low-latency SoundPool manager giving every Dynamic Island interaction its own unique sound.
  * Uses small preloaded WAV assets in res/raw/ and respects Settings (soundEnabled, soundVolume).
  */
 class IslandSoundManager(
@@ -54,7 +62,7 @@ class IslandSoundManager(
                 .build()
 
             val pool = SoundPool.Builder()
-                .setMaxStreams(4)
+                .setMaxStreams(6)
                 .setAudioAttributes(attrs)
                 .build()
 
@@ -67,8 +75,16 @@ class IslandSoundManager(
             soundIds[IslandSoundEvent.EXPAND] = pool.load(appContext, R.raw.sfx_expand, 1)
             soundIds[IslandSoundEvent.COLLAPSE] = pool.load(appContext, R.raw.sfx_collapse, 1)
             soundIds[IslandSoundEvent.TAP] = pool.load(appContext, R.raw.sfx_tap, 1)
+            soundIds[IslandSoundEvent.TIMER_SET] = pool.load(appContext, R.raw.sfx_timer_set, 1)
             soundIds[IslandSoundEvent.TIMER_DONE] = pool.load(appContext, R.raw.sfx_timer_done, 1)
-            soundIds[IslandSoundEvent.TOGGLE] = pool.load(appContext, R.raw.sfx_toggle, 1)
+            soundIds[IslandSoundEvent.TOGGLE_ON] = pool.load(appContext, R.raw.sfx_toggle, 1)
+            soundIds[IslandSoundEvent.TOGGLE_OFF] = pool.load(appContext, R.raw.sfx_toggle_off, 1)
+            soundIds[IslandSoundEvent.CALC_KEY] = pool.load(appContext, R.raw.sfx_calc_key, 1)
+            soundIds[IslandSoundEvent.MUSIC_PLAY] = pool.load(appContext, R.raw.sfx_music_play, 1)
+            soundIds[IslandSoundEvent.MUSIC_PAUSE] = pool.load(appContext, R.raw.sfx_music_pause, 1)
+            soundIds[IslandSoundEvent.MUSIC_NEXT] = pool.load(appContext, R.raw.sfx_music_next, 1)
+            soundIds[IslandSoundEvent.VAULT_ADD] = pool.load(appContext, R.raw.sfx_vault_add, 1)
+            soundIds[IslandSoundEvent.SEARCH_OPEN] = pool.load(appContext, R.raw.sfx_search_open, 1)
 
             soundPool = pool
         }
@@ -101,7 +117,6 @@ class IslandSoundManager(
         val sampleId = soundIds[event] ?: return false
         if (sampleId == 0) return false
 
-        // Wait for SoundPool decode completion if callback has been active; allow Robolectric/noop if empty
         if (loadedSampleIds.isNotEmpty() && !loadedSampleIds.contains(sampleId)) {
             return false
         }
@@ -124,12 +139,40 @@ class IslandSoundManager(
         play(IslandSoundEvent.TAP)
     }
 
+    fun playTimerSet() {
+        play(IslandSoundEvent.TIMER_SET)
+    }
+
     fun playTimerDone() {
         play(IslandSoundEvent.TIMER_DONE)
     }
 
-    fun playToggle() {
-        play(IslandSoundEvent.TOGGLE)
+    fun playToggle(isOn: Boolean = true) {
+        play(if (isOn) IslandSoundEvent.TOGGLE_ON else IslandSoundEvent.TOGGLE_OFF)
+    }
+
+    fun playCalcKey() {
+        play(IslandSoundEvent.CALC_KEY)
+    }
+
+    fun playMusicPlay() {
+        play(IslandSoundEvent.MUSIC_PLAY)
+    }
+
+    fun playMusicPause() {
+        play(IslandSoundEvent.MUSIC_PAUSE)
+    }
+
+    fun playMusicNext() {
+        play(IslandSoundEvent.MUSIC_NEXT)
+    }
+
+    fun playVaultAdd() {
+        play(IslandSoundEvent.VAULT_ADD)
+    }
+
+    fun playSearchOpen() {
+        play(IslandSoundEvent.SEARCH_OPEN)
     }
 
     fun release() {

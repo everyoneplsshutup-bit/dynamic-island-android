@@ -8,12 +8,17 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.content.res.Configuration
+import android.database.ContentObserver
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.provider.MediaStore
 import android.view.DragEvent
 import android.view.GestureDetector
 import android.view.Gravity
@@ -44,20 +49,21 @@ import com.example.system.IslandSettings
 import com.example.system.IslandTab
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
  * AccessibilityService hosting the Dynamic Island TYPE_ACCESSIBILITY_OVERLAY.
  * Uses the two-window trick:
  *  1) Fixed full-width drawing window that never resizes (120Hz smooth)
- *  2) Invisible touch window that follows the pill bounds (or captures Select Mode long-press)
+ *  2) Invisible touch window that follows the pill bounds (or captures Select Mode tap/long-press)
  *
  * HARD PRIVACY CONSTRAINT:
  * Never calls getRootInActiveWindow() or inspects nodes unless screenReadingEnabled == true
@@ -71,6 +77,18 @@ class IslandService : AccessibilityService() {
 
         private val _detectedCutout = MutableStateFlow<Rect?>(null)
         val detectedCutout: StateFlow<Rect?> = _detectedCutout.asStateFlow()
+
+        private val _currentForegroundApp = MutableStateFlow<String?>(null)
+        val currentForegroundApp: StateFlow<String?> = _currentForegroundApp.asStateFlow()
+
+        private val ignoredForegroundPackages = setOf(
+            "com.android.systemui",
+            "com.miui.home",
+            "com.miui.securitycenter",
+            "com.google.android.inputmethod.latin",
+            "com.emoji.keyboard.touchpal",
+            "com.sohu.inputmethod.sogou.xiaomi"
+        )
     }
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -81,9 +99,16 @@ class IslandService : AccessibilityService() {
     private var touchView: View? = null
     private var touchParams: WindowManager.LayoutParams? = null
 
+    private var lastTouchSignature: String = ""
+    private var lastDrawingFlags: Int = Int.MIN_VALUE
+
     private var overlayLifecycleOwner: OverlayLifecycleOwner? = null
     private var latestSettings: IslandSettings = IslandSettings()
     private var latestState: IslandState = IslandState()
+
+    private var screenshotObserver: ContentObserver? = null
+    private var screenshotCheckJob: Job? = null
+    private var lastTreePromptTimeMs: Long = 0L
 
     private var screenReceiverRegistered = false
     private val lockReceiver = object : BroadcastReceiver() {
@@ -108,14 +133,21 @@ class IslandService : AccessibilityService() {
         app.mediaHub.start()
         setupOverlayWindows(app)
         registerLockReceiver()
+        registerScreenshotObserver(app)
         measureDisplayCutout()
         observeStateAndSettings(app)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         // HARD PRIVACY CONSTRAINT:
-        // We do NOT inspect window/node text on accessibility events!
-        // Screen reading happens ONLY on explicit user long-press in Select Mode when opted in.
+        // We NEVER inspect window/node text or getRootInActiveWindow() on accessibility events!
+        // We only record non-system foreground package name on window transitions so Vault tap-to-attach can target an open chat app.
+        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            val pkg = event.packageName?.toString()
+            if (!pkg.isNullOrBlank() && pkg != packageName && pkg !in ignoredForegroundPackages) {
+                _currentForegroundApp.value = pkg
+            }
+        }
     }
 
     override fun onInterrupt() = Unit
@@ -123,12 +155,13 @@ class IslandService : AccessibilityService() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         measureDisplayCutout()
-        updateTouchWindowBounds()
+        updateTouchWindowBounds(force = true)
     }
 
     override fun onDestroy() {
         _isRunning.value = false
         unregisterLockReceiver()
+        unregisterScreenshotObserver()
         teardownOverlayWindows()
         serviceScope.cancel()
         super.onDestroy()
@@ -155,7 +188,47 @@ class IslandService : AccessibilityService() {
         overlayLifecycleOwner = owner
 
         val density = resources.displayMetrics.density
-        val fixedDrawingHeightPx = (560 * density).toInt()
+        val fixedDrawingHeightPx = (680 * density).toInt()
+
+        val dragListener = View.OnDragListener { _, dragEvent ->
+            when (dragEvent.action) {
+                DragEvent.ACTION_DRAG_STARTED -> true
+                DragEvent.ACTION_DRAG_ENTERED -> {
+                    app.islandController.setDragOverIsland(true)
+                    true
+                }
+                DragEvent.ACTION_DRAG_EXITED -> {
+                    app.islandController.setDragOverIsland(false)
+                    true
+                }
+                DragEvent.ACTION_DRAG_ENDED -> {
+                    app.islandController.setDragOverIsland(false)
+                    true
+                }
+                DragEvent.ACTION_DROP -> {
+                    app.islandController.setDragOverIsland(false)
+                    val clip = dragEvent.clipData ?: return@OnDragListener false
+                    var savedAny = false
+                    for (i in 0 until clip.itemCount) {
+                        val item = clip.getItemAt(i)
+                        val uri = item.uri ?: item.text?.toString()
+                            ?.takeIf { it.startsWith("content://") }
+                            ?.let { runCatching { Uri.parse(it) }.getOrNull() }
+                        if (uri != null) {
+                            savedAny = true
+                            serviceScope.launch {
+                                app.vaultManager.saveFromUri(uri, sourceType = "DRAGGED")
+                            }
+                        }
+                    }
+                    if (savedAny) {
+                        performSelectionHaptic()
+                    }
+                    savedAny
+                }
+                else -> true
+            }
+        }
 
         // Window 1: Fixed full-width drawing window that never resizes
         val dParams = WindowManager.LayoutParams(
@@ -181,6 +254,7 @@ class IslandService : AccessibilityService() {
             setViewTreeLifecycleOwner(owner)
             setViewTreeViewModelStoreOwner(owner)
             setViewTreeSavedStateRegistryOwner(owner)
+            setOnDragListener(dragListener)
             setContent {
                 IslandOverlayRoot(
                     app = app,
@@ -199,7 +273,7 @@ class IslandService : AccessibilityService() {
         // Window 2: Invisible touch window that follows the pill bounds
         val tParams = WindowManager.LayoutParams(
             (120 * density).toInt(),
-            (40 * density).toInt(),
+            (48 * density).toInt(),
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
@@ -244,30 +318,12 @@ class IslandService : AccessibilityService() {
                 gestureDetector.onTouchEvent(event)
                 true
             }
-            // Accept images dragged onto the Dynamic Island into the 10-minute Photo Vault
-            setOnDragListener { _, dragEvent ->
-                when (dragEvent.action) {
-                    DragEvent.ACTION_DRAG_STARTED -> true
-                    DragEvent.ACTION_DROP -> {
-                        val clip = dragEvent.clipData ?: return@setOnDragListener false
-                        var savedAny = false
-                        for (i in 0 until clip.itemCount) {
-                            val uri = clip.getItemAt(i).uri
-                            if (uri != null) {
-                                savedAny = true
-                                serviceScope.launch {
-                                    app.vaultManager.saveFromUri(uri, sourceType = "DRAGGED")
-                                }
-                            }
-                        }
-                        if (savedAny) performSelectionHaptic()
-                        savedAny
-                    }
-                    else -> true
-                }
-            }
+            setOnDragListener(dragListener)
         }
         touchView = invisibleTouch
+
+        lastDrawingFlags = dParams.flags
+        lastTouchSignature = ""
 
         runCatching {
             wm.addView(composeView, dParams)
@@ -299,33 +355,42 @@ class IslandService : AccessibilityService() {
         val view = drawingComposeView ?: return
         val params = drawingParams ?: return
 
-        val isExpanded = state.mode == IslandMode.EXPANDED || state.isFloatingSidebarOpen
-        val needsIme = isExpanded && state.needsKeyboardFocus
+        val isInteractive = state.mode == IslandMode.EXPANDED ||
+            state.isFloatingSidebarOpen ||
+            state.activeFloatingMiniTab != null
+        val needsIme = isInteractive && state.needsKeyboardFocus
 
         var flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
             WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
 
-        if (!isExpanded) {
+        if (!isInteractive) {
             flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         }
         if (!needsIme) {
             flags = flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         }
 
-        if (params.flags != flags) {
+        if (lastDrawingFlags != flags) {
+            lastDrawingFlags = flags
             params.flags = flags
             runCatching { wm.updateViewLayout(view, params) }
         }
     }
 
-    private fun updateTouchWindowBounds() {
+    private fun updateTouchWindowBounds(force: Boolean = false) {
         val wm = windowManager ?: return
         val view = touchView ?: return
         val params = touchParams ?: return
         val density = resources.displayMetrics.density
 
         if (latestState.isSelectModeActive) {
+            val sig = "SELECT"
+            if (!force && lastTouchSignature == sig) return
+            lastTouchSignature = sig
+
+            // 1/255 alpha ensures MIUI 14 does not treat full-screen overlay as click-through
+            view.setBackgroundColor(android.graphics.Color.argb(1, 0, 0, 0))
             params.width = WindowManager.LayoutParams.MATCH_PARENT
             params.height = WindowManager.LayoutParams.MATCH_PARENT
             params.x = 0
@@ -338,29 +403,44 @@ class IslandService : AccessibilityService() {
             return
         }
 
-        if (latestState.mode == IslandMode.EXPANDED || latestState.isFloatingSidebarOpen) {
-            // Drawing window handles touches directly when expanded
+        val hideTouchWindow = latestState.mode == IslandMode.EXPANDED ||
+            latestState.isFloatingSidebarOpen ||
+            latestState.activeFloatingMiniTab != null
+
+        if (hideTouchWindow) {
+            val sig = "GONE"
+            if (!force && lastTouchSignature == sig) return
+            lastTouchSignature = sig
+            view.setBackgroundColor(android.graphics.Color.TRANSPARENT)
             view.visibility = View.GONE
             return
         }
 
-        view.visibility = View.VISIBLE
         val pillWidthDp = when (latestState.mode) {
             IslandMode.IDLE -> (latestSettings.cutoutWidthDp + 24f).coerceAtLeast(48f)
-            IslandMode.COMPACT -> 210f
-            IslandMode.SPLIT -> 276f
+            IslandMode.COMPACT -> 212f
+            IslandMode.SPLIT -> 278f
             IslandMode.EXPANDED -> 340f
         }
         val pillHeightDp = when (latestState.mode) {
             IslandMode.IDLE -> (latestSettings.cutoutHeightDp + 18f).coerceAtLeast(48f)
-            IslandMode.COMPACT, IslandMode.SPLIT -> 48f
-            IslandMode.EXPANDED -> 48f
+            else -> 48f
         }
+        val targetW = (pillWidthDp * density).toInt()
+        val targetH = (pillHeightDp * density).toInt()
+        val targetX = (latestSettings.cutoutXOffsetDp * density).toInt()
+        val targetY = (latestSettings.cutoutYOffsetDp * density).toInt().coerceAtLeast(0)
 
-        params.width = (pillWidthDp * density).toInt()
-        params.height = (pillHeightDp * density).toInt()
-        params.x = (latestSettings.cutoutXOffsetDp * density).toInt()
-        params.y = (latestSettings.cutoutYOffsetDp * density).toInt().coerceAtLeast(0)
+        val sig = "PILL:$targetW:$targetH:$targetX:$targetY"
+        if (!force && lastTouchSignature == sig) return
+        lastTouchSignature = sig
+
+        view.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        view.visibility = View.VISIBLE
+        params.width = targetW
+        params.height = targetH
+        params.x = targetX
+        params.y = targetY
         runCatching { wm.updateViewLayout(view, params) }
     }
 
@@ -428,15 +508,23 @@ class IslandService : AccessibilityService() {
 
     private fun handleSelectModePoint(app: DynamicIslandApp, rawX: Int, rawY: Int) {
         serviceScope.launch {
+            app.soundManager.playTap()
             val allowed = OcrPrivacyGate.isScreenReadingAllowed(app.settingsRepository)
+
+            // Hide full-screen touch overlay FIRST so the underlying window is unobstructed
+            touchView?.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            touchView?.visibility = View.GONE
+            lastTouchSignature = "GONE"
             app.islandController.setSelectMode(false)
+
             if (!allowed) {
                 app.islandController.showTransientBanner("Refused: Screen Reading is OFF")
                 return@launch
             }
 
-            // Temporarily hide touch window so it doesn't interfere, then inspect deepest node at (rawX, rawY)
-            touchView?.visibility = View.GONE
+            // Wait briefly for WindowManager / SurfaceFlinger frame commit before querying windows
+            delay(65L)
+
             val result = TierAAccessibilityReader.readNodeAtPoint(
                 service = this@IslandService,
                 screenReadingAllowed = true,
@@ -452,7 +540,7 @@ class IslandService : AccessibilityService() {
                         IslandActivity.Alert(
                             id = "ocr_copied_${System.currentTimeMillis()}",
                             kind = AlertKind.OCR_COPIED,
-                            title = "Copied via Select Mode",
+                            title = "Copied text",
                             subtitle = result.text.take(56)
                         ),
                         autoShowCompact = true,
@@ -465,13 +553,91 @@ class IslandService : AccessibilityService() {
                 is TierAResult.NoText -> {
                     val tierBAllowed = OcrPrivacyGate.isTierBAllowed(app.settingsRepository)
                     if (tierBAllowed) {
-                        MediaProjectionPromptActivity.launchForTierBOcr(this@IslandService, result.bounds)
+                        MediaProjectionPromptActivity.launchForTierBOcr(
+                            context = this@IslandService,
+                            bounds = result.bounds,
+                            tapX = rawX,
+                            tapY = rawY
+                        )
                     } else {
-                        app.islandController.showTransientBanner("No accessibility text found (Tier B OCR is off)")
+                        app.islandController.showTransientBanner("No text at pressed point (Enable Tier B OCR for image text)")
                     }
                 }
             }
         }
+    }
+
+    private fun registerScreenshotObserver(app: DynamicIslandApp) {
+        unregisterScreenshotObserver()
+        val observer = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean, uri: Uri?) {
+                val settings = latestSettings
+                if (!settings.vaultEnabled || !settings.vaultAutoCapture3Finger) return
+
+                screenshotCheckJob?.cancel()
+                screenshotCheckJob = serviceScope.launch(Dispatchers.IO) {
+                    // Let MIUI/Android finish writing the screenshot file cleanly
+                    delay(420L)
+
+                    val treeStr = latestSettings.vaultScreenshotsTreeUri
+                    if (!treeStr.isNullOrBlank()) {
+                        val saved = app.vaultManager.ingestRecentScreenshotFromTree(Uri.parse(treeStr))
+                        if (saved != null) return@launch
+                    }
+
+                    // Secondary zero-permission check: if platform passed a specific Screenshot item URI and it's readable
+                    if (uri != null && uri != MediaStore.Images.Media.EXTERNAL_CONTENT_URI) {
+                        val looksLikeScreenshot = checkUriIsReadableScreenshot(uri)
+                        if (looksLikeScreenshot) {
+                            app.vaultManager.saveFromUri(uri, sourceType = "SCREENSHOT_AUTO")
+                            return@launch
+                        }
+                    }
+
+                    if (treeStr.isNullOrBlank()) {
+                        val now = System.currentTimeMillis()
+                        if (now - lastTreePromptTimeMs > 300_000L) {
+                            lastTreePromptTimeMs = now
+                            app.islandController.showTransientBanner(
+                                "Allow Screenshots folder in Vault for 10m auto-store",
+                                durationMs = 3200L
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        screenshotObserver = observer
+        runCatching {
+            contentResolver.registerContentObserver(
+                MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+                true,
+                observer
+            )
+        }
+    }
+
+    private fun checkUriIsReadableScreenshot(uri: Uri): Boolean {
+        return runCatching {
+            val cols = arrayOf(
+                MediaStore.MediaColumns.DISPLAY_NAME,
+                MediaStore.MediaColumns.RELATIVE_PATH
+            )
+            contentResolver.query(uri, cols, null, null, null)?.use { c ->
+                if (c.moveToFirst()) {
+                    val name = c.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME).let { if (it >= 0) c.getString(it).orEmpty() else "" }
+                    val rel = c.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH).let { if (it >= 0) c.getString(it).orEmpty() else "" }
+                    val combined = "$name $rel".lowercase()
+                    combined.contains("screenshot")
+                } else false
+            } ?: false
+        }.getOrDefault(false)
+    }
+
+    private fun unregisterScreenshotObserver() {
+        screenshotCheckJob?.cancel()
+        screenshotObserver?.let { runCatching { contentResolver.unregisterContentObserver(it) } }
+        screenshotObserver = null
     }
 
     private fun performSelectionHaptic() {

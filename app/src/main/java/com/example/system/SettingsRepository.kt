@@ -125,7 +125,8 @@ data class IslandSettings(
     // Setup & Survival
     val wizardCompleted: Boolean = false,
     val accessibilityWasEnabled: Boolean = false,
-    val verifiedFloatingPath: String = "UNTESTED"
+    val verifiedFloatingPath: String = "UNTESTED",
+    val vaultScreenshotsTreeUri: String? = null
 ) {
     companion object {
         const val MAX_ISLAND_FEATURES = 8
@@ -202,6 +203,7 @@ class SettingsRepository(private val context: Context) {
         val WIZARD_COMPLETED = booleanPreferencesKey("wizard_completed")
         val ACCESSIBILITY_WAS_ENABLED = booleanPreferencesKey("accessibility_was_enabled")
         val VERIFIED_FLOATING_PATH = stringPreferencesKey("verified_floating_path")
+        val VAULT_SCREENSHOTS_TREE_URI = stringPreferencesKey("vault_screenshots_tree_uri")
     }
 
     val settingsFlow: Flow<IslandSettings> = context.settingsDataStore.data.map { prefs ->
@@ -264,7 +266,8 @@ class SettingsRepository(private val context: Context) {
 
             wizardCompleted = prefs[Keys.WIZARD_COMPLETED] ?: false,
             accessibilityWasEnabled = prefs[Keys.ACCESSIBILITY_WAS_ENABLED] ?: false,
-            verifiedFloatingPath = prefs[Keys.VERIFIED_FLOATING_PATH] ?: default.verifiedFloatingPath
+            verifiedFloatingPath = prefs[Keys.VERIFIED_FLOATING_PATH] ?: default.verifiedFloatingPath,
+            vaultScreenshotsTreeUri = prefs[Keys.VAULT_SCREENSHOTS_TREE_URI]
         )
     }
 
@@ -325,6 +328,11 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.WIZARD_COMPLETED] = s.wizardCompleted
             prefs[Keys.ACCESSIBILITY_WAS_ENABLED] = s.accessibilityWasEnabled
             prefs[Keys.VERIFIED_FLOATING_PATH] = s.verifiedFloatingPath
+            if (s.vaultScreenshotsTreeUri != null) {
+                prefs[Keys.VAULT_SCREENSHOTS_TREE_URI] = s.vaultScreenshotsTreeUri
+            } else {
+                prefs.remove(Keys.VAULT_SCREENSHOTS_TREE_URI)
+            }
         }
     }
 

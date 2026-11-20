@@ -21,6 +21,8 @@ class MediaProjectionPromptActivity : ComponentActivity() {
         const val MODE_VAULT_SCREENSHOT = "vault_screenshot"
         const val MODE_OCR_TIER_B = "ocr_tier_b"
         const val EXTRA_BOUNDS = "crop_bounds"
+        const val EXTRA_TAP_X = "tap_x"
+        const val EXTRA_TAP_Y = "tap_y"
 
         fun launchForVaultScreenshot(context: Context) {
             val intent = Intent(context, MediaProjectionPromptActivity::class.java).apply {
@@ -30,10 +32,12 @@ class MediaProjectionPromptActivity : ComponentActivity() {
             context.startActivity(intent)
         }
 
-        fun launchForTierBOcr(context: Context, bounds: Rect?) {
+        fun launchForTierBOcr(context: Context, bounds: Rect?, tapX: Int = -1, tapY: Int = -1) {
             val intent = Intent(context, MediaProjectionPromptActivity::class.java).apply {
                 putExtra(EXTRA_MODE, MODE_OCR_TIER_B)
                 putExtra(EXTRA_BOUNDS, bounds)
+                putExtra(EXTRA_TAP_X, tapX)
+                putExtra(EXTRA_TAP_Y, tapY)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)
@@ -47,11 +51,15 @@ class MediaProjectionPromptActivity : ComponentActivity() {
             val mode = intent.getStringExtra(EXTRA_MODE) ?: MODE_VAULT_SCREENSHOT
             @Suppress("DEPRECATION")
             val bounds = intent.getParcelableExtra<Rect>(EXTRA_BOUNDS)
+            val tapX = intent.getIntExtra(EXTRA_TAP_X, -1)
+            val tapY = intent.getIntExtra(EXTRA_TAP_Y, -1)
             val serviceIntent = Intent(this, MediaProjectionCaptureService::class.java).apply {
                 putExtra(MediaProjectionCaptureService.EXTRA_RESULT_CODE, result.resultCode)
                 putExtra(MediaProjectionCaptureService.EXTRA_RESULT_DATA, result.data)
                 putExtra(EXTRA_MODE, mode)
                 putExtra(EXTRA_BOUNDS, bounds)
+                putExtra(EXTRA_TAP_X, tapX)
+                putExtra(EXTRA_TAP_Y, tapY)
             }
             ContextCompat.startForegroundService(this, serviceIntent)
         }

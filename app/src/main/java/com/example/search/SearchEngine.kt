@@ -8,7 +8,10 @@ import android.content.pm.PackageManager
 import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.provider.ContactsContract
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.drawable.toBitmap
 import com.example.floating.FloatingWindowManager
 import com.example.notes.NoteDao
 import com.example.notes.NoteEntity
@@ -19,7 +22,8 @@ import kotlinx.coroutines.withContext
 data class LaunchableApp(
     val packageName: String,
     val label: String,
-    val icon: Drawable?
+    val icon: Drawable?,
+    val iconBitmap: ImageBitmap? = null
 )
 
 data class ContactMatch(
@@ -43,7 +47,7 @@ class SearchEngine(
     @Volatile
     private var cachedApps: List<LaunchableApp>? = null
 
-    suspend fun getInstalledApps(forceRefresh: Boolean = false): List<LaunchableApp> = withContext(Dispatchers.IO) {
+    suspend fun getInstalledApps(forceRefresh: Boolean = false): List<LaunchableApp> = withContext(Dispatchers.Default) {
         if (!forceRefresh && cachedApps != null) return@withContext cachedApps!!
         val pm = context.packageManager
         val intent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
@@ -52,10 +56,13 @@ class SearchEngine(
             .filter { it.activityInfo.packageName != context.packageName }
             .distinctBy { it.activityInfo.packageName }
             .map { info ->
+                val drawable = runCatching { info.loadIcon(pm) }.getOrNull()
+                val bmp = runCatching { drawable?.toBitmap(64, 64)?.asImageBitmap() }.getOrNull()
                 LaunchableApp(
                     packageName = info.activityInfo.packageName,
                     label = info.loadLabel(pm).toString(),
-                    icon = runCatching { info.loadIcon(pm) }.getOrNull()
+                    icon = drawable,
+                    iconBitmap = bmp
                 )
             }
             .sortedBy { it.label.lowercase() }
@@ -134,28 +141,48 @@ class SearchEngine(
         runCatching { context.startActivity(intent) }
     }
 
-    fun launchWebSearch(query: String, preferFloating: Boolean = true) {
+    fun launchWebSearch(query: String, preferFloating: Boolean = false) {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return
-        val webIntent = Intent(Intent.ACTION_WEB_SEARCH).apply {
+
+        val googleUrl = Uri.parse("https://www.google.com/search?q=${Uri.encode(trimmed)}")
+        val browserIntent = Intent(Intent.ACTION_VIEW, googleUrl).apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        val pm = context.packageManager
+        val browserHandlers = pm.queryIntentActivities(browserIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            .filter { it.activityInfo.packageName != context.packageName }
+
+        val webSearchIntent = Intent(Intent.ACTION_WEB_SEARCH).apply {
             putExtra(SearchManager.QUERY, trimmed)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        val canHandleWebSearch = webIntent.resolveActivity(context.packageManager) != null
-        val targetIntent = if (canHandleWebSearch) {
-            webIntent
-        } else {
-            Intent(
-                Intent.ACTION_VIEW,
-                Uri.parse("https://www.google.com/search?q=${Uri.encode(trimmed)}")
-            ).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+        val targetIntent = when {
+            browserHandlers.isNotEmpty() -> {
+                val chosenPkg = browserHandlers.firstOrNull {
+                    it.activityInfo.packageName.contains("chrome", ignoreCase = true) ||
+                        it.activityInfo.packageName.contains("browser", ignoreCase = true)
+                }?.activityInfo?.packageName ?: browserHandlers.first().activityInfo.packageName
+                Intent(browserIntent).setPackage(chosenPkg)
             }
+            webSearchIntent.resolveActivity(pm) != null -> webSearchIntent
+            else -> browserIntent
         }
+
         if (preferFloating) {
             floatingWindowManager.launchIntentFloatingOrFallback(targetIntent)
-        } else {
-            runCatching { context.startActivity(targetIntent) }
+            return
+        }
+
+        val directResult = runCatching { context.startActivity(targetIntent) }
+        if (directResult.isFailure) {
+            val fallbackChooser = Intent.createChooser(browserIntent, "Search Google").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            runCatching { context.startActivity(fallbackChooser) }
         }
     }
 }

@@ -3,7 +3,9 @@ package com.example.system
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -15,7 +17,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,13 +24,17 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -37,18 +42,11 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.IslandColors
-import kotlin.math.min
 
 /**
- * Working iOS-style Calculator strictly matching Feature 5 specification:
- * - 4 x 5 grid, equal 12.dp gutter both ways, 16.dp side padding
- * - D = (W - 32.dp - 36.dp) / 4 (clamped to fit viewport cleanly if inside compact card)
- * - 0 button = 2D + gap wide, pill-shaped, left-aligned text
- * - Digit font size = 42% of D (Light 300), operators Semibold (600)
- * - Display font ~ 2.6x button font with auto-shrink ladder at 7 / 8 / 9 characters
- * - Colours: #000000 bg, #333333 digits, #A5A5A5 functions (black text), #FF9F0A operators,
- *   active operator inverted #D4D4D2 bg with #FF9F0A text; pressed brightness 130% / scale 0.95
- * - Real glyphs: ÷ × −
+ * Working iOS-style Calculator cleanly capped within the Dynamic Island panel height (216.dp in compactMode).
+ * Features aligned 4 x 5 capsule/circular grid, operator active inversion, pressed scale spring,
+ * and unique key press sound callback.
  */
 @Composable
 fun CalculatorIslandView(
@@ -60,23 +58,397 @@ fun CalculatorIslandView(
     onPercent: () -> Unit,
     onOperator: (CalcOperator) -> Unit,
     onEquals: () -> Unit,
+    onBackspace: () -> Unit = {},
     onHaptic: () -> Unit = {},
-    compactMode: Boolean = false
+    onKeySound: () -> Unit = {},
+    compactMode: Boolean = true
+) {
+    if (compactMode) {
+        CompactCappedCalculator(
+            state = state,
+            onDigit = onDigit,
+            onDecimal = onDecimal,
+            onClear = onClear,
+            onToggleSign = onToggleSign,
+            onPercent = onPercent,
+            onOperator = onOperator,
+            onEquals = onEquals,
+            onBackspace = onBackspace,
+            onHaptic = onHaptic,
+            onKeySound = onKeySound
+        )
+    } else {
+        FullCalculator(
+            state = state,
+            onDigit = onDigit,
+            onDecimal = onDecimal,
+            onClear = onClear,
+            onToggleSign = onToggleSign,
+            onPercent = onPercent,
+            onOperator = onOperator,
+            onEquals = onEquals,
+            onBackspace = onBackspace,
+            onHaptic = onHaptic,
+            onKeySound = onKeySound
+        )
+    }
+}
+
+@Composable
+private fun CompactCappedCalculator(
+    state: CalculatorState,
+    onDigit: (String) -> Unit,
+    onDecimal: () -> Unit,
+    onClear: () -> Unit,
+    onToggleSign: () -> Unit,
+    onPercent: () -> Unit,
+    onOperator: (CalcOperator) -> Unit,
+    onEquals: () -> Unit,
+    onBackspace: () -> Unit,
+    onHaptic: () -> Unit,
+    onKeySound: () -> Unit
+) {
+    val charCount = state.display.replace("-", "").replace(".", "").length
+    val shrinkMultiplier = when {
+        charCount >= 9 -> 0.72f
+        charCount == 8 -> 0.80f
+        charCount == 7 -> 0.90f
+        else -> 1.0f
+    }
+    val displayFontSp = (28f * shrinkMultiplier).sp
+    val rowGap = 4.dp
+    val keyHeight = 32.dp
+    val keyFont = 15f
+    var accumDrag by remember { mutableFloatStateOf(0f) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(216.dp)
+            .clip(RoundedCornerShape(22.dp))
+            .background(IslandColors.CalcBackground)
+            .border(0.75.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(22.dp))
+            .padding(horizontal = 12.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(rowGap)
+    ) {
+        // Expression hint + swipe-to-backspace numeric display (34.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(34.dp)
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { accumDrag = 0f },
+                        onHorizontalDrag = { _, dragAmount ->
+                            accumDrag += dragAmount
+                            if (kotlin.math.abs(accumDrag) >= 28f) {
+                                accumDrag = 0f
+                                onHaptic()
+                                onKeySound()
+                                onBackspace()
+                            }
+                        }
+                    )
+                }
+                .padding(horizontal = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.Bottom
+        ) {
+            Text(
+                text = state.activeOperator?.let { "Op ${it.glyph}" } ?: "",
+                color = IslandColors.AccentOrange.copy(alpha = 0.90f),
+                fontSize = 11.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(bottom = 4.dp)
+            )
+            Text(
+                text = state.display,
+                style = TextStyle(
+                    color = IslandColors.CalcDigitText,
+                    fontSize = displayFontSp,
+                    fontWeight = FontWeight.Light,
+                    fontFeatureSettings = "tnum"
+                ),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.End,
+                modifier = Modifier.testTag("calc_display")
+            )
+        }
+
+        // Row 1: AC/C, ±, %, ÷
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            CompactCalcKey(
+                label = if (state.canClearEntry && state.display != "0") "C" else "AC",
+                bgColor = IslandColors.CalcFunctionBg,
+                fgColor = IslandColors.CalcFunctionText,
+                height = keyHeight,
+                fontSizeSp = keyFont * 0.88f,
+                fontWeight = FontWeight.Medium,
+                testTag = "calc_key_clear",
+                modifier = Modifier.weight(1f)
+            ) { onHaptic(); onKeySound(); onClear() }
+
+            CompactCalcKey(
+                label = "±",
+                bgColor = IslandColors.CalcFunctionBg,
+                fgColor = IslandColors.CalcFunctionText,
+                height = keyHeight,
+                fontSizeSp = keyFont,
+                fontWeight = FontWeight.Medium,
+                testTag = "calc_key_sign",
+                modifier = Modifier.weight(1f)
+            ) { onHaptic(); onKeySound(); onToggleSign() }
+
+            CompactCalcKey(
+                label = "%",
+                bgColor = IslandColors.CalcFunctionBg,
+                fgColor = IslandColors.CalcFunctionText,
+                height = keyHeight,
+                fontSizeSp = keyFont * 0.92f,
+                fontWeight = FontWeight.Medium,
+                testTag = "calc_key_percent",
+                modifier = Modifier.weight(1f)
+            ) { onHaptic(); onKeySound(); onPercent() }
+
+            CompactOperatorKey(
+                op = CalcOperator.DIVIDE,
+                isActive = state.activeOperator == CalcOperator.DIVIDE,
+                height = keyHeight,
+                fontSizeSp = keyFont + 1f,
+                modifier = Modifier.weight(1f)
+            ) { onHaptic(); onKeySound(); onOperator(CalcOperator.DIVIDE) }
+        }
+
+        // Row 2: 7, 8, 9, ×
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            listOf("7", "8", "9").forEach { d ->
+                CompactCalcKey(
+                    label = d,
+                    bgColor = IslandColors.CalcDigitBg,
+                    fgColor = IslandColors.CalcDigitText,
+                    height = keyHeight,
+                    fontSizeSp = keyFont,
+                    fontWeight = FontWeight.Normal,
+                    testTag = "calc_key_$d",
+                    modifier = Modifier.weight(1f)
+                ) { onHaptic(); onKeySound(); onDigit(d) }
+            }
+            CompactOperatorKey(
+                op = CalcOperator.MULTIPLY,
+                isActive = state.activeOperator == CalcOperator.MULTIPLY,
+                height = keyHeight,
+                fontSizeSp = keyFont + 1f,
+                modifier = Modifier.weight(1f)
+            ) { onHaptic(); onKeySound(); onOperator(CalcOperator.MULTIPLY) }
+        }
+
+        // Row 3: 4, 5, 6, −
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            listOf("4", "5", "6").forEach { d ->
+                CompactCalcKey(
+                    label = d,
+                    bgColor = IslandColors.CalcDigitBg,
+                    fgColor = IslandColors.CalcDigitText,
+                    height = keyHeight,
+                    fontSizeSp = keyFont,
+                    fontWeight = FontWeight.Normal,
+                    testTag = "calc_key_$d",
+                    modifier = Modifier.weight(1f)
+                ) { onHaptic(); onKeySound(); onDigit(d) }
+            }
+            CompactOperatorKey(
+                op = CalcOperator.SUBTRACT,
+                isActive = state.activeOperator == CalcOperator.SUBTRACT,
+                height = keyHeight,
+                fontSizeSp = keyFont + 1f,
+                modifier = Modifier.weight(1f)
+            ) { onHaptic(); onKeySound(); onOperator(CalcOperator.SUBTRACT) }
+        }
+
+        // Row 4: 1, 2, 3, +
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            listOf("1", "2", "3").forEach { d ->
+                CompactCalcKey(
+                    label = d,
+                    bgColor = IslandColors.CalcDigitBg,
+                    fgColor = IslandColors.CalcDigitText,
+                    height = keyHeight,
+                    fontSizeSp = keyFont,
+                    fontWeight = FontWeight.Normal,
+                    testTag = "calc_key_$d",
+                    modifier = Modifier.weight(1f)
+                ) { onHaptic(); onKeySound(); onDigit(d) }
+            }
+            CompactOperatorKey(
+                op = CalcOperator.ADD,
+                isActive = state.activeOperator == CalcOperator.ADD,
+                height = keyHeight,
+                fontSizeSp = keyFont + 1f,
+                modifier = Modifier.weight(1f)
+            ) { onHaptic(); onKeySound(); onOperator(CalcOperator.ADD) }
+        }
+
+        // Row 5: 0 (2x width, left-aligned), ., =
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            CompactCalcKey(
+                label = "0",
+                bgColor = IslandColors.CalcDigitBg,
+                fgColor = IslandColors.CalcDigitText,
+                height = keyHeight,
+                fontSizeSp = keyFont,
+                fontWeight = FontWeight.Normal,
+                testTag = "calc_key_0",
+                leftAlign = true,
+                modifier = Modifier.weight(2.04f)
+            ) { onHaptic(); onKeySound(); onDigit("0") }
+
+            CompactCalcKey(
+                label = ".",
+                bgColor = IslandColors.CalcDigitBg,
+                fgColor = IslandColors.CalcDigitText,
+                height = keyHeight,
+                fontSizeSp = keyFont + 2f,
+                fontWeight = FontWeight.Medium,
+                testTag = "calc_key_dot",
+                modifier = Modifier.weight(1f)
+            ) { onHaptic(); onKeySound(); onDecimal() }
+
+            CompactCalcKey(
+                label = "=",
+                bgColor = IslandColors.CalcOperatorBg,
+                fgColor = IslandColors.CalcOperatorText,
+                height = keyHeight,
+                fontSizeSp = keyFont + 1f,
+                fontWeight = FontWeight.SemiBold,
+                testTag = "calc_key_equals",
+                modifier = Modifier.weight(1f)
+            ) { onHaptic(); onKeySound(); onEquals() }
+        }
+    }
+}
+
+@Composable
+private fun CompactOperatorKey(
+    op: CalcOperator,
+    isActive: Boolean,
+    height: Dp,
+    fontSizeSp: Float,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    CompactCalcKey(
+        label = op.glyph,
+        bgColor = if (isActive) IslandColors.CalcOperatorActiveBg else IslandColors.CalcOperatorBg,
+        fgColor = if (isActive) IslandColors.CalcOperatorActiveText else IslandColors.CalcOperatorText,
+        height = height,
+        fontSizeSp = fontSizeSp,
+        fontWeight = FontWeight.SemiBold,
+        testTag = "calc_key_${op.name.lowercase()}",
+        modifier = modifier,
+        onClick = onClick
+    )
+}
+
+@Composable
+private fun CompactCalcKey(
+    label: String,
+    bgColor: Color,
+    fgColor: Color,
+    height: Dp,
+    fontSizeSp: Float,
+    fontWeight: FontWeight,
+    testTag: String,
+    modifier: Modifier = Modifier,
+    leftAlign: Boolean = false,
+    onClick: () -> Unit
+) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val pressed by interactionSource.collectIsPressedAsState()
+    val scale by animateFloatAsState(
+        targetValue = if (pressed) 0.94f else 1.0f,
+        animationSpec = spring(dampingRatio = 0.7f, stiffness = 750f),
+        label = "calc_key_scale"
+    )
+    val effectiveBg = if (pressed) {
+        Color(
+            red = (bgColor.red * 1.28f).coerceIn(0f, 1f),
+            green = (bgColor.green * 1.28f).coerceIn(0f, 1f),
+            blue = (bgColor.blue * 1.28f).coerceIn(0f, 1f),
+            alpha = 1f
+        )
+    } else {
+        bgColor
+    }
+
+    Box(
+        modifier = modifier
+            .height(height)
+            .graphicsLayer {
+                scaleX = scale
+                scaleY = scale
+            }
+            .clip(CircleShape)
+            .background(effectiveBg)
+            .border(0.5.dp, Color.White.copy(alpha = 0.14f), CircleShape)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick
+            )
+            .testTag(testTag),
+        contentAlignment = if (leftAlign) Alignment.CenterStart else Alignment.Center
+    ) {
+        Text(
+            text = label,
+            color = fgColor,
+            fontSize = fontSizeSp.sp,
+            fontWeight = fontWeight,
+            maxLines = 1,
+            modifier = if (leftAlign) Modifier.padding(start = 22.dp) else Modifier
+        )
+    }
+}
+
+@Composable
+private fun FullCalculator(
+    state: CalculatorState,
+    onDigit: (String) -> Unit,
+    onDecimal: () -> Unit,
+    onClear: () -> Unit,
+    onToggleSign: () -> Unit,
+    onPercent: () -> Unit,
+    onOperator: (CalcOperator) -> Unit,
+    onEquals: () -> Unit,
+    onBackspace: () -> Unit,
+    onHaptic: () -> Unit,
+    onKeySound: () -> Unit
 ) {
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(24.dp))
             .background(IslandColors.CalcBackground)
-            .padding(horizontal = 16.dp, vertical = if (compactMode) 8.dp else 12.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
-        // Live viewport width W (BoxWithConstraints maxWidth is W - 32.dp already, so reconstruct W)
         val viewportW = maxWidth + 32.dp
         val gap = 12.dp
-        val rawD = (viewportW - 32.dp - 36.dp) / 4f
-        // In compactMode (inside floating island overlay), scale down cleanly if vertical budget is tight,
-        // while keeping minimum touch target >= 48.dp; in full screen/expanded test it uses exact D = (W - 32 - 36) / 4.
-        val d: Dp = if (compactMode) min(rawD.value, 54f).coerceAtLeast(48f).dp else rawD.coerceAtLeast(48.dp)
+        val d: Dp = ((viewportW - 32.dp - 36.dp) / 4f).coerceAtLeast(48.dp)
 
         val buttonFontSp = (d.value * 0.42f).sp
         val charCount = state.display.replace("-", "").replace(".", "").length
@@ -87,23 +459,40 @@ fun CalculatorIslandView(
             else -> 1.0f
         }
         val displayFontSp = (buttonFontSp.value * 2.55f * shrinkMultiplier).sp
+        var accumDrag by remember { mutableFloatStateOf(0f) }
 
         Column(
             modifier = Modifier.fillMaxWidth(),
             verticalArrangement = Arrangement.spacedBy(gap)
         ) {
-            // Result Display
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .pointerInput(Unit) {
+                        detectHorizontalDragGestures(
+                            onDragStart = { accumDrag = 0f },
+                            onHorizontalDrag = { _, dragAmount ->
+                                accumDrag += dragAmount
+                                if (kotlin.math.abs(accumDrag) >= 28f) {
+                                    accumDrag = 0f
+                                    onHaptic()
+                                    onKeySound()
+                                    onBackspace()
+                                }
+                            }
+                        )
+                    }
                     .padding(horizontal = 4.dp, vertical = 2.dp),
                 contentAlignment = Alignment.CenterEnd
             ) {
                 Text(
                     text = state.display,
-                    color = IslandColors.CalcDigitText,
-                    fontSize = displayFontSp,
-                    fontWeight = FontWeight.Light,
+                    style = TextStyle(
+                        color = IslandColors.CalcDigitText,
+                        fontSize = displayFontSp,
+                        fontWeight = FontWeight.Light,
+                        fontFeatureSettings = "tnum"
+                    ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.End,
@@ -111,7 +500,6 @@ fun CalculatorIslandView(
                 )
             }
 
-            // Row 1: AC/C, ±, %, ÷
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally)
@@ -124,7 +512,7 @@ fun CalculatorIslandView(
                     fontSizeSp = buttonFontSp.value * 0.86f,
                     fontWeight = FontWeight.Medium,
                     testTag = "calc_key_clear",
-                    onClick = { onHaptic(); onClear() }
+                    onClick = { onHaptic(); onKeySound(); onClear() }
                 )
                 CalcKey(
                     label = "±",
@@ -134,7 +522,7 @@ fun CalculatorIslandView(
                     fontSizeSp = buttonFontSp.value,
                     fontWeight = FontWeight.Medium,
                     testTag = "calc_key_sign",
-                    onClick = { onHaptic(); onToggleSign() }
+                    onClick = { onHaptic(); onKeySound(); onToggleSign() }
                 )
                 CalcKey(
                     label = "%",
@@ -144,69 +532,65 @@ fun CalculatorIslandView(
                     fontSizeSp = buttonFontSp.value * 0.9f,
                     fontWeight = FontWeight.Medium,
                     testTag = "calc_key_percent",
-                    onClick = { onHaptic(); onPercent() }
+                    onClick = { onHaptic(); onKeySound(); onPercent() }
                 )
                 OperatorKey(
                     op = CalcOperator.DIVIDE,
                     isActive = state.activeOperator == CalcOperator.DIVIDE,
                     diameter = d,
                     fontSizeSp = buttonFontSp.value,
-                    onClick = { onHaptic(); onOperator(CalcOperator.DIVIDE) }
+                    onClick = { onHaptic(); onKeySound(); onOperator(CalcOperator.DIVIDE) }
                 )
             }
 
-            // Row 2: 7, 8, 9, ×
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally)
             ) {
                 listOf("7", "8", "9").forEach { digit ->
-                    DigitKey(digit, d, buttonFontSp.value) { onHaptic(); onDigit(digit) }
+                    DigitKey(digit, d, buttonFontSp.value) { onHaptic(); onKeySound(); onDigit(digit) }
                 }
                 OperatorKey(
                     op = CalcOperator.MULTIPLY,
                     isActive = state.activeOperator == CalcOperator.MULTIPLY,
                     diameter = d,
                     fontSizeSp = buttonFontSp.value,
-                    onClick = { onHaptic(); onOperator(CalcOperator.MULTIPLY) }
+                    onClick = { onHaptic(); onKeySound(); onOperator(CalcOperator.MULTIPLY) }
                 )
             }
 
-            // Row 3: 4, 5, 6, −
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally)
             ) {
                 listOf("4", "5", "6").forEach { digit ->
-                    DigitKey(digit, d, buttonFontSp.value) { onHaptic(); onDigit(digit) }
+                    DigitKey(digit, d, buttonFontSp.value) { onHaptic(); onKeySound(); onDigit(digit) }
                 }
                 OperatorKey(
                     op = CalcOperator.SUBTRACT,
                     isActive = state.activeOperator == CalcOperator.SUBTRACT,
                     diameter = d,
                     fontSizeSp = buttonFontSp.value,
-                    onClick = { onHaptic(); onOperator(CalcOperator.SUBTRACT) }
+                    onClick = { onHaptic(); onKeySound(); onOperator(CalcOperator.SUBTRACT) }
                 )
             }
 
-            // Row 4: 1, 2, 3, +
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally)
             ) {
                 listOf("1", "2", "3").forEach { digit ->
-                    DigitKey(digit, d, buttonFontSp.value) { onHaptic(); onDigit(digit) }
+                    DigitKey(digit, d, buttonFontSp.value) { onHaptic(); onKeySound(); onDigit(digit) }
                 }
                 OperatorKey(
                     op = CalcOperator.ADD,
                     isActive = state.activeOperator == CalcOperator.ADD,
                     diameter = d,
                     fontSizeSp = buttonFontSp.value,
-                    onClick = { onHaptic(); onOperator(CalcOperator.ADD) }
+                    onClick = { onHaptic(); onKeySound(); onOperator(CalcOperator.ADD) }
                 )
             }
 
-            // Row 5: 0 (2D + gap wide, left-aligned), ., =
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(gap, Alignment.CenterHorizontally)
@@ -221,7 +605,7 @@ fun CalculatorIslandView(
                     fontSizeSp = buttonFontSp.value,
                     fontWeight = FontWeight.Light,
                     testTag = "calc_key_0",
-                    onClick = { onHaptic(); onDigit("0") }
+                    onClick = { onHaptic(); onKeySound(); onDigit("0") }
                 )
                 CalcKey(
                     label = ".",
@@ -231,7 +615,7 @@ fun CalculatorIslandView(
                     fontSizeSp = buttonFontSp.value,
                     fontWeight = FontWeight.Light,
                     testTag = "calc_key_dot",
-                    onClick = { onHaptic(); onDecimal() }
+                    onClick = { onHaptic(); onKeySound(); onDecimal() }
                 )
                 CalcKey(
                     label = "=",
@@ -241,7 +625,7 @@ fun CalculatorIslandView(
                     fontSizeSp = buttonFontSp.value,
                     fontWeight = FontWeight.SemiBold,
                     testTag = "calc_key_equals",
-                    onClick = { onHaptic(); onEquals() }
+                    onClick = { onHaptic(); onKeySound(); onEquals() }
                 )
             }
             Spacer(Modifier.height(2.dp))
@@ -303,7 +687,6 @@ private fun CalcKey(
         animationSpec = spring(stiffness = 700f),
         label = "calc_scale"
     )
-    // Brightness ~130% on press via lightened overlay
     val effectiveBg = if (pressed) {
         Color(
             red = (bgColor.red * 1.3f).coerceIn(0f, 1f),

@@ -1,10 +1,13 @@
 package com.example.notifications
 
 import android.app.Notification
+import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
+import androidx.core.graphics.drawable.toBitmap
 import com.example.DynamicIslandApp
 import com.example.island.IslandActivity
 import kotlinx.coroutines.CoroutineScope
@@ -66,17 +69,24 @@ class IslandNotificationListener : NotificationListenerService() {
             return
         }
 
-        // 2. 3-finger screenshot capture via MIUI / SystemUI screenshot notification URI or BigPicture
-        if (pkg in screenshotPackages && isScreenshotNotification(title, text)) {
+        // 2. 3-finger screenshot capture via MIUI / SystemUI screenshot notification URI, BigPicture, or actions
+        if (pkg in screenshotPackages && isScreenshotNotification(pkg, title, text, notification)) {
             scope.launch {
                 val settings = app.settingsRepository.settingsFlow.first()
                 if (settings.vaultEnabled && settings.vaultAutoCapture3Finger) {
                     val uri = extractImageUri(notification)
-                    if (uri != null) {
+                    val savedFromUri = if (uri != null) {
                         app.vaultManager.saveFromUri(uri, sourceType = "SCREENSHOT_3FINGER")
-                    } else {
-                        extractPictureBitmap(notification)?.let { bmp ->
+                    } else null
+
+                    if (savedFromUri == null) {
+                        val bmp = extractPictureBitmap(notification)
+                        if (bmp != null) {
                             app.vaultManager.saveBitmap(bmp, sourceType = "SCREENSHOT_3FINGER", namePrefix = "screenshot")
+                        } else if (!settings.vaultScreenshotsTreeUri.isNullOrBlank()) {
+                            runCatching {
+                                app.vaultManager.ingestRecentScreenshotFromTree(Uri.parse(settings.vaultScreenshotsTreeUri))
+                            }
                         }
                     }
                 }
@@ -146,31 +156,62 @@ class IslandNotificationListener : NotificationListenerService() {
         app.islandController.removeActivity("notif_${sbn.key}")
     }
 
-    private fun isScreenshotNotification(title: String, text: String): Boolean {
+    private fun isScreenshotNotification(
+        pkg: String,
+        title: String,
+        text: String,
+        notification: Notification
+    ): Boolean {
         val combined = "$title $text".lowercase()
-        return combined.contains("screenshot") || combined.contains("screen capture")
+        if (combined.contains("screenshot") || combined.contains("screen capture")) return true
+        return pkg == "com.miui.screenshot" && extractPictureBitmap(notification) != null
     }
 
     @Suppress("DEPRECATION")
     private fun extractImageUri(notification: Notification): Uri? {
         val extras = notification.extras ?: return null
         val streamUri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            extras.getParcelable(android.content.Intent.EXTRA_STREAM, Uri::class.java)
+            extras.getParcelable(Intent.EXTRA_STREAM, Uri::class.java)
         } else {
-            extras.getParcelable(android.content.Intent.EXTRA_STREAM)
+            extras.getParcelable(Intent.EXTRA_STREAM)
         }
         if (streamUri != null) return streamUri
+
+        notification.actions?.forEach { action ->
+            val pi = action.actionIntent ?: return@forEach
+            val intentUri = runCatching {
+                // PendingIntent#getIntent is hidden on some builds; inspect notification.extras instead if blocked
+                val m = android.app.PendingIntent::class.java.getMethod("getIntent")
+                val target = m.invoke(pi) as? Intent
+                target?.data ?: target?.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri
+            }.getOrNull()
+            if (intentUri != null && intentUri.scheme == "content") return intentUri
+        }
         return null
     }
 
     @Suppress("DEPRECATION")
-    private fun extractPictureBitmap(notification: Notification): android.graphics.Bitmap? {
+    private fun extractPictureBitmap(notification: Notification): Bitmap? {
         val extras = notification.extras ?: return null
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            extras.getParcelable(Notification.EXTRA_PICTURE, android.graphics.Bitmap::class.java)
+        val bigPic = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            extras.getParcelable(Notification.EXTRA_PICTURE, Bitmap::class.java)
         } else {
             extras.getParcelable(Notification.EXTRA_PICTURE)
         }
+        if (bigPic != null) return bigPic
+
+        val largeIconBmp = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            extras.getParcelable(Notification.EXTRA_LARGE_ICON_BIG, Bitmap::class.java)
+                ?: extras.getParcelable(Notification.EXTRA_LARGE_ICON, Bitmap::class.java)
+        } else {
+            extras.getParcelable(Notification.EXTRA_LARGE_ICON_BIG)
+                ?: extras.getParcelable(Notification.EXTRA_LARGE_ICON)
+        }
+        if (largeIconBmp != null) return largeIconBmp
+
+        return runCatching {
+            notification.getLargeIcon()?.loadDrawable(this)?.toBitmap()
+        }.getOrNull()
     }
 
     private fun parseChronometerOrClock(notification: Notification, text: String): Long? {

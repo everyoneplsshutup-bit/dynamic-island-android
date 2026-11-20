@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Rect
 import android.os.Build
+import android.os.Bundle
+import androidx.annotation.VisibleForTesting
 import com.example.system.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,19 +19,19 @@ import kotlinx.coroutines.launch
 enum class FloatingLaunchPath(val title: String, val honestNote: String) {
     UNTESTED(
         "Untested on this device",
-        "MIUI 14 has no public API to force floating windows. Ranked paths will be probed on launch."
+        "MIUI 14 freeform APIs or standard Android Freeform LaunchBounds will be probed on launch."
     ),
     MIUI_SIDEBAR(
-        "Path 1: MIUI Freeform / Sidebar handoff",
-        "Invoked with MIUI freeform launch extras; verified only if MIUI opens a floating card on your ROM."
+        "Path 1: MIUI Freeform Window",
+        "Launched using MiuiMultiWindowUtils + freeform launch bounds."
     ),
     FREEFORM_BOUNDS(
         "Path 2: Android Freeform LaunchBounds",
-        "Uses ActivityOptions.setLaunchBounds + WINDOWING_MODE_FREEFORM where MIUI allows it."
+        "Launched with WINDOWING_MODE_FREEFORM (mode 5) + ActivityOptions.setLaunchBounds."
     ),
     STANDARD_FALLBACK(
         "Fallback: Standard App Launch",
-        "Device blocked freeform windowing; launched normally."
+        "Device blocked external freeform windowing; launched normally."
     )
 }
 
@@ -43,6 +45,11 @@ class FloatingWindowManager(
     private val context: Context,
     private val settingsRepository: SettingsRepository
 ) {
+    companion object {
+        const val WINDOWING_MODE_FREEFORM = 5
+        const val KEY_LAUNCH_WINDOWING_MODE = "android.activity.windowingMode"
+    }
+
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
     private val _lastResult = MutableStateFlow<FloatingLaunchResult?>(null)
@@ -55,7 +62,7 @@ class FloatingWindowManager(
             _lastResult.value = fail
             return fail
         }
-        val path = launchIntentFloatingOrFallback(launchIntent)
+        val path = launchIntentFloatingOrFallback(launchIntent, packageName)
         val result = FloatingLaunchResult(packageName, path, true)
         _lastResult.value = result
         scope.launch {
@@ -64,65 +71,97 @@ class FloatingWindowManager(
         return result
     }
 
-    fun launchIntentFloatingOrFallback(intent: Intent): FloatingLaunchPath {
-        val dm = context.resources.displayMetrics
-        val w = dm.widthPixels
-        val h = dm.heightPixels
-        val bounds = Rect(
-            (w * 0.10f).toInt(),
-            (h * 0.15f).toInt(),
-            (w * 0.90f).toInt(),
-            (h * 0.65f).toInt()
-        )
+    fun launchIntentFloatingOrFallback(
+        intent: Intent,
+        targetPackage: String? = intent.`package` ?: intent.component?.packageName
+    ): FloatingLaunchPath {
+        val bounds = defaultFreeformBounds()
 
-        // Path 1: MIUI freeform intent flags / ActivityOptions reflection where exposed
-        if (isMiuiDevice()) {
-            val miuiAttempt = runCatching {
+        // Path 1: MIUI 14 MiuiMultiWindowUtils reflection + freeform ActivityOptions bundle
+        if (isMiuiDevice() && !targetPackage.isNullOrBlank()) {
+            val miuiOptions = buildMiuiFreeformBundle(targetPackage, bounds)
+            if (miuiOptions != null) {
                 val miuiIntent = Intent(intent).apply {
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    addFlags(Intent.FLAG_ACTIVITY_MULTIPLE_TASK)
-                    putExtra("miui_multi_window_mode", 1)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
                 }
-                val options = ActivityOptions.makeBasic()
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                    options.setLaunchBounds(bounds)
+                val miuiAttempt = runCatching {
+                    context.startActivity(miuiIntent, miuiOptions)
                 }
-                // Reflect setLaunchWindowingMode(5 = WINDOWING_MODE_FREEFORM) if supported
-                runCatching {
-                    val m = ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
-                    m.invoke(options, 5)
+                if (miuiAttempt.isSuccess) {
+                    return FloatingLaunchPath.MIUI_SIDEBAR
                 }
-                context.startActivity(miuiIntent, options.toBundle())
-            }
-            if (miuiAttempt.isSuccess) {
-                return FloatingLaunchPath.MIUI_SIDEBAR
             }
         }
 
-        // Path 2: Android standard Freeform LaunchBounds
+        // Path 2: Standard Android Freeform LaunchBounds + WINDOWING_MODE_FREEFORM (5)
+        val ffIntent = Intent(intent).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        val ffBundle = buildFreeformOptionsBundle(bounds)
         val freeformAttempt = runCatching {
-            val ffIntent = Intent(intent).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                addFlags(Intent.FLAG_ACTIVITY_LAUNCH_ADJACENT)
-            }
-            val options = ActivityOptions.makeBasic()
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                options.setLaunchBounds(bounds)
-            }
-            runCatching {
-                val m = ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
-                m.invoke(options, 5)
-            }
-            context.startActivity(ffIntent, options.toBundle())
+            context.startActivity(ffIntent, ffBundle)
         }
         if (freeformAttempt.isSuccess) {
             return FloatingLaunchPath.FREEFORM_BOUNDS
         }
 
         // Honest fallback
-        val fallback = Intent(intent).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+        val fallback = Intent(intent).apply { flags = Intent.FLAG_ACTIVITY_NEW_TASK }
         runCatching { context.startActivity(fallback) }
         return FloatingLaunchPath.STANDARD_FALLBACK
+    }
+
+    fun defaultFreeformBounds(): Rect {
+        val dm = context.resources.displayMetrics
+        val w = dm.widthPixels.coerceAtLeast(360)
+        val h = dm.heightPixels.coerceAtLeast(640)
+        return Rect(
+            (w * 0.08f).toInt(),
+            (h * 0.14f).toInt(),
+            (w * 0.92f).toInt(),
+            (h * 0.68f).toInt()
+        )
+    }
+
+    @VisibleForTesting
+    fun buildFreeformOptionsBundle(bounds: Rect): Bundle {
+        val options = ActivityOptions.makeBasic()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            options.setLaunchBounds(bounds)
+        }
+        runCatching {
+            val m = ActivityOptions::class.java.getMethod("setLaunchWindowingMode", Int::class.javaPrimitiveType)
+            m.invoke(options, WINDOWING_MODE_FREEFORM)
+        }
+        val bundle = options.toBundle() ?: Bundle()
+        bundle.putInt(KEY_LAUNCH_WINDOWING_MODE, WINDOWING_MODE_FREEFORM)
+        return bundle
+    }
+
+    private fun buildMiuiFreeformBundle(packageName: String, bounds: Rect): Bundle? {
+        return runCatching {
+            val clazz = Class.forName("android.util.MiuiMultiWindowUtils")
+            val activityOptions = runCatching {
+                val m = clazz.getMethod(
+                    "getActivityOptions",
+                    Context::class.java,
+                    String::class.java,
+                    Boolean::class.javaPrimitiveType,
+                    Boolean::class.javaPrimitiveType
+                )
+                m.invoke(null, context, packageName, true, false) as? ActivityOptions
+            }.getOrNull() ?: runCatching {
+                val m = clazz.getMethod("getActivityOptions", Context::class.java, String::class.java)
+                m.invoke(null, context, packageName) as? ActivityOptions
+            }.getOrNull() ?: return null
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                activityOptions.setLaunchBounds(bounds)
+            }
+            val bundle = activityOptions.toBundle() ?: Bundle()
+            bundle.putInt(KEY_LAUNCH_WINDOWING_MODE, WINDOWING_MODE_FREEFORM)
+            bundle
+        }.getOrNull()
     }
 
     fun isMiuiDevice(): Boolean {
