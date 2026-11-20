@@ -66,6 +66,8 @@ data class IslandSettings(
     val springFeel: SpringFeel = SpringFeel.BALANCED,
     val reducedMotion: Boolean = false,
     val hapticsStrength: HapticsStrength = HapticsStrength.LIGHT,
+    val soundEnabled: Boolean = true,
+    val soundVolume: Float = 0.75f,
 
     // 3. Pill & Calibration
     val cutoutXOffsetDp: Float = 0f,
@@ -160,6 +162,8 @@ class SettingsRepository(private val context: Context) {
         val SPRING_FEEL = stringPreferencesKey("spring_feel")
         val REDUCED_MOTION = booleanPreferencesKey("reduced_motion")
         val HAPTICS_STRENGTH = stringPreferencesKey("haptics_strength")
+        val SOUND_ENABLED = booleanPreferencesKey("sound_enabled")
+        val SOUND_VOLUME = floatPreferencesKey("sound_volume")
 
         val CUTOUT_X = floatPreferencesKey("cutout_x_dp")
         val CUTOUT_Y = floatPreferencesKey("cutout_y_dp")
@@ -212,6 +216,8 @@ class SettingsRepository(private val context: Context) {
             springFeel = prefs[Keys.SPRING_FEEL]?.let { runCatching { SpringFeel.valueOf(it) }.getOrNull() } ?: default.springFeel,
             reducedMotion = prefs[Keys.REDUCED_MOTION] ?: default.reducedMotion,
             hapticsStrength = prefs[Keys.HAPTICS_STRENGTH]?.let { runCatching { HapticsStrength.valueOf(it) }.getOrNull() } ?: default.hapticsStrength,
+            soundEnabled = prefs[Keys.SOUND_ENABLED] ?: default.soundEnabled,
+            soundVolume = (prefs[Keys.SOUND_VOLUME] ?: default.soundVolume).coerceIn(0f, 1f),
 
             cutoutXOffsetDp = prefs[Keys.CUTOUT_X] ?: default.cutoutXOffsetDp,
             cutoutYOffsetDp = prefs[Keys.CUTOUT_Y] ?: default.cutoutYOffsetDp,
@@ -279,6 +285,8 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.SPRING_FEEL] = s.springFeel.name
             prefs[Keys.REDUCED_MOTION] = s.reducedMotion
             prefs[Keys.HAPTICS_STRENGTH] = s.hapticsStrength.name
+            prefs[Keys.SOUND_ENABLED] = s.soundEnabled
+            prefs[Keys.SOUND_VOLUME] = s.soundVolume.coerceIn(0f, 1f)
 
             prefs[Keys.CUTOUT_X] = s.cutoutXOffsetDp
             prefs[Keys.CUTOUT_Y] = s.cutoutYOffsetDp

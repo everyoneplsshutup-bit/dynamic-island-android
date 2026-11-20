@@ -88,7 +88,7 @@ import kotlinx.coroutines.launch
 
 enum class SettingsGroup(val title: String, val subtitle: String, val icon: ImageVector) {
     LOOK("Look", "Pill style, glass density, solid fallback & theme", Icons.Filled.Palette),
-    MOTION("Motion", "Animation speed, spring feel, reduced motion & haptics", Icons.Filled.Animation),
+    MOTION("Motion", "Animation speed, spring feel, haptics & sound", Icons.Filled.Animation),
     PILL("Pill", "Camera calibration, compact view, idle widget & lock screen", Icons.Filled.RadioButtonChecked),
     FEATURES("Features", "Master toggles, Customise Island, quick toggles & apps", Icons.Filled.Tune),
     PRIVACY("Privacy", "Screen reading / OCR (off by default), Vault & clipboard", Icons.Filled.Security),
@@ -111,6 +111,8 @@ private val settingsIndex = listOf(
     SettingsSearchEntry("Spring Feel", "Snappy, Balanced, or Gentle", "Motion › Feel", SettingsGroup.MOTION),
     SettingsSearchEntry("Reduced Motion", "Calm fallback for sensitive eyes", "Motion › Accessibility", SettingsGroup.MOTION),
     SettingsSearchEntry("Haptics Strength", "Off, Light tick, or Medium click", "Motion › Haptics", SettingsGroup.MOTION),
+    SettingsSearchEntry("Sound Effects", "Enable or mute Dynamic Island UI sound effects", "Motion › Sound", SettingsGroup.MOTION),
+    SettingsSearchEntry("Sound Volume", "Adjust UI sound effects volume", "Motion › Sound", SettingsGroup.MOTION),
     SettingsSearchEntry("Camera Calibration", "Nudge X, Y, width, and height around punch-hole", "Pill › Calibration", SettingsGroup.PILL),
     SettingsSearchEntry("Compact Pill Content", "Auto, Music, Timer, Battery, or Notifications", "Pill › Compact", SettingsGroup.PILL),
     SettingsSearchEntry("Idle Widget", "None, Clock, Battery %, Search, or Quick Note", "Pill › Idle", SettingsGroup.PILL),
@@ -283,7 +285,8 @@ fun SettingsGroupDetailScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp)
-                .widthIn(max = 600.dp),
+                .widthIn(max = 600.dp)
+                .testTag("settings_detail_list"),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             when (group) {
@@ -390,6 +393,61 @@ fun SettingsGroupDetailScreen(
                                     Text(h.name.lowercase().replaceFirstChar { it.uppercase() })
                                 }
                             }
+                        }
+                    }
+                    item {
+                        SettingsSectionHeader("Sound Effects")
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            tonalElevation = 1.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Sound Effects", fontWeight = FontWeight.Medium)
+                                    Text(
+                                        "Short UI chimes for expand, collapse, taps, timer finish, and switches.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(Modifier.width(10.dp))
+                                Switch(
+                                    checked = settings.soundEnabled,
+                                    onCheckedChange = { enabled ->
+                                        app.soundManager.updateCachedAudioSettings(enabled, settings.soundVolume)
+                                        if (enabled) {
+                                            app.soundManager.playToggle()
+                                        }
+                                        scope.launch { app.settingsRepository.update { it.copy(soundEnabled = enabled) } }
+                                    },
+                                    modifier = Modifier.testTag("motion_sound_switch")
+                                )
+                            }
+                        }
+                    }
+                    item {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Sound Volume", fontWeight = FontWeight.Medium)
+                                Text("${(settings.soundVolume * 100).toInt()}%", color = MaterialTheme.colorScheme.primary)
+                            }
+                            Slider(
+                                value = settings.soundVolume,
+                                valueRange = 0f..1f,
+                                enabled = settings.soundEnabled,
+                                onValueChange = { v ->
+                                    app.soundManager.updateCachedAudioSettings(settings.soundEnabled, v)
+                                    scope.launch { app.settingsRepository.update { it.copy(soundVolume = v) } }
+                                },
+                                onValueChangeFinished = {
+                                    app.soundManager.playTap()
+                                },
+                                modifier = Modifier.testTag("motion_sound_volume_slider")
+                            )
                         }
                     }
                 }
@@ -553,6 +611,7 @@ fun SettingsGroupDetailScreen(
                                     Switch(
                                         checked = settings.screenReadingEnabled,
                                         onCheckedChange = { wantsOn ->
+                                            app.soundManager.playToggle()
                                             if (wantsOn) {
                                                 showOcrDisclosure = true
                                             } else {
@@ -680,6 +739,7 @@ fun SettingsGroupDetailScreen(
             confirmButton = {
                 Button(onClick = {
                     showOcrDisclosure = false
+                    app.soundManager.playToggle()
                     scope.launch { app.settingsRepository.update { it.copy(screenReadingEnabled = true) } }
                 }) {
                     Text("I Understand, Turn ON")
@@ -824,6 +884,7 @@ private fun SwitchRow(
     enabled: Boolean = true,
     onCheckedChange: (Boolean) -> Unit
 ) {
+    val app = LocalContext.current.applicationContext as? DynamicIslandApp
     Surface(
         shape = RoundedCornerShape(16.dp),
         tonalElevation = 1.dp,
@@ -838,7 +899,14 @@ private fun SwitchRow(
                 Text(helper, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             Spacer(Modifier.width(10.dp))
-            Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
+            Switch(
+                checked = checked,
+                enabled = enabled,
+                onCheckedChange = { next ->
+                    app?.soundManager?.playToggle()
+                    onCheckedChange(next)
+                }
+            )
         }
     }
 }

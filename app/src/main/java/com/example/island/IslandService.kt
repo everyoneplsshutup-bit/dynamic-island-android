@@ -373,8 +373,12 @@ class IslandService : AccessibilityService() {
         when (latestSettings.tapGesture) {
             IslandGesture.OPEN_APP -> {
                 when (primary) {
-                    is IslandActivity.Music -> app.mediaHub.openPlayerApp()
+                    is IslandActivity.Music -> {
+                        app.soundManager.playTap()
+                        app.mediaHub.openPlayerApp()
+                    }
                     is IslandActivity.NotificationPreview -> {
+                        app.soundManager.playTap()
                         val i = packageManager.getLaunchIntentForPackage(primary.packageName)
                         i?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)?.let { runCatching { startActivity(it) } }
                     }
@@ -384,8 +388,12 @@ class IslandService : AccessibilityService() {
                 }
             }
             IslandGesture.TOGGLE_PLAY -> {
-                if (primary is IslandActivity.Music) app.mediaHub.togglePlayPause()
-                else app.islandController.expand()
+                if (primary is IslandActivity.Music) {
+                    app.soundManager.playTap()
+                    app.mediaHub.togglePlayPause()
+                } else {
+                    app.islandController.expand()
+                }
             }
             IslandGesture.EXPAND, IslandGesture.OPEN_CUSTOMISE, IslandGesture.SELECT_OCR -> {
                 app.islandController.expand()

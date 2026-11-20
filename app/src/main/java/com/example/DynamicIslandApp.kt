@@ -19,6 +19,7 @@ import com.example.search.SearchEngine
 import com.example.system.AppDatabase
 import com.example.system.BatteryMonitor
 import com.example.system.CalculatorEngine
+import com.example.system.IslandSoundManager
 import com.example.system.QuickTogglesManager
 import com.example.system.SettingsRepository
 import com.example.system.TimerEngine
@@ -39,6 +40,8 @@ class DynamicIslandApp : Application() {
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     lateinit var settingsRepository: SettingsRepository
+        private set
+    lateinit var soundManager: IslandSoundManager
         private set
     lateinit var database: AppDatabase
         private set
@@ -70,10 +73,11 @@ class DynamicIslandApp : Application() {
         createNotificationChannels()
 
         settingsRepository = SettingsRepository(this)
+        soundManager = IslandSoundManager(this, settingsRepository)
         database = AppDatabase.getInstance(this)
-        islandController = IslandController()
+        islandController = IslandController(onSoundEvent = { event -> soundManager.play(event) })
         calculatorEngine = CalculatorEngine()
-        timerEngine = TimerEngine(this, islandController)
+        timerEngine = TimerEngine(this, islandController, onTimerCompletedSound = { soundManager.playTimerDone() })
         batteryMonitor = BatteryMonitor(this, islandController)
         quickTogglesManager = QuickTogglesManager(this)
         mediaHub = MediaHub(this, islandController)

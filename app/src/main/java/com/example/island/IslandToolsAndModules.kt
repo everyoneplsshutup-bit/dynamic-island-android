@@ -273,33 +273,34 @@ fun ToolsIslandPanel(
                     QuickToggleType.FLASHLIGHT -> Triple(
                         Icons.Filled.FlashlightOn,
                         toggleState.isTorchOn
-                    ) { onHaptic(); app.quickTogglesManager.toggleFlashlight(); Unit }
+                    ) { onHaptic(); app.soundManager.playToggle(); app.quickTogglesManager.toggleFlashlight(); Unit }
 
                     QuickToggleType.DND -> Triple(
                         Icons.Filled.DoNotDisturbOn,
                         toggleState.isDndOn
-                    ) { onHaptic(); app.quickTogglesManager.toggleDoNotDisturb(); Unit }
+                    ) { onHaptic(); app.soundManager.playToggle(); app.quickTogglesManager.toggleDoNotDisturb(); Unit }
 
                     QuickToggleType.BRIGHTNESS -> Triple(
                         Icons.Filled.BrightnessHigh,
                         toggleState.hasWriteSettingsPermission
-                    ) { onHaptic(); if (!toggleState.hasWriteSettingsPermission) app.quickTogglesManager.openWriteSettings() }
+                    ) { onHaptic(); app.soundManager.playTap(); if (!toggleState.hasWriteSettingsPermission) app.quickTogglesManager.openWriteSettings() }
 
                     QuickToggleType.WIFI -> Triple(
                         Icons.Filled.Wifi,
                         false
-                    ) { onHaptic(); app.quickTogglesManager.openWifiPanel(); onCollapse() }
+                    ) { onHaptic(); app.soundManager.playTap(); app.quickTogglesManager.openWifiPanel(); onCollapse() }
 
                     QuickToggleType.BLUETOOTH -> Triple(
                         Icons.Filled.Bluetooth,
                         false
-                    ) { onHaptic(); app.quickTogglesManager.openBluetoothPanel(); onCollapse() }
+                    ) { onHaptic(); app.soundManager.playTap(); app.quickTogglesManager.openBluetoothPanel(); onCollapse() }
 
                     QuickToggleType.SELECT_OCR -> Triple(
                         Icons.Filled.SelectAll,
                         false
                     ) {
                         onHaptic()
+                        app.soundManager.playToggle()
                         if (!settings.screenReadingEnabled) {
                             app.islandController.showTransientBanner("Enable Screen Reading in Settings → Privacy first")
                         } else {
@@ -312,6 +313,7 @@ fun ToolsIslandPanel(
                         false
                     ) {
                         onHaptic()
+                        app.soundManager.playTap()
                         onCollapse()
                         MediaProjectionPromptActivity.launchForVaultScreenshot(context)
                     }

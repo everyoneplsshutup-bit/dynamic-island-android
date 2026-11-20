@@ -41,7 +41,8 @@ data class TimerUiState(
 
 class TimerEngine(
     private val context: Context,
-    private val islandController: IslandController
+    private val islandController: IslandController,
+    private val onTimerCompletedSound: () -> Unit = {}
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -128,6 +129,7 @@ class TimerEngine(
             )
         }
         islandController.removeActivity("timer_primary")
+        onTimerCompletedSound()
         islandController.upsertActivity(
             IslandActivity.Alert(
                 id = "alert_timer_done_${System.currentTimeMillis()}",

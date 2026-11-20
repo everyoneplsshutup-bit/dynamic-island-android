@@ -155,6 +155,7 @@ fun NotificationHistoryScreen(
                                     Switch(
                                         checked = rule.allowIslandPreview,
                                         onCheckedChange = { allowed ->
+                                            app.soundManager.playToggle()
                                             scope.launch {
                                                 app.database.appRuleDao().setIslandPreviewAllowed(rule.packageName, allowed)
                                             }

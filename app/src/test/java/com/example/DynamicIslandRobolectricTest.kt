@@ -1,6 +1,10 @@
 package com.example
 
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -13,8 +17,10 @@ import com.example.island.IslandController
 import com.example.island.IslandMode
 import com.example.ocr.OcrPrivacyGate
 import com.example.system.IslandSettings
+import com.example.system.IslandSoundEvent
 import com.example.system.IslandTab
 import com.example.system.SettingsRepository
+import com.example.system.TimerEngine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -35,7 +41,8 @@ class DynamicIslandRobolectricTest {
 
     @Test
     fun `island state machine transitions Idle Compact Split Expanded`() {
-        val controller = IslandController()
+        val events = mutableListOf<IslandSoundEvent>()
+        val controller = IslandController(onSoundEvent = { events.add(it) })
         assertEquals(IslandMode.IDLE, controller.state.value.mode)
 
         controller.upsertActivity(
@@ -64,8 +71,42 @@ class DynamicIslandRobolectricTest {
         assertEquals(IslandMode.EXPANDED, controller.state.value.mode)
         assertEquals(IslandTab.CALC, controller.state.value.activeTab)
 
+        controller.selectTab(IslandTab.TIMER)
+        controller.toggleMoreRow()
         controller.collapse()
         assertEquals(IslandMode.SPLIT, controller.state.value.mode)
+
+        assertEquals(
+            listOf(
+                IslandSoundEvent.EXPAND,
+                IslandSoundEvent.TAP,
+                IslandSoundEvent.TAP,
+                IslandSoundEvent.COLLAPSE
+            ),
+            events
+        )
+    }
+
+    @Test
+    fun `timer completion fires sound callback and sound defaults are enabled`() {
+        val defaults = IslandSettings()
+        assertTrue(defaults.soundEnabled)
+        assertEquals(0.75f, defaults.soundVolume, 0.001f)
+
+        var timerDoneFired = false
+        val controller = IslandController()
+        val engine = TimerEngine(composeRule.activity, controller) {
+            timerDoneFired = true
+        }
+        engine.onTimerCompletedFromAlarm()
+        assertTrue(timerDoneFired)
+
+        val app = composeRule.activity.application as DynamicIslandApp
+        app.soundManager.updateCachedAudioSettings(enabled = false, volume = 0.5f)
+        assertFalse(app.soundManager.play(IslandSoundEvent.EXPAND))
+        app.soundManager.updateCachedAudioSettings(enabled = true, volume = 0f)
+        assertFalse(app.soundManager.play(IslandSoundEvent.TAP))
+        app.soundManager.updateCachedAudioSettings(enabled = true, volume = 0.75f)
     }
 
     @Test
@@ -116,7 +157,37 @@ class DynamicIslandRobolectricTest {
         composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_about"))
         composeRule.onNodeWithTag("settings_group_about").assertIsDisplayed()
 
+        // Open Motion settings and verify Sound Effects toggle (default ON) + Sound Volume next to Haptics Strength
+        composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_motion"))
+        composeRule.onNodeWithTag("settings_group_motion").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithText("Haptics Strength").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_detail_list").performScrollToNode(hasTestTag("motion_sound_switch"))
+        composeRule.onNodeWithTag("motion_sound_switch").assertIsDisplayed().assertIsOn()
+        composeRule.onNodeWithTag("settings_detail_list").performScrollToNode(hasTestTag("motion_sound_volume_slider"))
+        composeRule.onNodeWithTag("motion_sound_volume_slider").assertIsDisplayed().assertIsEnabled()
+
+        // Toggling Sound Effects OFF disables the volume slider; toggling back ON restores it
+        composeRule.onNodeWithTag("motion_sound_switch").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000L) {
+            runCatching {
+                composeRule.onNodeWithTag("motion_sound_switch").assertIsOff()
+                true
+            }.getOrDefault(false)
+        }
+        composeRule.onNodeWithTag("motion_sound_volume_slider").assertIsNotEnabled()
+        composeRule.onNodeWithTag("motion_sound_switch").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000L) {
+            runCatching {
+                composeRule.onNodeWithTag("motion_sound_switch").assertIsOn()
+                true
+            }.getOrDefault(false)
+        }
+        composeRule.onNodeWithTag("motion_sound_volume_slider").assertIsEnabled()
+
         // Navigate back to Home and open Setup Wizard
+        composeRule.onNodeWithTag("settings_detail_back").performClick()
+        composeRule.waitForIdle()
         composeRule.onNodeWithTag("settings_back").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("open_wizard_button").performScrollTo().performClick()

@@ -1,5 +1,6 @@
 package com.example.island
 
+import com.example.system.IslandSoundEvent
 import com.example.system.IslandTab
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -16,7 +17,9 @@ import kotlinx.coroutines.launch
  * Single source of truth for the Dynamic Island StateFlow<IslandState>.
  * Notification listener, media hub, battery monitor, and timer engine only write events into it.
  */
-class IslandController {
+class IslandController(
+    private val onSoundEvent: (IslandSoundEvent) -> Unit = {}
+) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -79,6 +82,7 @@ class IslandController {
     }
 
     fun expand(tab: IslandTab? = null) {
+        val wasExpanded = _state.value.mode == IslandMode.EXPANDED
         _state.update { current ->
             val resolvedTab = tab ?: when (current.primaryActivity) {
                 is IslandActivity.Timer -> IslandTab.TIMER
@@ -93,9 +97,13 @@ class IslandController {
                 isMoreRowOpen = !resolvedTab.isMainRow
             )
         }
+        if (!wasExpanded) {
+            onSoundEvent(IslandSoundEvent.EXPAND)
+        }
     }
 
     fun collapse() {
+        val wasExpanded = _state.value.mode == IslandMode.EXPANDED
         _state.update { current ->
             val nextMode = when {
                 current.activityQueue.size >= 2 -> IslandMode.SPLIT
@@ -107,6 +115,9 @@ class IslandController {
                 isMoreRowOpen = false,
                 needsKeyboardFocus = false
             )
+        }
+        if (wasExpanded) {
+            onSoundEvent(IslandSoundEvent.COLLAPSE)
         }
     }
 
@@ -128,10 +139,12 @@ class IslandController {
                 needsKeyboardFocus = (tab == IslandTab.SEARCH || tab == IslandTab.NOTES)
             )
         }
+        onSoundEvent(IslandSoundEvent.TAP)
     }
 
     fun toggleMoreRow() {
         _state.update { it.copy(isMoreRowOpen = !it.isMoreRowOpen) }
+        onSoundEvent(IslandSoundEvent.TAP)
     }
 
     fun setKeyboardFocusNeeded(needed: Boolean) {

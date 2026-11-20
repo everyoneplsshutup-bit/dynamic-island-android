@@ -295,6 +295,7 @@ fun FeaturePickerScreen(
                             Switch(
                                 checked = isEnabled,
                                 onCheckedChange = {
+                                    app.soundManager.playToggle()
                                     scope.launch {
                                         val ok = app.settingsRepository.toggleTabInIsland(tab)
                                         capBanner = if (!ok) {
