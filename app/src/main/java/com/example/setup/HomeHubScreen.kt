@@ -77,6 +77,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.DynamicIslandApp
@@ -91,11 +92,14 @@ import com.example.island.ToolsIslandPanel
 import com.example.island.VaultIslandPanel
 import com.example.media.MusicExpandedView
 import com.example.system.AccentTheme
+import com.example.system.AnimationStyle
 import com.example.system.CalculatorIslandView
 import com.example.system.IslandSettings
 import com.example.system.IslandTab
+import com.example.system.PillStyle
 import com.example.system.TimerStopwatchPanel
 import com.example.ui.theme.IslandColors
+import com.example.ui.theme.MotionTokens
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
@@ -122,8 +126,12 @@ fun HomeHubScreen(
         AccentTheme.ORANGE -> IslandColors.AccentOrange
         AccentTheme.CYAN -> IslandColors.AccentCyan
         AccentTheme.GREEN -> IslandColors.AccentGreen
-        AccentTheme.DYNAMIC -> IslandColors.AccentOrange
+        AccentTheme.DYNAMIC -> IslandColors.extractMaterialYouAccent(context)
     }
+    val musicAccent = mediaState.artworkAccentArgb?.let { Color(it) } ?: accentColor
+    val useGlass = settings.pillStyle == PillStyle.GLASS && !settings.solidFallback
+    val effectiveStyle = if (settings.reducedMotion) AnimationStyle.SMOOTH else settings.animationStyle
+    val outerShape = RoundedCornerShape(IslandColors.ExpandedOuterRadius)
 
     // Zero-permission Photo Picker for adding directly to 10-min Vault
     val photoPicker = rememberLauncherForActivityResult(
@@ -198,29 +206,31 @@ fun HomeHubScreen(
                 }
             }
 
-            // Live Interactive Island Sandbox (strictly capped to the same 216.dp height & 388.dp max width as the overlay card)
+            // Live Interactive Island Sandbox (matching live overlay: 44dp concentric radius, 408dp max width, 220dp unified panel cap)
             val sandboxBorder = IslandColors.liquidBorderBrush(
-                useGlass = true,
+                useGlass = useGlass,
                 isHighlighted = false,
                 accentColor = accentColor
             )
+            val sandboxBg = if (useGlass) {
+                IslandColors.blendGlassBase(accentColor, settings.glassDensity)
+            } else {
+                Brush.verticalGradient(listOf(Color(0xFF12131A), IslandColors.PillBlack))
+            }
             Surface(
-                shape = RoundedCornerShape(32.dp),
-                color = IslandColors.PillBlack,
+                shape = outerShape,
+                color = Color.Transparent,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .widthIn(max = 388.dp)
+                    .widthIn(max = 408.dp)
                     .align(Alignment.CenterHorizontally)
-                    .border(1.dp, sandboxBorder, RoundedCornerShape(32.dp))
+                    .border(1.dp, sandboxBorder, outerShape)
             ) {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(Color(0xFF12131A), IslandColors.PillBlack)
-                            )
-                        )
+                        .clip(outerShape)
+                        .background(sandboxBg)
                         .padding(vertical = 10.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
@@ -286,27 +296,34 @@ fun HomeHubScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(216.dp)
+                            .height(220.dp)
                     ) {
                         AnimatedContent(
                             targetState = islandState.activeTab,
                             transitionSpec = {
-                                val forward = targetState.ordinal >= initialState.ordinal
-                                val enterOffset = if (forward) { w: Int -> (w * 0.14f).roundToInt() } else { w: Int -> -(w * 0.14f).roundToInt() }
-                                val exitOffset = if (forward) { w: Int -> -(w * 0.10f).roundToInt() } else { w: Int -> (w * 0.10f).roundToInt() }
-                                (slideInHorizontally(spring(dampingRatio = 0.82f, stiffness = 520f), initialOffsetX = enterOffset) +
-                                    fadeIn(tween(140)) +
-                                    scaleIn(initialScale = 0.96f, animationSpec = spring(dampingRatio = 0.82f, stiffness = 520f)))
-                                    .togetherWith(
-                                        slideOutHorizontally(tween(110), targetOffsetX = exitOffset) + fadeOut(tween(95))
-                                    )
+                                if (effectiveStyle == AnimationStyle.NONE) {
+                                    fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                                } else {
+                                    val forward = targetState.ordinal >= initialState.ordinal
+                                    val enterOffset = if (forward) { w: Int -> (w * 0.14f).roundToInt() } else { w: Int -> -(w * 0.14f).roundToInt() }
+                                    val exitOffset = if (forward) { w: Int -> -(w * 0.10f).roundToInt() } else { w: Int -> (w * 0.10f).roundToInt() }
+                                    val moveSpec = MotionTokens.spatialFast<IntOffset>(effectiveStyle, settings.animationElasticity, settings.animationSpeed)
+                                    val scaleSpec = MotionTokens.spatialFast<Float>(effectiveStyle, settings.animationElasticity, settings.animationSpeed)
+                                    val fadeSpec = MotionTokens.contentCrossfadeTween(effectiveStyle, settings.animationSpeed)
+                                    (slideInHorizontally(moveSpec, initialOffsetX = enterOffset) +
+                                        fadeIn(fadeSpec) +
+                                        scaleIn(initialScale = 0.95f, animationSpec = scaleSpec))
+                                        .togetherWith(
+                                            slideOutHorizontally(tween(110), targetOffsetX = exitOffset) + fadeOut(tween(95))
+                                        )
+                                }
                             },
                             label = "sandbox_tab"
                         ) { tab ->
                             when (tab) {
                                 IslandTab.MUSIC -> MusicExpandedView(
                                     state = mediaState,
-                                    accentColor = accentColor,
+                                    accentColor = musicAccent,
                                     onTogglePlayPause = {
                                         if (mediaState.isPlaying) app.soundManager.playMusicPause() else app.soundManager.playMusicPlay()
                                         app.mediaHub.togglePlayPause()
@@ -364,7 +381,8 @@ fun HomeHubScreen(
                                     onPauseStopwatch = { app.timerEngine.pauseStopwatch() },
                                     onResetStopwatch = { app.timerEngine.resetStopwatch() },
                                     onLapStopwatch = { app.timerEngine.lapStopwatch() },
-                                    onTimerSetSound = { app.soundManager.playTimerSet() }
+                                    onTimerSetSound = { app.soundManager.playTimerSet() },
+                                    onStartSleepTimer = { durationMs -> app.timerEngine.startSleepTimer(durationMs) }
                                 )
 
                                 IslandTab.SEARCH -> SearchIslandPanel(app = app, accentColor = accentColor, onCollapse = {})
@@ -385,7 +403,7 @@ fun HomeHubScreen(
                         activeTab = islandState.activeTab,
                         isMoreOpen = islandState.isMoreRowOpen,
                         accentColor = accentColor,
-                        useLightGlass = false,
+                        useLightGlass = useGlass,
                         onSelectTab = { app.islandController.selectTab(it) },
                         onToggleMore = { app.islandController.toggleMoreRow() }
                     )

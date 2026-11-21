@@ -110,8 +110,8 @@ class IslandSoundManager(
 
     fun play(event: IslandSoundEvent): Boolean {
         if (!soundEnabled) return false
-        val vol = soundVolume.coerceIn(0f, 1f)
-        if (vol <= 0f) return false
+        val baseVol = soundVolume.coerceIn(0f, 1f)
+        if (baseVol <= 0f) return false
 
         val pool = soundPool ?: return false
         val sampleId = soundIds[event] ?: return false
@@ -121,8 +121,13 @@ class IslandSoundManager(
             return false
         }
 
+        // Subtle ±3% pitch variation & ±1 dB (0.891..1.122x) gain randomization so repeated UI taps never feel robotic
+        val rate = 0.97f + (Math.random().toFloat() * 0.06f)
+        val gainJitter = 0.891f + (Math.random().toFloat() * 0.231f)
+        val vol = (baseVol * gainJitter).coerceIn(0.01f, 1f)
+
         val streamId = runCatching {
-            pool.play(sampleId, vol, vol, 1, 0, 1.0f)
+            pool.play(sampleId, vol, vol, 1, 0, rate)
         }.getOrDefault(0)
         return streamId != 0
     }

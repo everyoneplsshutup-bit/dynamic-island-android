@@ -1,10 +1,12 @@
 package com.example.island
 
+import android.graphics.Rect
 import com.example.system.IslandTab
 
 enum class IslandMode {
     IDLE,
     COMPACT,
+    MEDIUM,
     SPLIT,
     EXPANDED
 }
@@ -12,9 +14,42 @@ enum class IslandMode {
 enum class AlertKind {
     TIMER_DONE,
     CHARGING_FULL,
+    LOW_BATTERY,
     VAULT_EXPIRING,
     ACCESSIBILITY_RECOVERED,
     OCR_COPIED
+}
+
+data class OcrTextToken(
+    val text: String,
+    val startChar: Int,
+    val endChar: Int,
+    val leftPx: Int,
+    val topPx: Int,
+    val rightPx: Int,
+    val bottomPx: Int
+)
+
+data class OcrSelectionState(
+    val fullText: String,
+    val elementBounds: Rect,
+    val tokens: List<OcrTextToken>,
+    val startTokenIndex: Int,
+    val endTokenIndex: Int,
+    val anchorX: Float,
+    val anchorY: Float,
+    val activeDragHandle: Int = 0, // 0 = none, 1 = start, 2 = end
+    val isFromTierB: Boolean = false
+) {
+    val selectedText: String
+        get() {
+            if (tokens.isEmpty()) return fullText
+            val s = startTokenIndex.coerceIn(0, tokens.lastIndex)
+            val e = endTokenIndex.coerceIn(s, tokens.lastIndex)
+            val cStart = tokens[s].startChar.coerceIn(0, fullText.length)
+            val cEnd = tokens[e].endChar.coerceIn(cStart, fullText.length)
+            return fullText.substring(cStart, cEnd).trim().ifEmpty { fullText }
+        }
 }
 
 sealed interface IslandActivity {
@@ -51,7 +86,9 @@ sealed interface IslandActivity {
         override val timestamp: Long = System.currentTimeMillis(),
         val levelPercent: Int,
         val isCharging: Boolean,
-        val isFull: Boolean
+        val isFull: Boolean,
+        val wattageWatts: Float? = null,
+        val pluggedLabel: String = "Fast AC"
     ) : IslandActivity
 
     data class NotificationPreview(
@@ -88,16 +125,26 @@ data class IslandState(
     val alertsHistory: List<IslandActivity.Alert> = emptyList(),
     val isMoreRowOpen: Boolean = false,
     val isSelectModeActive: Boolean = false,
+    val ocrSelection: OcrSelectionState? = null,
+    val isFlashlightCardOpen: Boolean = false,
+    val pullDownProgress: Float = 0f,
+    val promotedPrimaryId: String? = null,
     val isFloatingSidebarOpen: Boolean = false,
     val isDeviceLocked: Boolean = false,
     val isCalibrationPreview: Boolean = false,
     val isDragOverIsland: Boolean = false,
     val activeFloatingMiniTab: IslandTab? = null,
     val needsKeyboardFocus: Boolean = false,
-    val statusBanner: String? = null
+    val statusBanner: String? = null,
+    val batteryLevelPercent: Int = 100,
+    val isBatteryCharging: Boolean = false,
+    val isLowBatteryWarning: Boolean = false
 ) {
     val primaryActivity: IslandActivity?
-        get() = activityQueue.maxByOrNull { it.priority }
+        get() {
+            val promoted = promotedPrimaryId?.let { id -> activityQueue.firstOrNull { it.id == id } }
+            return promoted ?: activityQueue.maxByOrNull { it.priority }
+        }
 
     val secondaryActivity: IslandActivity?
         get() {
@@ -106,4 +153,7 @@ data class IslandState(
                 .filter { it.id != primary.id }
                 .maxByOrNull { it.priority }
         }
+
+    val companionCount: Int
+        get() = (activityQueue.size - 1).coerceAtLeast(0)
 }

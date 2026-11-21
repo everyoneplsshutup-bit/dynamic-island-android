@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 class IslandNotificationListener : NotificationListenerService() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private var staleReaperJob: kotlinx.coroutines.Job? = null
 
     private val clockPackages = setOf(
         "com.google.android.deskclock",
@@ -37,10 +38,24 @@ class IslandNotificationListener : NotificationListenerService() {
         scope.launch(Dispatchers.Main) {
             app.mediaHub.refreshSessions()
         }
+        staleReaperJob?.cancel()
+        staleReaperJob = scope.launch {
+            while (true) {
+                kotlinx.coroutines.delay(15_000L)
+                val activeIds = runCatching {
+                    activeNotifications?.map { "notif_${it.key}" }?.toSet()
+                }.getOrNull() ?: continue
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    app.islandController.pruneStaleNotifications(activeIds)
+                }
+            }
+        }
     }
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
+        staleReaperJob?.cancel()
+        staleReaperJob = null
         val app = applicationContext as? DynamicIslandApp ?: return
         scope.launch(Dispatchers.Main) {
             app.mediaHub.stop()
@@ -104,7 +119,8 @@ class IslandNotificationListener : NotificationListenerService() {
 
         scope.launch {
             val settings = app.settingsRepository.settingsFlow.first()
-            if (!settings.notificationsEnabled) return@launch
+            val notifCfg = settings.eventConfig(com.example.system.EventKind.NOTIFICATIONS)
+            if (!settings.notificationsEnabled || !notifCfg.enabled) return@launch
 
             val appName = runCatching {
                 val ai = packageManager.getApplicationInfo(pkg, 0)
@@ -131,7 +147,6 @@ class IslandNotificationListener : NotificationListenerService() {
             )
             app.database.notificationDao().insert(entity)
 
-            // Preview only — compact pill, never auto-expand message text!
             app.islandController.upsertActivity(
                 IslandActivity.NotificationPreview(
                     id = "notif_${sbn.key}",
@@ -142,7 +157,8 @@ class IslandNotificationListener : NotificationListenerService() {
                     timestamp = sbn.postTime
                 ),
                 autoShowCompact = true,
-                autoDismissMs = 4500L
+                autoDismissMs = 3800L,
+                autoExpandToFull = notifCfg.autoExpand
             )
         }
     }

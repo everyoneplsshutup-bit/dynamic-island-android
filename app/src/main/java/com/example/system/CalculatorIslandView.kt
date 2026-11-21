@@ -124,7 +124,7 @@ private fun CompactCappedCalculator(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(216.dp)
+            .height(220.dp)
             .clip(RoundedCornerShape(22.dp))
             .background(IslandColors.CalcBackground)
             .border(0.75.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(22.dp))

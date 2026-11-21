@@ -18,6 +18,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -42,6 +43,7 @@ data class TimerUiState(
 class TimerEngine(
     private val context: Context,
     private val islandController: IslandController,
+    private val settingsRepository: SettingsRepository? = null,
     private val onTimerCompletedSound: () -> Unit = {}
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -49,12 +51,23 @@ class TimerEngine(
     private val _state = MutableStateFlow(TimerUiState())
     val state: StateFlow<TimerUiState> = _state.asStateFlow()
 
+    @Volatile
+    private var latestSettings: IslandSettings = IslandSettings()
+
     private var timerJob: Job? = null
     private var timerEndWallMs: Long = 0L
 
     private var stopwatchJob: Job? = null
     private var stopwatchStartWallMs: Long = 0L
     private var stopwatchAccumulatedMs: Long = 0L
+
+    init {
+        settingsRepository?.let { repo ->
+            scope.launch {
+                repo.settingsFlow.collectLatest { latestSettings = it }
+            }
+        }
+    }
 
     fun setPickerDuration(hours: Int, minutes: Int, seconds: Int) {
         _state.update {
@@ -64,6 +77,22 @@ class TimerEngine(
                 selectedSeconds = seconds.coerceIn(0, 59)
             )
         }
+    }
+
+    fun startSleepTimer(durationMs: Long) {
+        if (durationMs <= 0L) return
+        timerEndWallMs = System.currentTimeMillis() + durationMs
+        _state.update {
+            it.copy(
+                totalMs = durationMs,
+                remainingMs = durationMs,
+                isRunning = true,
+                isActive = true,
+                isDone = false
+            )
+        }
+        scheduleExactAlarm(timerEndWallMs)
+        startTicker(label = "Sleep")
     }
 
     fun startTimer() {
@@ -166,13 +195,13 @@ class TimerEngine(
         }
     }
 
-    private fun startTicker() {
+    private fun startTicker(label: String = "Timer") {
         timerJob?.cancel()
         timerJob = scope.launch {
             while (isActive) {
                 val left = (timerEndWallMs - System.currentTimeMillis()).coerceAtLeast(0L)
                 _state.update { it.copy(remainingMs = left) }
-                pushTimerToIsland()
+                pushTimerToIsland(label)
                 if (left <= 0L) {
                     onTimerCompletedFromAlarm()
                     break
@@ -182,19 +211,22 @@ class TimerEngine(
         }
     }
 
-    private fun pushTimerToIsland() {
+    private fun pushTimerToIsland(label: String = "Timer") {
         val s = _state.value
         if (!s.isActive) return
+        val cfg = latestSettings.eventConfig(EventKind.TIMER)
+        if (!latestSettings.timerEnabled || !cfg.enabled) return
         islandController.upsertActivity(
             IslandActivity.Timer(
                 id = "timer_primary",
-                label = "Timer",
+                label = label,
                 remainingMs = s.remainingMs,
                 totalMs = s.totalMs.coerceAtLeast(1L),
                 isRunning = s.isRunning,
                 isMirroredFromClock = false
             ),
-            autoShowCompact = true
+            autoShowCompact = true,
+            autoExpandToFull = cfg.autoExpand && s.remainingMs == s.totalMs
         )
     }
 

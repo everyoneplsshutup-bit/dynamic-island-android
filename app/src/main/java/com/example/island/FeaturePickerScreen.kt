@@ -2,7 +2,7 @@ package com.example.island
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,8 +46,10 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -68,10 +70,10 @@ fun FeaturePickerScreen(
     val settings by app.settingsRepository.settingsFlow.collectAsState(initial = IslandSettings())
     val scope = rememberCoroutineScope()
     var capBanner by remember { mutableStateOf<String?>(null) }
+    var activeDragTab by remember { mutableStateOf<IslandTab?>(null) }
 
     val enabledList = settings.enabledTabs
     val disabledList = IslandTab.entries.filterNot { it in enabledList }
-    val orderedRows = enabledList + disabledList
 
     Scaffold(
         topBar = {
@@ -113,7 +115,7 @@ fun FeaturePickerScreen(
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp)
         ) {
-            // Pinned live mini-preview of the island at the top
+            // Pinned live mini-preview showing exact Main Row (first 5) + More Row (next 3)
             Surface(
                 shape = RoundedCornerShape(24.dp),
                 color = Color(0xFF0A0A0E),
@@ -126,12 +128,11 @@ fun FeaturePickerScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "Live Island Mini-Preview",
+                        text = "Live Dock Order Preview (First 5 in Main · Next 3 in More)",
                         color = IslandColors.TextSecondary,
                         fontSize = 11.sp
                     )
                     Spacer(Modifier.height(8.dp))
-                    // Mini Pill around camera hole
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
@@ -191,64 +192,106 @@ fun FeaturePickerScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
-                items(orderedRows, key = { it.name }) { tab ->
-                    val isEnabled = tab in enabledList
+                item(key = "section_active_hdr") {
+                    Text(
+                        text = "Active in Dock (${enabledList.size}) · Drag 6-dot handle to reorder",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
+                    )
+                }
+
+                items(enabledList, key = { it.name }) { tab ->
                     val enabledIdx = enabledList.indexOf(tab)
+                    val isDraggingThis = activeDragTab == tab
                     var menuExpanded by remember { mutableStateOf(false) }
                     var dragDeltaY by remember { mutableFloatStateOf(0f) }
 
                     Surface(
                         shape = RoundedCornerShape(18.dp),
-                        tonalElevation = if (isEnabled) 2.dp else 0.dp,
+                        tonalElevation = if (isDraggingThis) 8.dp else 2.dp,
                         modifier = Modifier
                             .fillMaxWidth()
+                            .graphicsLayer {
+                                translationY = if (isDraggingThis) dragDeltaY.coerceIn(-40f, 40f) else 0f
+                                scaleX = if (isDraggingThis) 1.02f else 1f
+                                scaleY = if (isDraggingThis) 1.02f else 1f
+                            }
+                            .then(
+                                if (isDraggingThis) Modifier.border(1.5.dp, IslandColors.AccentOrange, RoundedCornerShape(18.dp))
+                                else Modifier
+                            )
                             .testTag("feature_row_${tab.name.lowercase()}")
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
                         ) {
-                            // Six-dot drag handle (minimum 44x44 px -> 48.dp touch target)
+                            // Six-dot drag handle: IMMEDIATE drag without long-press delay
                             Box(
                                 contentAlignment = Alignment.Center,
                                 modifier = Modifier
                                     .minimumInteractiveComponentSize()
                                     .size(44.dp)
                                     .pointerInput(tab, enabledIdx) {
-                                        if (!isEnabled) return@pointerInput
-                                        detectDragGesturesAfterLongPress(
-                                            onDragStart = { dragDeltaY = 0f },
+                                        detectDragGestures(
+                                            onDragStart = {
+                                                dragDeltaY = 0f
+                                                activeDragTab = tab
+                                            },
                                             onDrag = { change, dragAmount ->
                                                 change.consume()
                                                 dragDeltaY += dragAmount.y
-                                                if (dragDeltaY > 72f) {
+                                                if (dragDeltaY > 64f) {
                                                     dragDeltaY = 0f
+                                                    app.soundManager.playTap()
                                                     scope.launch { app.settingsRepository.moveTab(tab, +1) }
-                                                } else if (dragDeltaY < -72f) {
+                                                } else if (dragDeltaY < -64f) {
                                                     dragDeltaY = 0f
+                                                    app.soundManager.playTap()
                                                     scope.launch { app.settingsRepository.moveTab(tab, -1) }
                                                 }
+                                            },
+                                            onDragEnd = {
+                                                dragDeltaY = 0f
+                                                activeDragTab = null
+                                            },
+                                            onDragCancel = {
+                                                dragDeltaY = 0f
+                                                activeDragTab = null
                                             }
                                         )
                                     }
+                                    .testTag("feature_drag_handle_${tab.name.lowercase()}")
                             ) {
                                 Icon(
                                     imageVector = Icons.Filled.DragIndicator,
-                                    contentDescription = "Reorder ${tab.title}",
-                                    tint = if (isEnabled) MaterialTheme.colorScheme.onSurfaceVariant else Color.Gray.copy(alpha = 0.35f)
+                                    contentDescription = "Drag to reorder ${tab.title}",
+                                    tint = if (isDraggingThis) IslandColors.AccentOrange else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
 
                             Icon(
                                 imageVector = tabIcon(tab),
                                 contentDescription = null,
-                                tint = if (isEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(22.dp)
                             )
                             Spacer(Modifier.width(10.dp))
 
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(tab.title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text(tab.title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                                    Text(
+                                        text = if (enabledIdx < 5) "Main #${enabledIdx + 1}" else "More",
+                                        fontSize = 10.sp,
+                                        color = if (enabledIdx < 5) IslandColors.AccentOrange else IslandColors.TextSecondary,
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(6.dp))
+                                            .background(Color.White.copy(alpha = 0.08f))
+                                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                                    )
+                                }
                                 Text(
                                     tab.description,
                                     style = MaterialTheme.typography.bodyMedium,
@@ -257,52 +300,45 @@ fun FeaturePickerScreen(
                                 )
                             }
 
-                            // Non-drag Move Up / Move Down menu (accessibility compliant)
-                            if (isEnabled) {
-                                Box {
-                                    IconButton(
-                                        onClick = { menuExpanded = true },
-                                        modifier = Modifier.testTag("feature_menu_${tab.name.lowercase()}")
-                                    ) {
-                                        Icon(Icons.Filled.MoreVert, contentDescription = "Reorder menu")
-                                    }
-                                    DropdownMenu(
-                                        expanded = menuExpanded,
-                                        onDismissRequest = { menuExpanded = false }
-                                    ) {
-                                        DropdownMenuItem(
-                                            text = { Text("Move up") },
-                                            leadingIcon = { Icon(Icons.Filled.ArrowUpward, contentDescription = null) },
-                                            enabled = enabledIdx > 0,
-                                            onClick = {
-                                                menuExpanded = false
-                                                scope.launch { app.settingsRepository.moveTab(tab, -1) }
-                                            }
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Move down") },
-                                            leadingIcon = { Icon(Icons.Filled.ArrowDownward, contentDescription = null) },
-                                            enabled = enabledIdx in 0 until enabledList.lastIndex,
-                                            onClick = {
-                                                menuExpanded = false
-                                                scope.launch { app.settingsRepository.moveTab(tab, +1) }
-                                            }
-                                        )
-                                    }
+                            Box {
+                                IconButton(
+                                    onClick = { menuExpanded = true },
+                                    modifier = Modifier.testTag("feature_menu_${tab.name.lowercase()}")
+                                ) {
+                                    Icon(Icons.Filled.MoreVert, contentDescription = "Reorder menu")
+                                }
+                                DropdownMenu(
+                                    expanded = menuExpanded,
+                                    onDismissRequest = { menuExpanded = false }
+                                ) {
+                                    DropdownMenuItem(
+                                        text = { Text("Move up") },
+                                        leadingIcon = { Icon(Icons.Filled.ArrowUpward, contentDescription = null) },
+                                        enabled = enabledIdx > 0,
+                                        onClick = {
+                                            menuExpanded = false
+                                            scope.launch { app.settingsRepository.moveTab(tab, -1) }
+                                        }
+                                    )
+                                    DropdownMenuItem(
+                                        text = { Text("Move down") },
+                                        leadingIcon = { Icon(Icons.Filled.ArrowDownward, contentDescription = null) },
+                                        enabled = enabledIdx in 0 until enabledList.lastIndex,
+                                        onClick = {
+                                            menuExpanded = false
+                                            scope.launch { app.settingsRepository.moveTab(tab, +1) }
+                                        }
+                                    )
                                 }
                             }
 
                             Switch(
-                                checked = isEnabled,
+                                checked = true,
                                 onCheckedChange = {
-                                    app.soundManager.playToggle()
+                                    app.soundManager.playToggle(isOn = false)
                                     scope.launch {
-                                        val ok = app.settingsRepository.toggleTabInIsland(tab)
-                                        capBanner = if (!ok) {
-                                            "Maximum 8 / 8 features reached. Disable one to add ${tab.title}."
-                                        } else {
-                                            null
-                                        }
+                                        app.settingsRepository.toggleTabInIsland(tab)
+                                        capBanner = null
                                     }
                                 },
                                 modifier = Modifier.testTag("feature_toggle_${tab.name.lowercase()}")
@@ -310,6 +346,66 @@ fun FeaturePickerScreen(
                         }
                     }
                 }
+
+                if (disabledList.isNotEmpty()) {
+                    item(key = "section_disabled_hdr") {
+                        Text(
+                            text = "Disabled Modules (${disabledList.size})",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(top = 10.dp, bottom = 2.dp)
+                        )
+                    }
+
+                    items(disabledList, key = { it.name }) { tab ->
+                        Surface(
+                            shape = RoundedCornerShape(18.dp),
+                            tonalElevation = 0.dp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .alpha(0.65f)
+                                .testTag("feature_row_${tab.name.lowercase()}")
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = tabIcon(tab),
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(tab.title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                                    Text(
+                                        tab.description,
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1
+                                    )
+                                }
+                                Switch(
+                                    checked = false,
+                                    onCheckedChange = {
+                                        app.soundManager.playToggle(isOn = true)
+                                        scope.launch {
+                                            val ok = app.settingsRepository.toggleTabInIsland(tab)
+                                            capBanner = if (!ok) {
+                                                "Maximum 8 / 8 features reached. Disable one to add ${tab.title}."
+                                            } else {
+                                                null
+                                            }
+                                        }
+                                    },
+                                    modifier = Modifier.testTag("feature_toggle_${tab.name.lowercase()}")
+                                )
+                            }
+                        }
+                    }
+                }
+
                 item { Spacer(Modifier.height(18.dp)) }
             }
         }

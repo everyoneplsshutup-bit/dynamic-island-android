@@ -77,11 +77,11 @@ class DynamicIslandApp : Application() {
         database = AppDatabase.getInstance(this)
         islandController = IslandController(onSoundEvent = { event -> soundManager.play(event) })
         calculatorEngine = CalculatorEngine()
-        timerEngine = TimerEngine(this, islandController, onTimerCompletedSound = { soundManager.playTimerDone() })
-        batteryMonitor = BatteryMonitor(this, islandController)
+        timerEngine = TimerEngine(this, islandController, settingsRepository, onTimerCompletedSound = { soundManager.playTimerDone() })
+        batteryMonitor = BatteryMonitor(this, islandController, settingsRepository)
         quickTogglesManager = QuickTogglesManager(this)
-        mediaHub = MediaHub(this, islandController)
-        vaultManager = VaultManager(this, database.vaultDao(), islandController) {
+        mediaHub = MediaHub(this, islandController, settingsRepository)
+        vaultManager = VaultManager(this, database.vaultDao(), islandController, settingsRepository) {
             soundManager.playVaultAdd()
         }
         voiceMemoManager = VoiceMemoManager(this, database.voiceMemoDao(), islandController)

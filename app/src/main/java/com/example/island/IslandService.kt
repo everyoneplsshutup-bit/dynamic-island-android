@@ -7,6 +7,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.media.AudioManager
 import android.content.res.Configuration
 import android.database.ContentObserver
 import android.graphics.PixelFormat
@@ -47,6 +48,7 @@ import com.example.system.HapticsStrength
 import com.example.system.IslandGesture
 import com.example.system.IslandSettings
 import com.example.system.IslandTab
+import com.example.system.PillSwipeAction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -188,7 +190,6 @@ class IslandService : AccessibilityService() {
         overlayLifecycleOwner = owner
 
         val density = resources.displayMetrics.density
-        val fixedDrawingHeightPx = (680 * density).toInt()
 
         val dragListener = View.OnDragListener { _, dragEvent ->
             when (dragEvent.action) {
@@ -230,10 +231,10 @@ class IslandService : AccessibilityService() {
             }
         }
 
-        // Window 1: Fixed full-width drawing window that never resizes
+        // Window 1: Fixed full-screen drawing window (never resizes, 120Hz smooth)
         val dParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
-            fixedDrawingHeightPx,
+            WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                 WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
@@ -302,6 +303,18 @@ class IslandService : AccessibilityService() {
                 return true
             }
 
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                if (latestState.isSelectModeActive) return false
+                performSelectionHaptic()
+                if (latestSettings.vaultEnabled) {
+                    app.soundManager.playVaultAdd()
+                    MediaProjectionPromptActivity.launchForVaultScreenshot(this@IslandService)
+                } else {
+                    app.islandController.openFromPill(latestSettings.twoStageOpen)
+                }
+                return true
+            }
+
             override fun onLongPress(e: MotionEvent) {
                 performSelectionHaptic()
                 if (latestState.isSelectModeActive) {
@@ -310,12 +323,84 @@ class IslandService : AccessibilityService() {
                     handlePillLongPress(app)
                 }
             }
+
+            override fun onFling(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                velocityX: Float,
+                velocityY: Float
+            ): Boolean {
+                if (latestState.isSelectModeActive) return false
+                val absX = kotlin.math.abs(velocityX)
+                val absY = kotlin.math.abs(velocityY)
+                if (absX > absY && absX > 420f) {
+                    performSelectionHaptic()
+                    val isLeft = velocityX < 0f
+                    val swipeAction = if (isLeft) latestSettings.pillSwipeLeftGesture else latestSettings.pillSwipeRightGesture
+                    when (swipeAction) {
+                        PillSwipeAction.TRACK_OR_NOTIF -> {
+                            when (latestState.primaryActivity) {
+                                is IslandActivity.Music -> {
+                                    app.soundManager.playMusicNext()
+                                    if (isLeft) app.mediaHub.skipNext() else app.mediaHub.skipPrevious()
+                                }
+                                is IslandActivity.NotificationPreview -> app.islandController.nextNotification()
+                                else -> app.islandController.expand(IslandTab.SEARCH)
+                            }
+                        }
+                        PillSwipeAction.VOLUME -> {
+                            val am = getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                            val dir = if (isLeft) AudioManager.ADJUST_LOWER else AudioManager.ADJUST_RAISE
+                            am?.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir, AudioManager.FLAG_SHOW_UI)
+                        }
+                        PillSwipeAction.SEARCH -> app.islandController.expand(IslandTab.SEARCH)
+                        PillSwipeAction.NONE -> Unit
+                    }
+                    return true
+                }
+                if (velocityY > 520f && absY > absX) {
+                    performSelectionHaptic()
+                    app.islandController.openFromPill(latestSettings.twoStageOpen)
+                    return true
+                }
+                return false
+            }
         })
 
+        var downRawY = 0f
+        var isPullingDown = false
+        val pullThresholdPx = 46f * density
         val invisibleTouch = View(this).apply {
             setBackgroundColor(android.graphics.Color.TRANSPARENT)
             setOnTouchListener { _, event ->
                 gestureDetector.onTouchEvent(event)
+                if (!latestState.isSelectModeActive) {
+                    when (event.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            downRawY = event.rawY
+                            isPullingDown = false
+                        }
+                        MotionEvent.ACTION_MOVE -> {
+                            val dy = (event.rawY - downRawY).coerceAtLeast(0f)
+                            if (dy > 16f * density) {
+                                isPullingDown = true
+                                app.islandController.setPullDownProgress((dy / (110f * density)).coerceIn(0f, 1f))
+                            }
+                        }
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                            if (isPullingDown) {
+                                val dy = event.rawY - downRawY
+                                isPullingDown = false
+                                if (dy >= pullThresholdPx) {
+                                    performSelectionHaptic()
+                                    app.islandController.openFromPill(latestSettings.twoStageOpen)
+                                } else {
+                                    app.islandController.setPullDownProgress(0f)
+                                }
+                            }
+                        }
+                    }
+                }
                 true
             }
             setOnDragListener(dragListener)
@@ -356,6 +441,9 @@ class IslandService : AccessibilityService() {
         val params = drawingParams ?: return
 
         val isInteractive = state.mode == IslandMode.EXPANDED ||
+            state.mode == IslandMode.MEDIUM ||
+            state.ocrSelection != null ||
+            state.isFlashlightCardOpen ||
             state.isFloatingSidebarOpen ||
             state.activeFloatingMiniTab != null
         val needsIme = isInteractive && state.needsKeyboardFocus
@@ -404,6 +492,9 @@ class IslandService : AccessibilityService() {
         }
 
         val hideTouchWindow = latestState.mode == IslandMode.EXPANDED ||
+            latestState.mode == IslandMode.MEDIUM ||
+            latestState.ocrSelection != null ||
+            latestState.isFlashlightCardOpen ||
             latestState.isFloatingSidebarOpen ||
             latestState.activeFloatingMiniTab != null
 
@@ -418,9 +509,10 @@ class IslandService : AccessibilityService() {
 
         val pillWidthDp = when (latestState.mode) {
             IslandMode.IDLE -> (latestSettings.cutoutWidthDp + 24f).coerceAtLeast(48f)
-            IslandMode.COMPACT -> 212f
-            IslandMode.SPLIT -> 278f
-            IslandMode.EXPANDED -> 340f
+            IslandMode.COMPACT -> 228f
+            IslandMode.MEDIUM -> 328f
+            IslandMode.SPLIT -> 296f
+            IslandMode.EXPANDED -> 360f
         }
         val pillHeightDp = when (latestState.mode) {
             IslandMode.IDLE -> (latestSettings.cutoutHeightDp + 18f).coerceAtLeast(48f)
@@ -447,7 +539,7 @@ class IslandService : AccessibilityService() {
     private fun handlePillTap(app: DynamicIslandApp) {
         val primary = latestState.primaryActivity
         if (latestState.mode == IslandMode.IDLE) {
-            app.islandController.expand()
+            app.islandController.openFromPill(latestSettings.twoStageOpen)
             return
         }
         when (latestSettings.tapGesture) {
@@ -462,9 +554,9 @@ class IslandService : AccessibilityService() {
                         val i = packageManager.getLaunchIntentForPackage(primary.packageName)
                         i?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)?.let { runCatching { startActivity(it) } }
                     }
-                    is IslandActivity.Timer -> app.islandController.expand(IslandTab.TIMER)
-                    is IslandActivity.VoiceRecording -> app.islandController.expand(IslandTab.MEMO)
-                    else -> app.islandController.expand()
+                    is IslandActivity.Timer -> app.islandController.openFromPill(latestSettings.twoStageOpen, IslandTab.TIMER)
+                    is IslandActivity.VoiceRecording -> app.islandController.openFromPill(latestSettings.twoStageOpen, IslandTab.MEMO)
+                    else -> app.islandController.openFromPill(latestSettings.twoStageOpen)
                 }
             }
             IslandGesture.TOGGLE_PLAY -> {
@@ -472,11 +564,11 @@ class IslandService : AccessibilityService() {
                     app.soundManager.playTap()
                     app.mediaHub.togglePlayPause()
                 } else {
-                    app.islandController.expand()
+                    app.islandController.openFromPill(latestSettings.twoStageOpen)
                 }
             }
             IslandGesture.EXPAND, IslandGesture.OPEN_CUSTOMISE, IslandGesture.SELECT_OCR -> {
-                app.islandController.expand()
+                app.islandController.openFromPill(latestSettings.twoStageOpen)
             }
         }
     }
@@ -535,17 +627,8 @@ class IslandService : AccessibilityService() {
 
             when (result) {
                 is TierAResult.TextFound -> {
-                    app.clipboardMonitor.copyToClipboard(result.text)
-                    app.islandController.upsertActivity(
-                        IslandActivity.Alert(
-                            id = "ocr_copied_${System.currentTimeMillis()}",
-                            kind = AlertKind.OCR_COPIED,
-                            title = "Copied text",
-                            subtitle = result.text.take(56)
-                        ),
-                        autoShowCompact = true,
-                        autoDismissMs = 3500L
-                    )
+                    // Open adjustable blue handles + loupe + Callout Copy (never auto-copies)
+                    app.islandController.setOcrSelection(result.selectionState)
                 }
                 is TierAResult.Refused -> {
                     app.islandController.showTransientBanner(result.reason)

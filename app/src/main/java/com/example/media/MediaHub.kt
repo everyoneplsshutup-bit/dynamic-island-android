@@ -10,9 +10,13 @@ import android.media.session.MediaSessionManager
 import android.media.session.PlaybackState
 import android.os.Bundle
 import android.provider.Settings
+import androidx.core.graphics.ColorUtils
 import com.example.island.IslandActivity
 import com.example.island.IslandController
 import com.example.notifications.IslandNotificationListener
+import com.example.system.EventKind
+import com.example.system.IslandSettings
+import com.example.system.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -21,9 +25,11 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class LyricLine(
     val timestampMs: Long,
@@ -38,6 +44,7 @@ data class MediaUiState(
     val title: String = "Nothing Playing",
     val artist: String = "",
     val albumArt: Bitmap? = null,
+    val artworkAccentArgb: Int? = null,
     val isPlaying: Boolean = false,
     val positionMs: Long = 0L,
     val durationMs: Long = 0L,
@@ -54,7 +61,8 @@ data class MediaUiState(
 
 class MediaHub(
     private val context: Context,
-    private val islandController: IslandController
+    private val islandController: IslandController,
+    private val settingsRepository: SettingsRepository? = null
 ) {
     companion object {
         const val PIXEL_MUSIC_PKG = "com.unshoo.pixelmusic"
@@ -70,9 +78,21 @@ class MediaHub(
     private val _state = MutableStateFlow(MediaUiState())
     val state: StateFlow<MediaUiState> = _state.asStateFlow()
 
+    @Volatile
+    private var latestSettings: IslandSettings = IslandSettings()
+
     private var activeController: MediaController? = null
     private var progressJob: Job? = null
+    private var accentJob: Job? = null
     private var sessionsListenerRegistered = false
+
+    init {
+        settingsRepository?.let { repo ->
+            scope.launch {
+                repo.settingsFlow.collectLatest { latestSettings = it }
+            }
+        }
+    }
 
     private val controllerCallback = object : MediaController.Callback() {
         override fun onPlaybackStateChanged(state: PlaybackState?) {
@@ -169,6 +189,7 @@ class MediaHub(
 
     private fun detachController() {
         progressJob?.cancel()
+        accentJob?.cancel()
         activeController?.let { runCatching { it.unregisterCallback(controllerCallback) } }
         activeController = null
     }
@@ -214,10 +235,12 @@ class MediaHub(
                 extras?.getBoolean("supports_like", false) == true
             )
 
+        val mediaUriStr = metadata?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI)
         val lyricsRaw = extras?.getString("lyrics")
             ?: extras?.getString("lrc")
             ?: metadata?.getString("android.media.metadata.LYRICS")
-        val parsedLyrics = parseLyrics(lyricsRaw, title, artist)
+            ?: readSidecarLrcIfLocal(mediaUriStr)
+        val parsedLyrics = parseLyrics(lyricsRaw)
 
         val appLabel = runCatching {
             val pm = context.packageManager
@@ -232,6 +255,7 @@ class MediaHub(
             title = title,
             artist = artist,
             albumArt = art,
+            artworkAccentArgb = _state.value.artworkAccentArgb,
             isPlaying = isPlaying,
             positionMs = pos,
             durationMs = duration,
@@ -245,19 +269,65 @@ class MediaHub(
             lyrics = parsedLyrics
         )
 
-        islandController.upsertActivity(
-            IslandActivity.Music(
-                packageName = pkg,
-                title = title,
-                artist = artist,
-                isPlaying = isPlaying,
-                positionMs = pos,
-                durationMs = duration
-            ),
-            autoShowCompact = isPlaying
-        )
+        if (art != null) {
+            extractArtworkAccentAsync(art)
+        } else {
+            _state.update { it.copy(artworkAccentArgb = null) }
+        }
+
+        val musicCfg = latestSettings.eventConfig(EventKind.MUSIC)
+        if (latestSettings.musicEnabled && musicCfg.enabled) {
+            islandController.upsertActivity(
+                IslandActivity.Music(
+                    packageName = pkg,
+                    title = title,
+                    artist = artist,
+                    isPlaying = isPlaying,
+                    positionMs = pos,
+                    durationMs = duration
+                ),
+                autoShowCompact = isPlaying,
+                autoExpandToFull = isPlaying && musicCfg.autoExpand
+            )
+        }
 
         if (isPlaying) startProgressTicker() else progressJob?.cancel()
+    }
+
+    private fun extractArtworkAccentAsync(bitmap: Bitmap) {
+        accentJob?.cancel()
+        accentJob = scope.launch {
+            val argb = withContext(Dispatchers.Default) {
+                runCatching {
+                    val stepX = (bitmap.width / 10).coerceAtLeast(1)
+                    val stepY = (bitmap.height / 10).coerceAtLeast(1)
+                    var bestScore = -1f
+                    var bestColor = 0xFFBF5AF2.toInt()
+                    val hsl = FloatArray(3)
+                    var y = 0
+                    while (y < bitmap.height) {
+                        var x = 0
+                        while (x < bitmap.width) {
+                            val pixel = bitmap.getPixel(x, y)
+                            ColorUtils.colorToHSL(pixel, hsl)
+                            val sat = hsl[1]
+                            val light = hsl[2]
+                            val score = sat * 2.0f - kotlin.math.abs(light - 0.55f)
+                            if (sat > 0.18f && light in 0.18f..0.85f && score > bestScore) {
+                                bestScore = score
+                                hsl[1] = sat.coerceAtLeast(0.65f)
+                                hsl[2] = light.coerceIn(0.50f, 0.70f)
+                                bestColor = ColorUtils.HSLToColor(hsl)
+                            }
+                            x += stepX
+                        }
+                        y += stepY
+                    }
+                    bestColor
+                }.getOrNull()
+            }
+            _state.update { it.copy(artworkAccentArgb = argb) }
+        }
     }
 
     private fun startProgressTicker() {
@@ -331,7 +401,28 @@ class MediaHub(
         }
     }
 
-    private fun parseLyrics(raw: String?, title: String, artist: String): List<LyricLine> {
+    /**
+     * Strictly on-device local .lrc sidecar reader (if player exposes file:// METADATA_KEY_MEDIA_URI).
+     * NEVER performs any network call (app has zero INTERNET permission).
+     */
+    private fun readSidecarLrcIfLocal(mediaUriStr: String?): String? {
+        if (mediaUriStr.isNullOrBlank()) return null
+        return runCatching {
+            val uri = android.net.Uri.parse(mediaUriStr)
+            if (!uri.scheme.equals("file", ignoreCase = true)) return null
+            val path = uri.path ?: return null
+            val audioFile = java.io.File(path)
+            val parent = audioFile.parentFile ?: return null
+            val lrcFile = java.io.File(parent, audioFile.nameWithoutExtension + ".lrc")
+            if (lrcFile.exists() && lrcFile.canRead() && lrcFile.length() in 1L..256_000L) {
+                lrcFile.readText(Charsets.UTF_8)
+            } else {
+                null
+            }
+        }.getOrNull()
+    }
+
+    private fun parseLyrics(raw: String?): List<LyricLine> {
         if (raw.isNullOrBlank()) {
             return emptyList()
         }

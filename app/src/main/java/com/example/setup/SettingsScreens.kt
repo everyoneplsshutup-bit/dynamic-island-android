@@ -7,9 +7,16 @@ import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -21,6 +28,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -29,6 +37,7 @@ import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonChecked
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Security
@@ -39,6 +48,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -59,13 +69,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -78,16 +91,24 @@ import com.example.floating.FloatingLaunchPath
 import com.example.ocr.OcrPrivacyGate
 import com.example.search.LaunchableApp
 import com.example.system.AccentTheme
+import com.example.system.AnimationStyle
 import com.example.system.CompactPreference
+import com.example.system.CompanionPosition
+import com.example.system.ContentEffect
+import com.example.system.EventBehaviorConfig
+import com.example.system.EventKind
+import com.example.system.ExpandedSwipeAction
 import com.example.system.HapticsStrength
 import com.example.system.IdleWidgetType
 import com.example.system.IslandGesture
 import com.example.system.IslandSettings
 import com.example.system.LockScreenPreset
+import com.example.system.OpeningEffect
 import com.example.system.PillStyle
-import com.example.system.QuickToggleType
+import com.example.system.PillSwipeAction
 import com.example.system.SpringFeel
 import com.example.ui.theme.IslandColors
+import com.example.ui.theme.MotionTokens
 import kotlinx.coroutines.launch
 
 enum class SettingsGroup(val title: String, val subtitle: String, val icon: ImageVector) {
@@ -111,16 +132,21 @@ private val settingsIndex = listOf(
     SettingsSearchEntry("Glass Density", "Clear to Tinted density slider", "Look › Glass", SettingsGroup.LOOK),
     SettingsSearchEntry("Solid Fallback", "Force solid black over glass", "Look › Fallback", SettingsGroup.LOOK),
     SettingsSearchEntry("Accent Theme", "Orange, Cyan, Green, or Dynamic", "Look › Theme", SettingsGroup.LOOK),
+    SettingsSearchEntry("Animation Style", "Like a Fruit jelly, Spring, Smooth, or Off", "Motion › Style", SettingsGroup.MOTION),
     SettingsSearchEntry("Animation Speed", "Adjust spring transition speed", "Motion › Speed", SettingsGroup.MOTION),
-    SettingsSearchEntry("Spring Feel", "Snappy, Balanced, or Gentle", "Motion › Feel", SettingsGroup.MOTION),
+    SettingsSearchEntry("Elasticity", "Adjust overshoot bounce intensity", "Motion › Elasticity", SettingsGroup.MOTION),
+    SettingsSearchEntry("Two-Stage Open", "Compact pill -> Stage 1 preview -> Full card", "Motion › Stages", SettingsGroup.MOTION),
+    SettingsSearchEntry("Try It Motion Demo", "Interactive capsule animation playground", "Motion › Demo", SettingsGroup.MOTION),
     SettingsSearchEntry("Reduced Motion", "Calm fallback for sensitive eyes", "Motion › Accessibility", SettingsGroup.MOTION),
     SettingsSearchEntry("Haptics Strength", "Off, Light tick, or Medium click", "Motion › Haptics", SettingsGroup.MOTION),
     SettingsSearchEntry("Sound Effects", "Enable or mute Dynamic Island UI sound effects", "Motion › Sound", SettingsGroup.MOTION),
     SettingsSearchEntry("Sound Volume", "Adjust UI sound effects volume", "Motion › Sound", SettingsGroup.MOTION),
     SettingsSearchEntry("Camera Calibration", "Nudge X, Y, width, and height around punch-hole", "Pill › Calibration", SettingsGroup.PILL),
+    SettingsSearchEntry("Companion Circle Side", "Place +1 split bubble on Left or Right", "Pill › Split", SettingsGroup.PILL),
     SettingsSearchEntry("Compact Pill Content", "Auto, Music, Timer, Battery, or Notifications", "Pill › Compact", SettingsGroup.PILL),
     SettingsSearchEntry("Idle Widget", "None, Clock, Battery %, Search, or Quick Note", "Pill › Idle", SettingsGroup.PILL),
     SettingsSearchEntry("Lock-Screen Preset", "Minimal, Hide Message Text, or Hidden", "Pill › Lock Screen", SettingsGroup.PILL),
+    SettingsSearchEntry("Per-Event Switches", "Enable & auto-expand behavior per event kind", "Features › Events", SettingsGroup.FEATURES),
     SettingsSearchEntry("Customise Island", "Pick & reorder up to 8 island features", "Features › Chooser", SettingsGroup.FEATURES),
     SettingsSearchEntry("Master Feature Toggles", "Enable/disable Music, Timer, Calc, Vault, OCR & more", "Features › Toggles", SettingsGroup.FEATURES),
     SettingsSearchEntry("Floating-Window Apps", "Pick apps for MIUI sidebar & freeform launch", "Features › Floating", SettingsGroup.FEATURES),
@@ -269,6 +295,8 @@ fun SettingsGroupDetailScreen(
     var showResetConfirm by remember { mutableStateOf(false) }
     var showDeleteAllConfirm by remember { mutableStateOf(false) }
     var showBackupDialog by remember { mutableStateOf(false) }
+    var showMotionDemoDialog by remember { mutableStateOf(false) }
+    var motionSubSection by remember { mutableIntStateOf(0) } // 0 = All, 1 = Background, 2 = Animations, 3 = Gestures
     var backupText by remember { mutableStateOf("") }
     var showAppMultiPickerFor by remember { mutableStateOf<String?>(null) } // "FLOATING" or "PINNED"
 
@@ -366,40 +394,191 @@ fun SettingsGroupDetailScreen(
 
                 SettingsGroup.MOTION -> {
                     item {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Animation Speed", fontWeight = FontWeight.Medium)
-                                Text("${String.format("%.1f", settings.animationSpeed)}x", color = MaterialTheme.colorScheme.primary)
-                            }
-                            Slider(
-                                value = settings.animationSpeed,
-                                valueRange = 0.6f..1.6f,
-                                onValueChange = { v -> scope.launch { app.settingsRepository.update { it.copy(animationSpeed = v) } } }
-                            )
-                        }
-                    }
-                    item {
-                        SettingsSectionHeader("Spring Feel")
                         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                            SpringFeel.entries.forEachIndexed { idx, feel ->
+                            listOf("All", "Background", "Animations", "Gestures").forEachIndexed { idx, label ->
                                 SegmentedButton(
-                                    selected = settings.springFeel == feel,
-                                    onClick = { scope.launch { app.settingsRepository.update { it.copy(springFeel = feel) } } },
-                                    shape = SegmentedButtonDefaults.itemShape(idx, SpringFeel.entries.size)
+                                    selected = motionSubSection == idx,
+                                    onClick = {
+                                        app.soundManager.playTap()
+                                        motionSubSection = idx
+                                    },
+                                    shape = SegmentedButtonDefaults.itemShape(idx, 4),
+                                    modifier = Modifier.testTag("motion_subtab_${label.lowercase()}")
                                 ) {
-                                    Text(feel.name.lowercase().replaceFirstChar { it.uppercase() })
+                                    Text(label, fontSize = 11.sp, maxLines = 1)
                                 }
                             }
                         }
                     }
-                    item {
-                        SwitchRow(
-                            title = "Reduced Motion",
-                            helper = "Uses calm critically-damped transitions (also respects system animation scale).",
-                            checked = settings.reducedMotion,
-                            onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(reducedMotion = c) } } }
-                        )
+
+                    if (motionSubSection == 1) {
+                        item {
+                            SettingsSectionHeader("Background & Surface")
+                            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                                PillStyle.entries.forEachIndexed { idx, style ->
+                                    SegmentedButton(
+                                        selected = settings.pillStyle == style,
+                                        onClick = { scope.launch { app.settingsRepository.update { it.copy(pillStyle = style) } } },
+                                        shape = SegmentedButtonDefaults.itemShape(idx, PillStyle.entries.size)
+                                    ) {
+                                        Text(if (style == PillStyle.BLACK) "Solid Black" else "Apple Glass")
+                                    }
+                                }
+                            }
+                        }
+                        item {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Glass Density", fontWeight = FontWeight.Medium)
+                                    Text("${(settings.glassDensity * 100).toInt()}%", color = MaterialTheme.colorScheme.primary)
+                                }
+                                Slider(
+                                    value = settings.glassDensity,
+                                    onValueChange = { v -> scope.launch { app.settingsRepository.update { it.copy(glassDensity = v) } } },
+                                    enabled = settings.pillStyle == PillStyle.GLASS && !settings.solidFallback
+                                )
+                            }
+                        }
                     }
+
+                    if (motionSubSection == 0 || motionSubSection == 2) {
+                        item {
+                            SettingsSectionHeader("Motion Style (Springy / Standard / Calm)")
+                            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                                AnimationStyle.entries.forEachIndexed { idx, style ->
+                                    SegmentedButton(
+                                        selected = settings.animationStyle == style,
+                                        onClick = {
+                                            app.soundManager.playTap()
+                                            scope.launch { app.settingsRepository.update { it.copy(animationStyle = style) } }
+                                        },
+                                        shape = SegmentedButtonDefaults.itemShape(idx, AnimationStyle.entries.size),
+                                        modifier = Modifier.testTag("motion_style_${style.name.lowercase()}")
+                                    ) {
+                                        Text(style.label, fontSize = 11.sp, maxLines = 1)
+                                    }
+                                }
+                            }
+                        }
+                        item {
+                            SettingsSectionHeader("Capsule Opening Effect")
+                            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                                OpeningEffect.entries.forEachIndexed { idx, eff ->
+                                    SegmentedButton(
+                                        selected = settings.openingEffect == eff,
+                                        onClick = {
+                                            app.soundManager.playTap()
+                                            scope.launch { app.settingsRepository.update { it.copy(openingEffect = eff) } }
+                                        },
+                                        shape = SegmentedButtonDefaults.itemShape(idx, OpeningEffect.entries.size),
+                                        modifier = Modifier.testTag("opening_effect_${eff.name.lowercase()}")
+                                    ) {
+                                        Text(eff.label, fontSize = 11.sp, maxLines = 1)
+                                    }
+                                }
+                            }
+                        }
+                        item {
+                            SettingsSectionHeader("Inner Content Effect")
+                            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                                ContentEffect.entries.forEachIndexed { idx, eff ->
+                                    SegmentedButton(
+                                        selected = settings.contentEffect == eff,
+                                        onClick = {
+                                            app.soundManager.playTap()
+                                            scope.launch { app.settingsRepository.update { it.copy(contentEffect = eff) } }
+                                        },
+                                        shape = SegmentedButtonDefaults.itemShape(idx, ContentEffect.entries.size),
+                                        modifier = Modifier.testTag("content_effect_${eff.name.lowercase()}")
+                                    ) {
+                                        Text(eff.label, fontSize = 11.sp, maxLines = 1)
+                                    }
+                                }
+                            }
+                        }
+                        item {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Speed", fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                                        Text("${String.format("%.1f", settings.animationSpeed)}x", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+                                    }
+                                    Slider(
+                                        value = settings.animationSpeed,
+                                        valueRange = 0.6f..1.6f,
+                                        onValueChange = { v -> scope.launch { app.settingsRepository.update { it.copy(animationSpeed = v) } } },
+                                        modifier = Modifier.testTag("motion_speed_slider")
+                                    )
+                                }
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Elasticity", fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                                        Text("${(settings.animationElasticity * 100).toInt()}%", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
+                                    }
+                                    Slider(
+                                        value = settings.animationElasticity,
+                                        valueRange = 0f..1f,
+                                        enabled = settings.animationStyle == AnimationStyle.FRUIT || settings.animationStyle == AnimationStyle.SPRING,
+                                        onValueChange = { v -> scope.launch { app.settingsRepository.update { it.copy(animationElasticity = v) } } },
+                                        modifier = Modifier.testTag("motion_elasticity_slider")
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    if (motionSubSection == 0 || motionSubSection == 3) {
+                        item {
+                            SettingsSectionHeader("Swipes & Long-Press Gestures")
+                            EnumPickerRow(
+                                title = "Collapsed Pill Swipe Left",
+                                helper = "Next track, cycle notifications, adjust volume, or open search.",
+                                selectedLabel = settings.pillSwipeLeftGesture.label,
+                                options = PillSwipeAction.entries.map { it.label to it },
+                                onSelect = { a -> scope.launch { app.settingsRepository.update { it.copy(pillSwipeLeftGesture = a) } } }
+                            )
+                        }
+                        item {
+                            EnumPickerRow(
+                                title = "Collapsed Pill Swipe Right",
+                                helper = "Previous track, volume up, or open search.",
+                                selectedLabel = settings.pillSwipeRightGesture.label,
+                                options = PillSwipeAction.entries.map { it.label to it },
+                                onSelect = { a -> scope.launch { app.settingsRepository.update { it.copy(pillSwipeRightGesture = a) } } }
+                            )
+                        }
+                        item {
+                            EnumPickerRow(
+                                title = "Expanded Card Swipe Left",
+                                helper = "Dismiss active notification or collapse card.",
+                                selectedLabel = settings.expandedSwipeLeftGesture.label,
+                                options = ExpandedSwipeAction.entries.map { it.label to it },
+                                onSelect = { a -> scope.launch { app.settingsRepository.update { it.copy(expandedSwipeLeftGesture = a) } } }
+                            )
+                        }
+                        item {
+                            EnumPickerRow(
+                                title = "Expanded Card Swipe Right",
+                                helper = "Cycle to next notification or collapse.",
+                                selectedLabel = settings.expandedSwipeRightGesture.label,
+                                options = ExpandedSwipeAction.entries.map { it.label to it },
+                                onSelect = { a -> scope.launch { app.settingsRepository.update { it.copy(expandedSwipeRightGesture = a) } } }
+                            )
+                        }
+                        item {
+                            EnumPickerRow(
+                                title = "Pill Long-Press Action",
+                                helper = "Expand island, trigger Select Mode OCR, or open Customise.",
+                                selectedLabel = settings.longPressGesture.name.replace("_", " "),
+                                options = IslandGesture.entries.map { it.name.replace("_", " ") to it },
+                                onSelect = { g -> scope.launch { app.settingsRepository.update { it.copy(longPressGesture = g) } } }
+                            )
+                        }
+                    }
+
                     item {
                         SettingsSectionHeader("Haptics Strength")
                         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
@@ -413,6 +592,22 @@ fun SettingsGroupDetailScreen(
                                 }
                             }
                         }
+                    }
+                    item {
+                        SwitchRow(
+                            title = "Two-Stage Open",
+                            helper = "First tap reveals Stage 1 compact preview; second tap opens Stage 2 full card.",
+                            checked = settings.twoStageOpen,
+                            onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(twoStageOpen = c) } } }
+                        )
+                    }
+                    item {
+                        SwitchRow(
+                            title = "Reduced Motion",
+                            helper = "Uses calm critically-damped transitions (also respects system animation scale).",
+                            checked = settings.reducedMotion,
+                            onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(reducedMotion = c) } } }
+                        )
                     }
                     item {
                         SettingsSectionHeader("Sound Effects")
@@ -472,6 +667,22 @@ fun SettingsGroupDetailScreen(
                             )
                         }
                     }
+                    item {
+                        Button(
+                            onClick = {
+                                app.soundManager.playExpand()
+                                showMotionDemoDialog = true
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(48.dp)
+                                .testTag("motion_try_it_btn")
+                        ) {
+                            Icon(Icons.Filled.PlayArrow, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text("Try It · Interactive Motion Demo")
+                        }
+                    }
                 }
 
                 SettingsGroup.PILL -> {
@@ -481,6 +692,24 @@ fun SettingsGroupDetailScreen(
                             helper = "Nudge X (${settings.cutoutXOffsetDp.toInt()}dp), Y (${settings.cutoutYOffsetDp.toInt()}dp), W (${settings.cutoutWidthDp.toInt()}dp), H (${settings.cutoutHeightDp.toInt()}dp)",
                             onClick = onOpenCalibration
                         )
+                    }
+                    item {
+                        SettingsSectionHeader("Split Companion Circle Side")
+                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                            CompanionPosition.entries.forEachIndexed { idx, side ->
+                                SegmentedButton(
+                                    selected = settings.companionPosition == side,
+                                    onClick = {
+                                        app.soundManager.playTap()
+                                        scope.launch { app.settingsRepository.update { it.copy(companionPosition = side) } }
+                                    },
+                                    shape = SegmentedButtonDefaults.itemShape(idx, CompanionPosition.entries.size),
+                                    modifier = Modifier.testTag("pill_companion_${side.name.lowercase()}")
+                                ) {
+                                    Text(if (side == CompanionPosition.LEFT) "Left of Camera" else "Right of Camera")
+                                }
+                            }
+                        }
                     }
                     item {
                         EnumPickerRow(
@@ -608,6 +837,60 @@ fun SettingsGroupDetailScreen(
                     item {
                         SwitchRow("OCR Text Copy Feature", "Allows Select Mode (still gated by Privacy toggle)", settings.ocrFeatureEnabled) { c ->
                             scope.launch { app.settingsRepository.update { it.copy(ocrFeatureEnabled = c) } }
+                        }
+                    }
+                    item { SettingsSectionHeader("Per-Event Behavior Switches") }
+                    items(EventKind.entries, key = { it.name }) { kind ->
+                        val cfg = settings.eventConfig(kind)
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            tonalElevation = 1.dp,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(kind.label, fontWeight = FontWeight.Medium)
+                                        Text(kind.subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Switch(
+                                        checked = cfg.enabled,
+                                        onCheckedChange = { next ->
+                                            app.soundManager.playToggle(isOn = next)
+                                            scope.launch {
+                                                app.settingsRepository.update { s ->
+                                                    val map = s.perEventConfig.toMutableMap()
+                                                    map[kind.name] = cfg.copy(enabled = next)
+                                                    s.copy(perEventConfig = map)
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier.testTag("event_enable_${kind.name.lowercase()}")
+                                    )
+                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
+                                ) {
+                                    Text("Auto-expand when event arrives", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Switch(
+                                        checked = cfg.autoExpand,
+                                        enabled = cfg.enabled,
+                                        onCheckedChange = { nextAuto ->
+                                            app.soundManager.playToggle(isOn = nextAuto)
+                                            scope.launch {
+                                                app.settingsRepository.update { s ->
+                                                    val map = s.perEventConfig.toMutableMap()
+                                                    map[kind.name] = cfg.copy(autoExpand = nextAuto)
+                                                    s.copy(perEventConfig = map)
+                                                }
+                                            }
+                                        },
+                                        modifier = Modifier.testTag("event_autoexpand_${kind.name.lowercase()}")
+                                    )
+                                }
+                            }
                         }
                     }
                 }
@@ -906,6 +1189,147 @@ fun SettingsGroupDetailScreen(
             }
         )
     }
+
+    if (showMotionDemoDialog) {
+        InteractiveMotionDemoDialog(
+            settings = settings,
+            app = app,
+            onDismiss = { showMotionDemoDialog = false }
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun InteractiveMotionDemoDialog(
+    settings: IslandSettings,
+    app: DynamicIslandApp,
+    onDismiss: () -> Unit
+) {
+    var demoStage by remember { mutableIntStateOf(0) } // 0=Idle, 1=Compact, 2=Medium, 3=Expanded, 4=Split+1
+    val style = if (settings.reducedMotion) AnimationStyle.NONE else settings.animationStyle
+    val targetScaleX = when (demoStage) {
+        0 -> 0.34f
+        1 -> 0.72f
+        2 -> 0.90f
+        3 -> 1.00f
+        else -> 0.84f
+    }
+    val targetScaleY = when (demoStage) {
+        0 -> 0.38f
+        1 -> 0.44f
+        2 -> 0.68f
+        3 -> 1.00f
+        else -> 0.44f
+    }
+    val animScaleX by animateFloatAsState(
+        targetValue = targetScaleX,
+        animationSpec = MotionTokens.openingEffectSpec(settings.openingEffect, style, settings.animationElasticity, settings.animationSpeed),
+        label = "demo_sx"
+    )
+    val animScaleY by animateFloatAsState(
+        targetValue = targetScaleY,
+        animationSpec = MotionTokens.openingEffectSpec(settings.openingEffect, style, settings.animationElasticity, settings.animationSpeed),
+        label = "demo_sy"
+    )
+    var demoEvent by remember { mutableStateOf("Music · Starlight") }
+    var demoColor by remember { mutableStateOf(IslandColors.AccentOrange) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Try It · ${style.label} (${settings.openingEffect.label})") },
+        text = {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(140.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Color(0xFF0A0A0E)),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .padding(top = 12.dp, start = 12.dp, end = 12.dp)
+                            .fillMaxWidth()
+                            .height(112.dp)
+                            .graphicsLayer {
+                                scaleX = animScaleX
+                                scaleY = animScaleY
+                            }
+                            .clip(RoundedCornerShape(36.dp))
+                            .background(Color(0xFF171923))
+                            .border(1.dp, demoColor.copy(alpha = 0.72f), RoundedCornerShape(36.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        AnimatedContent(targetState = demoStage to demoEvent, label = "demo_text") { (st, ev) ->
+                            val label = when (st) {
+                                0 -> "Idle Ring"
+                                1 -> "Compact · $ev"
+                                2 -> "Stage 1 · $ev"
+                                3 -> "Stage 2 · Expanded"
+                                else -> "Split Bubble +1"
+                            }
+                            Text(label, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        }
+                    }
+                }
+
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(
+                        0 to "Idle",
+                        1 to "Compact",
+                        2 to "Stage 1",
+                        3 to "Stage 2",
+                        4 to "Split +1"
+                    ).forEach { (st, title) ->
+                        FilterChip(
+                            selected = demoStage == st,
+                            onClick = {
+                                if (st > demoStage) app.soundManager.playExpand() else app.soundManager.playCollapse()
+                                demoStage = st
+                            },
+                            label = { Text(title, fontSize = 11.sp) }
+                        )
+                    }
+                }
+
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf(
+                        Triple("Music", "Music · Starlight", IslandColors.AccentPurple),
+                        Triple("Timer", "Timer · 04:30", IslandColors.AccentOrange),
+                        Triple("Charging", "Charging · 75%", IslandColors.AccentGreen),
+                        Triple("Low Bat", "Low Battery · 15%", IslandColors.AccentRed),
+                        Triple("Notif", "Message · Alex", IslandColors.AccentCyan)
+                    ).forEach { (chipLabel, evText, color) ->
+                        FilterChip(
+                            selected = demoEvent == evText,
+                            onClick = {
+                                app.soundManager.playTap()
+                                demoEvent = evText
+                                demoColor = color
+                                if (demoStage == 0) demoStage = 1
+                            },
+                            label = { Text(chipLabel, fontSize = 10.sp) }
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss) { Text("Close") }
+        }
+    )
 }
 
 @Composable

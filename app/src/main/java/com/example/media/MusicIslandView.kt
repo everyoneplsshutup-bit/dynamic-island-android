@@ -1,5 +1,6 @@
 package com.example.media
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -12,6 +13,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -33,6 +35,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Lyrics
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -56,9 +59,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
@@ -186,7 +192,12 @@ fun MusicExpandedView(
     onToggleLike: () -> Unit,
     onOpenPlayer: () -> Unit
 ) {
-    // Artwork subtle RenderThread breathing pulse + soft ambient halo while playing
+    // Dynamic artwork-derived accent takes precedence when track has cover art
+    val effectiveAccent = remember(state.artworkAccentArgb, accentColor) {
+        state.artworkAccentArgb?.let { Color(it) } ?: accentColor
+    }
+    var lyricsFocusMode by remember { mutableStateOf(false) }
+
     val infinite = rememberInfiniteTransition(label = "art_pulse")
     val playingPulse by infinite.animateFloat(
         initialValue = 1.0f,
@@ -208,27 +219,27 @@ fun MusicExpandedView(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(216.dp)
+            .height(220.dp)
             .drawBehind {
                 if (state.hasActiveSession) {
                     drawCircle(
                         brush = Brush.radialGradient(
                             colors = listOf(
-                                accentColor.copy(alpha = if (state.isPlaying) 0.16f else 0.06f),
+                                effectiveAccent.copy(alpha = if (state.isPlaying) 0.22f else 0.08f),
                                 Color.Transparent
                             ),
-                            center = Offset(38.dp.toPx(), 34.dp.toPx()),
-                            radius = 120.dp.toPx()
+                            center = Offset(42.dp.toPx(), 38.dp.toPx()),
+                            radius = 136.dp.toPx()
                         ),
-                        center = Offset(38.dp.toPx(), 34.dp.toPx()),
-                        radius = 120.dp.toPx()
+                        center = Offset(42.dp.toPx(), 38.dp.toPx()),
+                        radius = 136.dp.toPx()
                     )
                 }
             }
             .padding(horizontal = 14.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // Header: Artwork + Track Info + Live Equalizer + Like
+        // Header: Artwork + Track Info + Live Equalizer + Lyrics toggle + Like
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -242,8 +253,9 @@ fun MusicExpandedView(
                         scaleX = artScale
                         scaleY = artScale
                     }
-                    .clip(RoundedCornerShape(13.dp))
-                    .background(Color(0xFF1F2028)),
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0xFF1F2028))
+                    .border(0.75.dp, effectiveAccent.copy(alpha = 0.45f), RoundedCornerShape(14.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 if (state.albumArt != null) {
@@ -257,7 +269,7 @@ fun MusicExpandedView(
                     Icon(
                         imageVector = Icons.Filled.MusicNote,
                         contentDescription = "Music",
-                        tint = accentColor,
+                        tint = effectiveAccent,
                         modifier = Modifier.size(24.dp)
                     )
                 }
@@ -276,11 +288,11 @@ fun MusicExpandedView(
                 )
                 Text(
                     text = when {
-                        !state.hasNotificationAccess -> "Enable Notification Access for PixelMusic control"
+                        !state.hasNotificationAccess -> "Enable Notification Access for PixelMusic"
                         state.hasActiveSession -> listOf(state.artist, state.appLabel)
                             .filter { it.isNotBlank() }
                             .joinToString(" · ")
-                        else -> "Start playing in PixelMusic, Spotify, or YT Music"
+                        else -> "Start playing in PixelMusic or Spotify"
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     fontSize = 12.sp,
@@ -290,8 +302,24 @@ fun MusicExpandedView(
                 )
             }
 
-            Spacer(Modifier.width(8.dp))
-            MusicLiveEqualizer(isPlaying = state.isPlaying, accentColor = accentColor)
+            Spacer(Modifier.width(6.dp))
+            MusicLiveEqualizer(isPlaying = state.isPlaying, accentColor = effectiveAccent)
+
+            if (state.lyrics.isNotEmpty()) {
+                IconButton(
+                    onClick = { lyricsFocusMode = !lyricsFocusMode },
+                    modifier = Modifier
+                        .size(34.dp)
+                        .testTag("music_lyrics_toggle")
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Lyrics,
+                        contentDescription = "Toggle expanded lyrics",
+                        tint = if (lyricsFocusMode) effectiveAccent else IslandColors.TextSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
 
             if (state.supportsLike) {
                 IconButton(
@@ -309,24 +337,29 @@ fun MusicExpandedView(
             }
         }
 
-        // Live synced lyrics block (compactly capped to fit inside 216.dp)
+        // Live synced lyrics block with vertical edge fade
         if (state.lyrics.isNotEmpty()) {
             SyncedLyricsPanel(
                 lyrics = state.lyrics,
                 positionMs = state.positionMs,
-                accentColor = accentColor
+                accentColor = effectiveAccent,
+                expandedHeight = lyricsFocusMode,
+                onSeekTo = onSeekTo,
+                onToggleExpand = { lyricsFocusMode = !lyricsFocusMode }
             )
         }
 
-        // Knob Seek Bar (draggable knob on track + current / total time at ends)
-        KnobSeekBar(
-            positionMs = state.positionMs,
-            durationMs = state.durationMs,
-            accentColor = accentColor,
-            onSeekTo = onSeekTo
-        )
+        // Seekbar hides cleanly when Lyrics Focus Mode expands to preserve 220.dp cap
+        AnimatedVisibility(visible = !lyricsFocusMode || state.lyrics.isEmpty()) {
+            KnobSeekBar(
+                positionMs = state.positionMs,
+                durationMs = state.durationMs,
+                accentColor = effectiveAccent,
+                onSeekTo = onSeekTo
+            )
+        }
 
-        // Transport Controls Row (Shuffle/Repeat gracefully hidden if not offered)
+        // Transport Controls Row
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceEvenly,
@@ -342,7 +375,7 @@ fun MusicExpandedView(
                     Icon(
                         imageVector = Icons.Filled.Shuffle,
                         contentDescription = "Toggle shuffle",
-                        tint = if (state.isShuffled) accentColor else IslandColors.TextSecondary
+                        tint = if (state.isShuffled) effectiveAccent else IslandColors.TextSecondary
                     )
                 }
             }
@@ -369,7 +402,7 @@ fun MusicExpandedView(
                         scaleY = playBtnScale
                     }
                     .clip(CircleShape)
-                    .background(if (state.isPlaying) accentColor.copy(alpha = 0.24f) else Color.White.copy(alpha = 0.16f))
+                    .background(if (state.isPlaying) effectiveAccent.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.16f))
                     .clickable(onClick = onTogglePlayPause)
                     .testTag("music_play_pause_button"),
                 contentAlignment = Alignment.Center
@@ -377,7 +410,7 @@ fun MusicExpandedView(
                 Icon(
                     imageVector = if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                     contentDescription = if (state.isPlaying) "Pause" else "Play",
-                    tint = if (state.isPlaying) accentColor else IslandColors.TextPrimary,
+                    tint = if (state.isPlaying) effectiveAccent else IslandColors.TextPrimary,
                     modifier = Modifier.size(28.dp)
                 )
             }
@@ -406,7 +439,7 @@ fun MusicExpandedView(
                     Icon(
                         imageVector = Icons.Filled.Repeat,
                         contentDescription = "Cycle repeat (${state.repeatModeLabel})",
-                        tint = if (state.repeatModeLabel != "Off") accentColor else IslandColors.TextSecondary
+                        tint = if (state.repeatModeLabel != "Off") effectiveAccent else IslandColors.TextSecondary
                     )
                 }
             }
@@ -418,25 +451,43 @@ fun MusicExpandedView(
 private fun SyncedLyricsPanel(
     lyrics: List<LyricLine>,
     positionMs: Long,
-    accentColor: Color
+    accentColor: Color,
+    expandedHeight: Boolean,
+    onSeekTo: (Long) -> Unit,
+    onToggleExpand: () -> Unit
 ) {
     val activeIndex = remember(lyrics, positionMs) {
         val timed = lyrics.indexOfLast { it.timestampMs in 0..positionMs }
         if (timed >= 0) timed else 0
     }
     val listState = rememberLazyListState()
-    LaunchedEffect(activeIndex) {
+    LaunchedEffect(activeIndex, expandedHeight) {
         if (activeIndex in lyrics.indices) {
             listState.animateScrollToItem((activeIndex - 1).coerceAtLeast(0))
         }
     }
 
+    val panelHeight = if (expandedHeight) 104.dp else 46.dp
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(44.dp)
-            .clip(RoundedCornerShape(12.dp))
+            .height(panelHeight)
+            .clip(RoundedCornerShape(14.dp))
             .background(Color.White.copy(alpha = 0.06f))
+            .clickable(onClick = onToggleExpand)
+            .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+            .drawWithContent {
+                drawContent()
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        0.0f to Color.Transparent,
+                        0.18f to Color.Black,
+                        0.82f to Color.Black,
+                        1.0f to Color.Transparent
+                    ),
+                    blendMode = BlendMode.DstIn
+                )
+            }
             .padding(horizontal = 10.dp, vertical = 4.dp)
     ) {
         LazyColumn(state = listState) {
@@ -444,12 +495,17 @@ private fun SyncedLyricsPanel(
                 val isCurrent = index == activeIndex
                 Text(
                     text = line.text,
-                    color = if (isCurrent) accentColor else IslandColors.TextSecondary.copy(alpha = 0.65f),
-                    fontSize = if (isCurrent) 12.sp else 11.sp,
-                    fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                    color = if (isCurrent) accentColor else IslandColors.TextSecondary.copy(alpha = 0.58f),
+                    fontSize = if (isCurrent) 13.sp else 11.sp,
+                    fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.padding(vertical = 1.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            if (line.timestampMs >= 0L) onSeekTo(line.timestampMs) else onToggleExpand()
+                        }
+                        .padding(vertical = 2.dp)
                 )
             }
         }

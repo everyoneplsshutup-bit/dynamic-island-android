@@ -17,8 +17,11 @@ import androidx.work.workDataOf
 import com.example.island.AlertKind
 import com.example.island.IslandActivity
 import com.example.island.IslandController
+import com.example.system.EventKind
+import com.example.system.SettingsRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -32,6 +35,7 @@ class VaultManager(
     private val context: Context,
     private val vaultDao: VaultDao,
     private val islandController: IslandController,
+    private val settingsRepository: SettingsRepository? = null,
     private val onVaultAddedSound: () -> Unit = {}
 ) {
     private val vaultDir: File by lazy {
@@ -185,16 +189,20 @@ class VaultManager(
         scheduleExpiryWork(id, VaultConstants.EXPIRY_MILLIS)
         onVaultAddedSound()
 
-        islandController.upsertActivity(
-            IslandActivity.Alert(
-                id = "vault_saved_$id",
-                kind = AlertKind.VAULT_EXPIRING,
-                title = "Saved to Photo Vault",
-                subtitle = "$displayName · expires in 10 min"
-            ),
-            autoShowCompact = true,
-            autoDismissMs = 3500L
-        )
+        val vaultCfg = settingsRepository?.settingsFlow?.first()?.eventConfig(EventKind.VAULT)
+        if (vaultCfg?.enabled != false) {
+            islandController.upsertActivity(
+                IslandActivity.Alert(
+                    id = "vault_saved_$id",
+                    kind = AlertKind.VAULT_EXPIRING,
+                    title = "Saved to Photo Vault",
+                    subtitle = "$displayName · expires in 10 min"
+                ),
+                autoShowCompact = true,
+                autoDismissMs = 3400L,
+                autoExpandToFull = vaultCfg?.autoExpand == true
+            )
+        }
         return saved
     }
 

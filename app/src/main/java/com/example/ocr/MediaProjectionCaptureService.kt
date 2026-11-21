@@ -143,19 +143,10 @@ class MediaProjectionCaptureService : Service() {
             try {
                 if (app != null) {
                     if (mode == MediaProjectionPromptActivity.MODE_OCR_TIER_B) {
-                        val recognized = TierBMlKitOcr.recognizeCroppedElement(frame, bounds, tapX, tapY)
-                        if (!recognized.isNullOrBlank()) {
-                            app.clipboardMonitor.copyToClipboard(recognized)
-                            app.islandController.upsertActivity(
-                                IslandActivity.Alert(
-                                    id = "ocr_copied_${System.currentTimeMillis()}",
-                                    kind = AlertKind.OCR_COPIED,
-                                    title = "Text Copied (Tier B OCR)",
-                                    subtitle = recognized.take(56)
-                                ),
-                                autoShowCompact = true,
-                                autoDismissMs = 3500L
-                            )
+                        val recognized = TierBMlKitOcr.recognizeSelectionAtPoint(frame, bounds, tapX, tapY)
+                        if (recognized != null) {
+                            app.soundManager.playTap()
+                            app.islandController.setOcrSelection(recognized.selectionState)
                         } else {
                             app.islandController.showTransientBanner("No text detected in selected element")
                         }

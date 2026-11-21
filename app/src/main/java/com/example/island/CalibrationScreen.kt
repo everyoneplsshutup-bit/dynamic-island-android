@@ -1,6 +1,10 @@
 package com.example.island
 
 import android.os.Build
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +19,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -23,8 +28,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CenterFocusStrong
+import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,12 +54,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.DynamicIslandApp
 import com.example.system.IslandSettings
 import com.example.ui.theme.IslandColors
@@ -69,6 +79,13 @@ fun CalibrationScreen(
     val view = LocalView.current
     val density = LocalDensity.current
     var cutoutText by remember { mutableStateOf("Checking DisplayCutout...") }
+    var previewExpanded by remember { mutableStateOf(false) }
+
+    val previewScale by animateFloatAsState(
+        targetValue = if (previewExpanded) 1.0f else 0.92f,
+        animationSpec = spring(dampingRatio = 0.65f, stiffness = 420f),
+        label = "calib_preview_scale"
+    )
 
     DisposableEffect(Unit) {
         app.islandController.setCalibrationPreview(true)
@@ -84,7 +101,7 @@ fun CalibrationScreen(
                 val topDp = with(density) { rect.top.toDp().value.toInt() }
                 "Detected DisplayCutout: ${rect.width()}×${rect.height()} px (~${wDp}×${hDp} dp, top ${topDp} dp)"
             } else {
-                "No hardware DisplayCutout reported in this window (simulator/standard bezel)"
+                "No hardware DisplayCutout reported in this window (emulator/standard bezel)"
             }
         } else {
             cutoutText = "DisplayCutout API requires Android 9+"
@@ -113,41 +130,126 @@ fun CalibrationScreen(
                 .widthIn(max = 600.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Visual Live Pill & Cutout Preview Box
+            // Red Calibrate Mode Preview Box (island grows directly out of the red camera ring)
             Surface(
                 shape = RoundedCornerShape(24.dp),
                 color = Color(0xFF0A0A0E),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(140.dp)
+                    .height(172.dp)
+                    .border(1.dp, IslandColors.AccentRed.copy(alpha = 0.55f), RoundedCornerShape(24.dp))
             ) {
                 Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-                    Text(
-                        text = "Live Pill Ring Alignment Preview",
-                        color = IslandColors.TextSecondary,
-                        style = MaterialTheme.typography.labelMedium,
-                        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 14.dp)
-                    )
+                    // Precision alignment crosshairs
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val cx = size.width / 2f + settings.cutoutXOffsetDp.dp.toPx()
+                        val cy = settings.cutoutYOffsetDp.dp.toPx() + (settings.cutoutHeightDp.dp.toPx() / 2f) + 3.dp.toPx()
+                        drawLine(
+                            color = IslandColors.AccentRed.copy(alpha = 0.28f),
+                            start = Offset(cx, 0f),
+                            end = Offset(cx, size.height),
+                            strokeWidth = 1.dp.toPx()
+                        )
+                        drawLine(
+                            color = IslandColors.AccentRed.copy(alpha = 0.28f),
+                            start = Offset(0f, cy),
+                            end = Offset(size.width, cy),
+                            strokeWidth = 1.dp.toPx()
+                        )
+                    }
 
-                    // Simulated punch-hole + calibrated pill outline
-                    Box(
+                    // Red calibration ring or expanded capsule growing cleanly around camera cutout
+                    AnimatedContent(
+                        targetState = previewExpanded,
+                        label = "calib_expand_anim",
                         modifier = Modifier
                             .offset(
                                 x = settings.cutoutXOffsetDp.dp,
                                 y = settings.cutoutYOffsetDp.dp
                             )
-                            .clip(CircleShape)
-                            .background(Color.Black)
-                            .border(2.dp, IslandColors.AccentOrange, CircleShape)
-                            .padding(horizontal = 4.dp, vertical = 2.dp),
-                        contentAlignment = Alignment.Center
+                            .graphicsLayer {
+                                scaleX = previewScale
+                                scaleY = previewScale
+                            }
+                    ) { expanded ->
+                        if (!expanded) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(Color.Black)
+                                    .border(2.5.dp, IslandColors.AccentRed, CircleShape)
+                                    .padding(horizontal = 5.dp, vertical = 3.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(settings.cutoutWidthDp.dp, settings.cutoutHeightDp.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF20222A))
+                                )
+                            }
+                        } else {
+                            Column(
+                                modifier = Modifier
+                                    .widthIn(min = 240.dp, max = 300.dp)
+                                    .clip(RoundedCornerShape(32.dp))
+                                    .background(Color(0xFF14151C))
+                                    .border(2.dp, IslandColors.AccentRed, RoundedCornerShape(32.dp))
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Left Safe", color = Color.White, fontSize = 10.sp)
+                                    Box(
+                                        modifier = Modifier
+                                            .size(settings.cutoutWidthDp.dp, settings.cutoutHeightDp.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF22242E))
+                                            .border(1.5.dp, IslandColors.AccentRed, CircleShape)
+                                    )
+                                    Text("Right Safe", color = Color.White, fontSize = 10.sp)
+                                }
+                                Spacer(Modifier.height(6.dp))
+                                Text(
+                                    text = "Expanded content sits below camera void",
+                                    color = IslandColors.TextSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .size(settings.cutoutWidthDp.dp, settings.cutoutHeightDp.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF20222A))
+                        Text(
+                            text = "Red Calibrate Mode · X:${settings.cutoutXOffsetDp.toInt()} Y:${settings.cutoutYOffsetDp.toInt()}",
+                            color = IslandColors.AccentRed,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold
                         )
+                        Button(
+                            onClick = { previewExpanded = !previewExpanded },
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (previewExpanded) IslandColors.AccentRed else Color.White.copy(alpha = 0.14f),
+                                contentColor = Color.White
+                            ),
+                            shape = CircleShape,
+                            modifier = Modifier.height(32.dp).testTag("calibration_preview_expand")
+                        ) {
+                            Icon(Icons.Filled.OpenInFull, contentDescription = null, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(if (previewExpanded) "Shrink" else "Preview Expand", fontSize = 11.sp)
+                        }
                     }
                 }
             }

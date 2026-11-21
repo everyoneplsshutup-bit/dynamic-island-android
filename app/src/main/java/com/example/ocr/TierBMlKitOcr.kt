@@ -2,6 +2,8 @@ package com.example.ocr
 
 import android.graphics.Bitmap
 import android.graphics.Rect
+import com.example.island.OcrSelectionState
+import com.example.island.OcrTextToken
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.Text
 import com.google.mlkit.vision.text.TextRecognition
@@ -11,22 +13,27 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
 import kotlin.math.hypot
 
+data class TierBSelectionResult(
+    val text: String,
+    val selectionState: OcrSelectionState
+)
+
 /**
  * Tier B OCR: Opt-in fallback only when Tier A finds no text.
  * Crops strictly around the pressed element / tap point, runs bundled on-device ML Kit
- * (Latin + Devanagari), extracts ONLY the pressed line of text, and immediately discards all bitmaps.
+ * (Latin + Devanagari), builds word-level tokens in screen coordinates for interactive
+ * iOS-style handle selection, and immediately recycles all bitmaps.
  */
 object TierBMlKitOcr {
 
-    suspend fun recognizeCroppedElement(
+    suspend fun recognizeSelectionAtPoint(
         fullFrame: Bitmap,
         elementBounds: Rect?,
         tapX: Int = -1,
         tapY: Int = -1
-    ): String? {
+    ): TierBSelectionResult? {
         val cropRect = resolveFocusedCropRect(fullFrame.width, fullFrame.height, elementBounds, tapX, tapY)
         val cropped = cropSafely(fullFrame, cropRect)
-        // Immediately discard the full frame if cropped is a separate bitmap
         if (cropped !== fullFrame && !fullFrame.isRecycled) {
             fullFrame.recycle()
         }
@@ -36,12 +43,12 @@ object TierBMlKitOcr {
         return try {
             val inputImage = InputImage.fromBitmap(cropped, 0)
             val latinResult = runLatinRecognizer(inputImage)
-            val latinMatch = latinResult?.let { selectPressedText(it, localTapX, localTapY) }
-            if (!latinMatch.isNullOrBlank()) {
+            val latinMatch = latinResult?.let { selectPressedLine(it, cropRect, localTapX, localTapY, tapX, tapY) }
+            if (latinMatch != null) {
                 latinMatch
             } else {
                 val devResult = runDevanagariRecognizer(inputImage)
-                devResult?.let { selectPressedText(it, localTapX, localTapY) }
+                devResult?.let { selectPressedLine(it, cropRect, localTapX, localTapY, tapX, tapY) }
             }
         } finally {
             if (!cropped.isRecycled) {
@@ -49,6 +56,13 @@ object TierBMlKitOcr {
             }
         }
     }
+
+    suspend fun recognizeCroppedElement(
+        fullFrame: Bitmap,
+        elementBounds: Rect?,
+        tapX: Int = -1,
+        tapY: Int = -1
+    ): String? = recognizeSelectionAtPoint(fullFrame, elementBounds, tapX, tapY)?.text
 
     private fun resolveFocusedCropRect(
         bitmapW: Int,
@@ -78,20 +92,21 @@ object TierBMlKitOcr {
         return Rect(left, top, right, bottom)
     }
 
-    private fun selectPressedText(visionText: Text, localX: Int, localY: Int): String? {
+    private fun selectPressedLine(
+        visionText: Text,
+        cropRect: Rect,
+        localX: Int,
+        localY: Int,
+        rawX: Int,
+        rawY: Int
+    ): TierBSelectionResult? {
         val allLines = visionText.textBlocks.flatMap { it.lines }
         if (allLines.isEmpty()) return null
 
-        // 1. Direct element hit inside a specific word/element or line
-        for (line in allLines) {
+        val hitLine = allLines.firstOrNull { line ->
             val box = line.boundingBox
-            if (box != null && box.contains(localX, localY)) {
-                return line.text.trim().takeIf { it.isNotEmpty() }
-            }
-        }
-
-        // 2. Closest line to the pressed point within reasonable touch radius (120px)
-        val nearest = allLines.minByOrNull { line ->
+            box != null && box.contains(localX, localY)
+        } ?: allLines.minByOrNull { line ->
             val box = line.boundingBox ?: return@minByOrNull Double.MAX_VALUE
             val dx = when {
                 localX < box.left -> (box.left - localX).toDouble()
@@ -106,7 +121,66 @@ object TierBMlKitOcr {
             hypot(dx, dy)
         } ?: return null
 
-        return nearest.text.trim().takeIf { it.isNotEmpty() }
+        val lineText = hitLine.text.trim().takeIf { it.isNotEmpty() } ?: return null
+        val screenLineRect = hitLine.boundingBox?.let {
+            Rect(cropRect.left + it.left, cropRect.top + it.top, cropRect.left + it.right, cropRect.top + it.bottom)
+        } ?: cropRect
+
+        val elements = hitLine.elements
+        val selectionState = if (elements.isNotEmpty()) {
+            var cursor = 0
+            val tokens = mutableListOf<OcrTextToken>()
+            for (el in elements) {
+                val word = el.text.trim()
+                if (word.isEmpty()) continue
+                val startChar = lineText.indexOf(word, startIndex = cursor).takeIf { it >= 0 } ?: cursor
+                val endChar = (startChar + word.length).coerceAtMost(lineText.length)
+                cursor = endChar
+                val eb = el.boundingBox
+                val tokenRect = if (eb != null) {
+                    Rect(cropRect.left + eb.left, cropRect.top + eb.top, cropRect.left + eb.right, cropRect.top + eb.bottom)
+                } else {
+                    screenLineRect
+                }
+                tokens.add(
+                    OcrTextToken(
+                        text = word,
+                        startChar = startChar,
+                        endChar = endChar,
+                        leftPx = tokenRect.left,
+                        topPx = tokenRect.top,
+                        rightPx = tokenRect.right,
+                        bottomPx = tokenRect.bottom
+                    )
+                )
+            }
+            val hitTokenIdx = tokens.indices.minByOrNull { idx ->
+                val tok = tokens[idx]
+                hypot(((tok.leftPx + tok.rightPx) / 2.0) - rawX, ((tok.topPx + tok.bottomPx) / 2.0) - rawY)
+            } ?: 0
+            OcrSelectionState(
+                fullText = lineText,
+                elementBounds = screenLineRect,
+                tokens = tokens.ifEmpty {
+                    TierAAccessibilityReader.buildSelectionState(lineText, screenLineRect, rawX, rawY, isFromTierB = true).tokens
+                },
+                startTokenIndex = hitTokenIdx,
+                endTokenIndex = hitTokenIdx,
+                anchorX = rawX.toFloat(),
+                anchorY = rawY.toFloat(),
+                isFromTierB = true
+            )
+        } else {
+            TierAAccessibilityReader.buildSelectionState(
+                text = lineText,
+                bounds = screenLineRect,
+                tapX = rawX,
+                tapY = rawY,
+                isFromTierB = true
+            )
+        }
+
+        return TierBSelectionResult(lineText, selectionState)
     }
 
     private fun cropSafely(bitmap: Bitmap, bounds: Rect): Bitmap {
