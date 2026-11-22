@@ -27,7 +27,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Search
@@ -233,17 +232,6 @@ fun FloatingSidebarOverlay(
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     MiniWindowShortcut(
-                        label = "Calc",
-                        icon = Icons.Filled.Calculate,
-                        accentColor = effectiveAccent,
-                        modifier = Modifier.weight(1f),
-                        testTag = "floating_mini_calc"
-                    ) {
-                        app.soundManager.playExpand()
-                        app.islandController.setFloatingMiniTab(IslandTab.CALC)
-                        app.islandController.collapse()
-                    }
-                    MiniWindowShortcut(
                         label = "Notes",
                         icon = Icons.Filled.Description,
                         accentColor = effectiveAccent,
@@ -262,8 +250,8 @@ fun FloatingSidebarOverlay(
                         testTag = "floating_mini_timer"
                     ) {
                         app.soundManager.playExpand()
-                        app.islandController.setFloatingMiniTab(IslandTab.TIMER)
-                        app.islandController.collapse()
+                        app.islandController.setFloatingSidebarOpen(false)
+                        app.islandController.expand(IslandTab.TIMER)
                     }
                     MiniWindowShortcut(
                         label = "Search",

@@ -572,6 +572,16 @@ class IslandController(
     }
 
     fun setFloatingMiniTab(tab: IslandTab?) {
+        if (tab == IslandTab.TIMER) {
+            _state.update {
+                it.copy(
+                    activeFloatingMiniTab = null,
+                    isFloatingSidebarOpen = false
+                )
+            }
+            expand(IslandTab.TIMER)
+            return
+        }
         _state.update {
             it.copy(
                 activeFloatingMiniTab = tab,

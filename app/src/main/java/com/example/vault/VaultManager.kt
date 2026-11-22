@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -33,6 +34,7 @@ import java.io.FileOutputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import kotlin.math.roundToInt
 
 class VaultManager(
     private val context: Context,
@@ -100,6 +102,8 @@ class VaultManager(
                     }
                     markIngested(displayName, namePrefix)
                     insertAndSchedule(destFile, "image/png", displayName, sourceType)
+                }.onFailure {
+                    android.util.Log.e("VaultManager", "saveBitmap failed", it)
                 }.getOrNull()
             }
         }
@@ -227,23 +231,27 @@ class VaultManager(
         scheduleExpiryWork(id, VaultConstants.EXPIRY_MILLIS)
     }
 
-    suspend fun purgeItemNow(id: Long) = withContext(Dispatchers.IO) {
+    suspend fun purgeItemNow(id: Long): Unit = withContext(Dispatchers.IO) {
         val item = vaultDao.getById(id)
         if (item != null) {
             runCatching { File(item.filePath).delete() }
             vaultDao.deleteById(id)
         }
-        WorkManager.getInstance(context).cancelUniqueWork("vault_expire_$id")
-        WorkManager.getInstance(context).cancelUniqueWork("vault_purge_$id")
+        runCatching {
+            WorkManager.getInstance(context).cancelUniqueWork("vault_expire_$id")
+            WorkManager.getInstance(context).cancelUniqueWork("vault_purge_$id")
+        }
     }
 
-    suspend fun clearAllActiveItemsImmediate() = withContext(Dispatchers.IO) {
+    suspend fun clearAllActiveItemsImmediate(): Unit = withContext(Dispatchers.IO) {
         val existing = vaultDao.getActiveOldestFirst()
         existing.forEach { item ->
             runCatching { File(item.filePath).delete() }
             vaultDao.deleteById(item.id)
-            WorkManager.getInstance(context).cancelUniqueWork("vault_expire_${item.id}")
-            WorkManager.getInstance(context).cancelUniqueWork("vault_purge_${item.id}")
+            runCatching {
+                WorkManager.getInstance(context).cancelUniqueWork("vault_expire_${item.id}")
+                WorkManager.getInstance(context).cancelUniqueWork("vault_purge_${item.id}")
+            }
         }
     }
 
@@ -299,6 +307,64 @@ class VaultManager(
         }.getOrDefault(false)
     }
 
+    suspend fun cropVaultItem(
+        itemId: Long,
+        leftFrac: Float,
+        topFrac: Float,
+        rightFrac: Float,
+        bottomFrac: Float
+    ): VaultItemEntity? = withContext(Dispatchers.IO) {
+        ingestMutex.withLock {
+            runCatching {
+                val item = vaultDao.getById(itemId) ?: return@withContext null
+                val srcFile = File(item.filePath)
+                if (!srcFile.exists()) return@withContext null
+
+                val srcBitmap = BitmapFactory.decodeFile(srcFile.absolutePath) ?: return@withContext null
+                val w = srcBitmap.width
+                val h = srcBitmap.height
+                if (w <= 1 || h <= 1) {
+                    srcBitmap.recycle()
+                    return@withContext null
+                }
+
+                val l = leftFrac.coerceIn(0f, 0.92f)
+                val t = topFrac.coerceIn(0f, 0.92f)
+                val r = rightFrac.coerceIn(l + 0.08f, 1f)
+                val b = bottomFrac.coerceIn(t + 0.08f, 1f)
+
+                val x = (l * w).roundToInt().coerceIn(0, w - 1)
+                val y = (t * h).roundToInt().coerceIn(0, h - 1)
+                val cropW = ((r - l) * w).roundToInt().coerceIn(1, w - x)
+                val cropH = ((b - t) * h).roundToInt().coerceIn(1, h - y)
+
+                val cropped = Bitmap.createBitmap(srcBitmap, x, y, cropW, cropH)
+                if (cropped !== srcBitmap) {
+                    srcBitmap.recycle()
+                }
+
+                val destFile = File(vaultDir, "${UUID.randomUUID()}.png")
+                FileOutputStream(destFile).use { out ->
+                    cropped.compress(Bitmap.CompressFormat.PNG, 95, out)
+                }
+                cropped.recycle()
+
+                if (!destFile.exists() || destFile.length() == 0L) {
+                    destFile.delete()
+                    return@withContext null
+                }
+
+                vaultDao.updateFilePath(item.id, destFile.absolutePath, "image/png")
+                if (srcFile.absolutePath != destFile.absolutePath) {
+                    runCatching { srcFile.delete() }
+                }
+                item.copy(filePath = destFile.absolutePath, mimeType = "image/png")
+            }.onFailure {
+                android.util.Log.e("VaultManager", "cropVaultItem failed", it)
+            }.getOrNull()
+        }
+    }
+
     suspend fun saveItemToGallery(item: VaultItemEntity): Boolean = withContext(Dispatchers.IO) {
         val src = File(item.filePath)
         if (!src.exists()) return@withContext false
@@ -328,27 +394,31 @@ class VaultManager(
     }
 
     fun scheduleExpiryWork(itemId: Long, delayMs: Long) {
-        val req = OneTimeWorkRequestBuilder<VaultExpiryWorker>()
-            .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
-            .setInputData(workDataOf(VaultExpiryWorker.KEY_ITEM_ID to itemId))
-            .build()
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            "vault_expire_$itemId",
-            ExistingWorkPolicy.REPLACE,
-            req
-        )
+        runCatching {
+            val req = OneTimeWorkRequestBuilder<VaultExpiryWorker>()
+                .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
+                .setInputData(workDataOf(VaultExpiryWorker.KEY_ITEM_ID to itemId))
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                "vault_expire_$itemId",
+                ExistingWorkPolicy.REPLACE,
+                req
+            )
+        }
     }
 
     fun schedulePurgeWork(itemId: Long, delayMs: Long) {
-        val req = OneTimeWorkRequestBuilder<VaultPurgeWorker>()
-            .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
-            .setInputData(workDataOf(VaultExpiryWorker.KEY_ITEM_ID to itemId))
-            .build()
-        WorkManager.getInstance(context).enqueueUniqueWork(
-            "vault_purge_$itemId",
-            ExistingWorkPolicy.REPLACE,
-            req
-        )
+        runCatching {
+            val req = OneTimeWorkRequestBuilder<VaultPurgeWorker>()
+                .setInitialDelay(delayMs, TimeUnit.MILLISECONDS)
+                .setInputData(workDataOf(VaultExpiryWorker.KEY_ITEM_ID to itemId))
+                .build()
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                "vault_purge_$itemId",
+                ExistingWorkPolicy.REPLACE,
+                req
+            )
+        }
     }
 
     suspend fun clearAllVaultFiles() = withContext(Dispatchers.IO) {

@@ -18,7 +18,6 @@ import com.example.notes.VoiceMemoManager
 import com.example.search.SearchEngine
 import com.example.system.AppDatabase
 import com.example.system.BatteryMonitor
-import com.example.system.CalculatorEngine
 import com.example.system.IslandSoundManager
 import com.example.system.QuickTogglesManager
 import com.example.system.SettingsRepository
@@ -47,8 +46,6 @@ class DynamicIslandApp : Application() {
         private set
     lateinit var islandController: IslandController
         private set
-    lateinit var calculatorEngine: CalculatorEngine
-        private set
     lateinit var timerEngine: TimerEngine
         private set
     lateinit var batteryMonitor: BatteryMonitor
@@ -76,7 +73,6 @@ class DynamicIslandApp : Application() {
         soundManager = IslandSoundManager(this, settingsRepository)
         database = AppDatabase.getInstance(this)
         islandController = IslandController(onSoundEvent = { event -> soundManager.play(event) })
-        calculatorEngine = CalculatorEngine()
         timerEngine = TimerEngine(this, islandController, settingsRepository, onTimerCompletedSound = { soundManager.playTimerDone() })
         batteryMonitor = BatteryMonitor(this, islandController, settingsRepository)
         quickTogglesManager = QuickTogglesManager(this)

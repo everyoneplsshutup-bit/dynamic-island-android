@@ -73,6 +73,18 @@ object DeadZoneGeometry {
     const val COMPACT_PILL_MIN_HEIGHT_DP = 37f
     const val LANDSCAPE_SLOT_HEIGHT_DP = 44f
 
+    // Alex Hard Rule — Compact Expansion Limits
+    const val MEDIUM_MAX_WIDTH_DP = 320f
+    const val MEDIUM_MAX_HEIGHT_DP = 120f
+    const val FULL_MAX_WIDTH_DP = 360f
+    const val FULL_MAX_HEIGHT_DP = 160f
+
+    fun isCompactExpansionWithinCap(widthDp: Float, heightDp: Float, isExpanded: Boolean): Boolean {
+        val maxW = if (isExpanded) FULL_MAX_WIDTH_DP else MEDIUM_MAX_WIDTH_DP
+        val maxH = if (isExpanded) FULL_MAX_HEIGHT_DP else MEDIUM_MAX_HEIGHT_DP
+        return widthDp <= maxW + 0.5f && heightDp <= maxH + 0.5f
+    }
+
     /**
      * Pure geometric check required by CameraDeadZoneTest.
      * Verifies:

@@ -132,6 +132,14 @@ class SearchEngine(
         list
     }
 
+    fun refreshApps() {
+        cachedApps = null
+        scope.launch {
+            getInstalledApps(forceRefresh = true)
+            _appsVersion.value = _appsVersion.value + 1
+        }
+    }
+
     suspend fun search(query: String): SearchResults = withContext(Dispatchers.IO) {
         val trimmed = query.trim()
         val hasContactsPerm = ContextCompat.checkSelfPermission(

@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -273,6 +274,95 @@ class CameraDeadZoneTest {
                 root = composeRule.onRoot().fetchSemanticsNode(),
                 zone = zone,
                 contextLabel = if (isExpanded) "ExpandedCard[holeW=$holeW]" else "MediumPill[holeW=$holeW]"
+            )
+        }
+    }
+
+    @Test
+    fun `Alex compact expansion caps Medium max 320x120 and Full max 360x160 across all tabs`() {
+        val app = composeRule.activity.application as DynamicIslandApp
+        val densityVal = 2.75f
+        val screenWidthDp = 393f
+        val zone = DeadZoneGeometry.fromSyntheticHole(
+            holeWidthDp = 26f,
+            holeHeightDp = 33f,
+            screenWidthDp = screenWidthDp,
+            density = densityVal
+        )
+        val settings = IslandSettings(cutoutWidthDp = 26f, cutoutHeightDp = 33f)
+
+        // Pair(isExpanded, Pair(tab, showMoreRow))
+        val cases = mutableListOf<Pair<Boolean, Pair<IslandTab, Boolean>>>()
+        cases.add(false to (IslandTab.MUSIC to false))
+        IslandTab.entries.forEach { tab ->
+            cases.add(true to (tab to false))
+            cases.add(true to (tab to true))
+        }
+        val activeCase = androidx.compose.runtime.mutableStateOf(cases.first())
+
+        composeRule.setContent {
+            val (isExpanded, pair) = activeCase.value
+            val (tab, showMore) = pair
+            val state = IslandState(
+                mode = if (isExpanded) IslandMode.EXPANDED else IslandMode.MEDIUM,
+                activeTab = tab,
+                isMoreRowOpen = showMore,
+                activityQueue = listOf(
+                    IslandActivity.Music(
+                        packageName = "com.unshoo.pixelmusic",
+                        title = "Track",
+                        artist = "Artist",
+                        isPlaying = true,
+                        positionMs = 10_000L,
+                        durationMs = 180_000L
+                    )
+                )
+            )
+            CompositionLocalProvider(LocalDensity provides Density(densityVal, fontScale = 1f)) {
+                Box(
+                    modifier = Modifier.width(screenWidthDp.dp),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    if (!isExpanded) {
+                        MediumPillView(
+                            app = app,
+                            state = state,
+                            settings = settings,
+                            exclusionZone = zone,
+                            accentColor = Color(0xFFFF9F0A),
+                            mediaState = MediaUiState(
+                                title = "Track",
+                                artist = "Artist",
+                                isPlaying = true,
+                                appLabel = "Music"
+                            ),
+                            timerState = TimerUiState()
+                        )
+                    } else {
+                        ExpandedIslandCard(
+                            app = app,
+                            state = state,
+                            settings = settings,
+                            exclusionZone = zone,
+                            accentColor = Color(0xFFFF9F0A)
+                        )
+                    }
+                }
+            }
+        }
+
+        cases.forEach { case ->
+            val (isExpanded, pair) = case
+            val (tab, showMore) = pair
+            composeRule.runOnUiThread { activeCase.value = case }
+            composeRule.waitForIdle()
+            val tag = if (isExpanded) "expanded_island_card" else "medium_stage1_pill"
+            val bounds = composeRule.onNodeWithTag(tag).fetchSemanticsNode().boundsInRoot
+            val wDp = bounds.width / densityVal
+            val hDp = bounds.height / densityVal
+            assertTrue(
+                "Compact expansion cap violated for isExpanded=$isExpanded tab=$tab showMore=$showMore: ${wDp}dp x ${hDp}dp",
+                DeadZoneGeometry.isCompactExpansionWithinCap(wDp, hDp, isExpanded = isExpanded)
             )
         }
     }

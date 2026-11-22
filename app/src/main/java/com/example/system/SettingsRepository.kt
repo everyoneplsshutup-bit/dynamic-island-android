@@ -125,10 +125,9 @@ enum class IslandTab(
 ) {
     SEARCH("Search", "Apps, contacts, notes & inline math", true),
     MUSIC("Music", "On-device media player & local lyrics", true),
-    CALC("Calc", "Compact iOS-style calculator", true),
     TIMER("Timer", "Countdown rings, sleep dial & stopwatch", true),
     TOOLS("Tools", "Torch beam, Keep Awake, brightness & OCR", true),
-    VAULT("Shelf", "10-minute auto-expiring photo shelf", false),
+    VAULT("Shelf", "10-minute auto-expiring photo shelf", true),
     CLIPS("Clips", "Foreground-only saved clip history", false),
     NOTES("Notes", "On-device auto-saved quick notes", false),
     MEMO("Memo", "One-tap voice memo recorder", false),
@@ -197,16 +196,15 @@ data class IslandSettings(
     val enabledTabs: List<IslandTab> = listOf(
         IslandTab.SEARCH,
         IslandTab.MUSIC,
-        IslandTab.CALC,
         IslandTab.TIMER,
         IslandTab.TOOLS,
         IslandTab.VAULT,
         IslandTab.NOTES,
+        IslandTab.CLIPS,
         IslandTab.ALERTS
     ),
     val musicEnabled: Boolean = true,
     val timerEnabled: Boolean = true,
-    val calculatorEnabled: Boolean = true,
     val searchEnabled: Boolean = true,
     val notificationsEnabled: Boolean = true,
     val batteryEnabled: Boolean = true,
@@ -263,7 +261,6 @@ data class IslandSettings(
     fun isTabMasterEnabled(tab: IslandTab): Boolean = when (tab) {
         IslandTab.SEARCH -> searchEnabled
         IslandTab.MUSIC -> musicEnabled
-        IslandTab.CALC -> calculatorEnabled
         IslandTab.TIMER -> timerEnabled
         IslandTab.TOOLS -> togglesEnabled
         IslandTab.VAULT -> vaultEnabled
@@ -328,7 +325,6 @@ class SettingsRepository(private val context: Context) {
         val ENABLED_TABS = stringPreferencesKey("enabled_tabs_json")
         val MUSIC_ENABLED = booleanPreferencesKey("music_enabled")
         val TIMER_ENABLED = booleanPreferencesKey("timer_enabled")
-        val CALC_ENABLED = booleanPreferencesKey("calc_enabled")
         val SEARCH_ENABLED = booleanPreferencesKey("search_enabled")
         val NOTIF_ENABLED = booleanPreferencesKey("notif_enabled")
         val BATTERY_ENABLED = booleanPreferencesKey("battery_enabled")
@@ -409,12 +405,15 @@ class SettingsRepository(private val context: Context) {
             lockScreenPreset = prefs[Keys.LOCK_SCREEN_PRESET]?.let { runCatching { LockScreenPreset.valueOf(it) }.getOrNull() } ?: default.lockScreenPreset,
             alertsDwellMs = (prefs[Keys.ALERTS_DWELL_MS] ?: default.alertsDwellMs).coerceIn(4000L, 10000L),
 
-            enabledTabs = prefs[Keys.ENABLED_TABS]?.let {
-                runCatching { json.decodeFromString<List<IslandTab>>(it) }.getOrNull()
+            enabledTabs = prefs[Keys.ENABLED_TABS]?.let { raw ->
+                runCatching {
+                    json.decodeFromString<List<String>>(raw).mapNotNull { name ->
+                        runCatching { IslandTab.valueOf(name) }.getOrNull()
+                    }
+                }.getOrNull()
             }?.take(IslandSettings.MAX_ISLAND_FEATURES) ?: default.enabledTabs,
             musicEnabled = prefs[Keys.MUSIC_ENABLED] ?: default.musicEnabled,
             timerEnabled = prefs[Keys.TIMER_ENABLED] ?: default.timerEnabled,
-            calculatorEnabled = prefs[Keys.CALC_ENABLED] ?: default.calculatorEnabled,
             searchEnabled = prefs[Keys.SEARCH_ENABLED] ?: default.searchEnabled,
             notificationsEnabled = prefs[Keys.NOTIF_ENABLED] ?: default.notificationsEnabled,
             batteryEnabled = prefs[Keys.BATTERY_ENABLED] ?: default.batteryEnabled,
@@ -512,7 +511,6 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.ENABLED_TABS] = json.encodeToString(s.enabledTabs.take(IslandSettings.MAX_ISLAND_FEATURES))
             prefs[Keys.MUSIC_ENABLED] = s.musicEnabled
             prefs[Keys.TIMER_ENABLED] = s.timerEnabled
-            prefs[Keys.CALC_ENABLED] = s.calculatorEnabled
             prefs[Keys.SEARCH_ENABLED] = s.searchEnabled
             prefs[Keys.NOTIF_ENABLED] = s.notificationsEnabled
             prefs[Keys.BATTERY_ENABLED] = s.batteryEnabled

@@ -157,7 +157,7 @@ private val settingsIndex = listOf(
     SettingsSearchEntry("Lock-Screen Preset", "Minimal, Hide Message Text, or Hidden", "Pill › Lock Screen", SettingsGroup.PILL),
     SettingsSearchEntry("Per-Event Switches", "Group & per-event auto-expand behavior", "Features › Events", SettingsGroup.FEATURES),
     SettingsSearchEntry("Customise Island", "Pick & reorder up to 8 island features", "Features › Chooser", SettingsGroup.FEATURES),
-    SettingsSearchEntry("Master Feature Toggles", "Enable/disable Music, Timer, Calc, Shelf, OCR & more", "Features › Toggles", SettingsGroup.FEATURES),
+    SettingsSearchEntry("Master Feature Toggles", "Enable/disable Music, Timer, Search, Shelf, OCR & more", "Features › Toggles", SettingsGroup.FEATURES),
     SettingsSearchEntry("Floating-Window Apps", "Pick apps for MIUI sidebar & freeform launch", "Features › Floating", SettingsGroup.FEATURES),
     SettingsSearchEntry("Pinned Quick Launch Apps", "Choose shortcuts shown in expanded island", "Features › Shortcuts", SettingsGroup.FEATURES),
     SettingsSearchEntry("Screen Reading / OCR", "Strictly opt-in, OFF by default", "Privacy › Screen Reading", SettingsGroup.PRIVACY),
@@ -957,12 +957,7 @@ fun SettingsGroupDetailScreen(
                         }
                     }
                     item {
-                        SwitchRow("iOS Calculator", "Working 4×5 grid calculator", settings.calculatorEnabled) { c ->
-                            scope.launch { app.settingsRepository.update { it.copy(calculatorEnabled = c) } }
-                        }
-                    }
-                    item {
-                        SwitchRow("Search Launcher", "Apps, contacts, notes, math & Google handoff", settings.searchEnabled) { c ->
+                        SwitchRow("Search Launcher", "Apps, pinned apps, contacts, notes & Google handoff", settings.searchEnabled) { c ->
                             scope.launch { app.settingsRepository.update { it.copy(searchEnabled = c) } }
                         }
                     }
@@ -1423,8 +1418,9 @@ private fun InteractiveMotionDemoDialog(
                     Box(
                         modifier = Modifier
                             .padding(top = 12.dp, start = 12.dp, end = 12.dp)
+                            .widthIn(max = 320.dp)
                             .fillMaxWidth()
-                            .height(112.dp)
+                            .height(92.dp)
                             .graphicsLayer {
                                 scaleX = animScaleX
                                 scaleY = animScaleY

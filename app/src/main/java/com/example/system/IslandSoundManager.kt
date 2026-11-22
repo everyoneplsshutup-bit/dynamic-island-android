@@ -32,10 +32,10 @@ enum class IslandSoundEvent {
 }
 
 /**
- * Low-latency SoundPool earcon engine for Build #5.
+ * Low-latency SoundPool earcon engine for Build #5+.
  * - Preloads all 13 single-family assets at startup; maxStreams = 4; never requests AudioFocus.
  * - Priority hierarchy: HERO (TIMER_DONE = 10, fixed 1.0x pitch) > Confirm (6) > Nav (4) > Micro-taps (1).
- * - Stop-before-replay for TAP and CALC_KEY so rapid taps stay crisp without stacking into a wash.
+ * - Stop-before-replay + 28ms rapid-tap debounce keeps fast navigation smooth and never metallic.
  */
 class IslandSoundManager(
     context: Context,
@@ -47,6 +47,7 @@ class IslandSoundManager(
     private val loadedSampleIds = ConcurrentHashMap.newKeySet<Int>()
     private val soundIds = ConcurrentHashMap<IslandSoundEvent, Int>()
     private val activeStreams = ConcurrentHashMap<IslandSoundEvent, Int>()
+    private val lastPlayedMs = ConcurrentHashMap<IslandSoundEvent, Long>()
 
     @Volatile
     private var soundEnabled: Boolean = true
@@ -128,7 +129,22 @@ class IslandSoundManager(
             return false
         }
 
-        // Stop-before-replay for high-frequency taps so 10x calc taps stay crisp
+        // Prevent rapid double-triggers within 28ms on micro-taps/toggles so nothing ever chatters
+        val nowMs = android.os.SystemClock.uptimeMillis()
+        if (event == IslandSoundEvent.TAP ||
+            event == IslandSoundEvent.CALC_KEY ||
+            event == IslandSoundEvent.MUSIC_NEXT ||
+            event == IslandSoundEvent.TOGGLE_ON ||
+            event == IslandSoundEvent.TOGGLE_OFF
+        ) {
+            val prevMs = lastPlayedMs[event] ?: 0L
+            if (nowMs - prevMs < 28L) {
+                return false
+            }
+        }
+        lastPlayedMs[event] = nowMs
+
+        // Stop-before-replay for high-frequency taps so rapid taps stay crisp without stacking
         if (event == IslandSoundEvent.TAP || event == IslandSoundEvent.CALC_KEY) {
             activeStreams[event]?.let { prevStream ->
                 if (prevStream != 0) runCatching { pool.stop(prevStream) }
@@ -150,21 +166,28 @@ class IslandSoundManager(
             IslandSoundEvent.MUSIC_PAUSE -> 1
         }
 
-        // Pitch rate per Point 5 recipes
+        // Musical micro-pitch variation: hero/expand/collapse lock 1.00x pure tuning; taps shimmer subtly (+-1.5%)
         val rate = when (event) {
-            IslandSoundEvent.TIMER_DONE -> 1.0f // Fixed 1.00x hero chime
-            IslandSoundEvent.CALC_KEY, IslandSoundEvent.MUSIC_NEXT -> 0.97f + (Math.random().toFloat() * 0.06f) // +-3%
-            IslandSoundEvent.TAP, IslandSoundEvent.TOGGLE_ON, IslandSoundEvent.TOGGLE_OFF -> 0.98f + (Math.random().toFloat() * 0.04f) // +-2%
-            else -> 0.99f + (Math.random().toFloat() * 0.02f) // +-1%
+            IslandSoundEvent.TIMER_DONE,
+            IslandSoundEvent.EXPAND,
+            IslandSoundEvent.COLLAPSE,
+            IslandSoundEvent.TIMER_SET -> 1.0f
+            IslandSoundEvent.TAP,
+            IslandSoundEvent.CALC_KEY,
+            IslandSoundEvent.MUSIC_NEXT,
+            IslandSoundEvent.TOGGLE_ON,
+            IslandSoundEvent.TOGGLE_OFF -> 0.985f + (Math.random().toFloat() * 0.03f)
+            else -> 0.992f + (Math.random().toFloat() * 0.016f)
         }
 
-        // Gain jitter: +-0.5 dB for hero/nav, +-1 dB for frequent micro-taps
+        // Clean amplitude headroom (0.94..1.00x) to stay velvety and never clip
         val gainJitter = when (event) {
-            IslandSoundEvent.TAP, IslandSoundEvent.CALC_KEY, IslandSoundEvent.MUSIC_NEXT,
-            IslandSoundEvent.TOGGLE_ON, IslandSoundEvent.TOGGLE_OFF ->
-                0.891f + (Math.random().toFloat() * 0.231f)
-            else ->
-                0.944f + (Math.random().toFloat() * 0.118f)
+            IslandSoundEvent.TAP,
+            IslandSoundEvent.CALC_KEY,
+            IslandSoundEvent.MUSIC_NEXT,
+            IslandSoundEvent.TOGGLE_ON,
+            IslandSoundEvent.TOGGLE_OFF -> 0.94f + (Math.random().toFloat() * 0.06f)
+            else -> 0.96f + (Math.random().toFloat() * 0.04f)
         }
         val vol = (baseVol * gainJitter).coerceIn(0.01f, 1f)
 
@@ -253,5 +276,6 @@ class IslandSoundManager(
         loadedSampleIds.clear()
         soundIds.clear()
         activeStreams.clear()
+        lastPlayedMs.clear()
     }
 }

@@ -12,6 +12,7 @@ import android.provider.Settings
 import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
@@ -49,15 +50,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.BatteryChargingFull
-import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Description
@@ -123,10 +121,8 @@ import com.example.media.MediaUiState
 import com.example.media.MusicCompactWaveform
 import com.example.media.MusicExpandedView
 import com.example.ocr.OcrSelectionOverlay
-import com.example.search.LaunchableApp
 import com.example.system.AccentTheme
 import com.example.system.AnimationStyle
-import com.example.system.CalculatorIslandView
 import com.example.system.CompanionPosition
 import com.example.system.ContentEffect
 import com.example.system.ExpandedSwipeAction
@@ -144,7 +140,6 @@ import com.example.ui.theme.IslandColors
 import com.example.ui.theme.LocalAppBackdrop
 import com.example.ui.theme.MotionTokens
 import com.example.ui.theme.islandGlassChrome
-import com.example.vault.VaultItemEntity
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -202,8 +197,6 @@ fun IslandOverlayRoot(
     val mediaState by app.mediaHub.state.collectAsState()
     val timerState by app.timerEngine.state.collectAsState()
 
-    var previewVaultItem by remember { mutableStateOf<VaultItemEntity?>(null) }
-
     val context = LocalContext.current
     val systemAnimScale = remember {
         runCatching {
@@ -233,7 +226,7 @@ fun IslandOverlayRoot(
         return
     }
 
-    // Apple Two-Stage + Liquid Reveal GPU Motion Choreography (120Hz RenderThread)
+    // 120Hz Velocity-Continuous Spring Choreography (no jarring snap resets mid-flight)
     var showMediumStage by remember { mutableStateOf(state.mode == IslandMode.MEDIUM) }
     var showExpandedCard by remember { mutableStateOf(state.mode == IslandMode.EXPANDED) }
     val pillPreStretchX = remember { Animatable(1f) }
@@ -241,7 +234,6 @@ fun IslandOverlayRoot(
     val cardScaleY = remember { Animatable(if (state.mode == IslandMode.EXPANDED || state.mode == IslandMode.MEDIUM) 1f else 0.24f) }
     val cardAlpha = remember { Animatable(if (state.mode == IslandMode.EXPANDED || state.mode == IslandMode.MEDIUM) 1f else 0f) }
     val revealBlurDp = remember { Animatable(0f) }
-    // Opening choreography: content fades & rises after initial 30% container expand
     val innerContentAlpha = remember { Animatable(if (state.mode == IslandMode.EXPANDED || state.mode == IslandMode.MEDIUM) 1f else 0f) }
     val innerContentOffsetDp = remember { Animatable(0f) }
 
@@ -249,6 +241,7 @@ fun IslandOverlayRoot(
         val useLiquidBlur = settings.openingEffect == OpeningEffect.LIQUID
         when (state.mode) {
             IslandMode.MEDIUM -> {
+                val wasAlreadyOpen = showMediumStage || showExpandedCard
                 showExpandedCard = false
                 showMediumStage = true
                 if (effectiveStyle == AnimationStyle.NONE) {
@@ -260,20 +253,24 @@ fun IslandOverlayRoot(
                     innerContentAlpha.snapTo(1f)
                     innerContentOffsetDp.snapTo(0f)
                 } else {
-                    revealBlurDp.snapTo(if (useLiquidBlur) 10f else 0f)
-                    cardScaleX.snapTo(if (settings.openingEffect == OpeningEffect.POP) 0.78f else 0.66f)
-                    cardScaleY.snapTo(if (settings.openingEffect == OpeningEffect.POP) 0.70f else 0.55f)
-                    cardAlpha.snapTo(0.35f)
-                    innerContentAlpha.snapTo(0f)
-                    innerContentOffsetDp.snapTo(6f)
+                    if (!wasAlreadyOpen) {
+                        revealBlurDp.snapTo(if (useLiquidBlur) 8f else 0f)
+                        cardScaleX.snapTo(if (settings.openingEffect == OpeningEffect.POP) 0.78f else 0.66f)
+                        cardScaleY.snapTo(if (settings.openingEffect == OpeningEffect.POP) 0.70f else 0.56f)
+                        cardAlpha.snapTo(0.28f)
+                        innerContentAlpha.snapTo(0f)
+                        innerContentOffsetDp.snapTo(5f)
+                    }
                     val spec = MotionTokens.idleToMediumSpec<Float>(effectiveStyle, elasticity, durationScale)
                     launch { cardScaleX.animateTo(1f, spec) }
                     launch { cardScaleY.animateTo(1f, spec) }
                     if (useLiquidBlur) {
                         launch { revealBlurDp.animateTo(0f, MotionTokens.effectsDefault(durationScale)) }
+                    } else {
+                        launch { revealBlurDp.snapTo(0f) }
                     }
                     launch {
-                        delay(85L)
+                        if (!wasAlreadyOpen) delay(65L)
                         launch { innerContentOffsetDp.animateTo(0f, tween(MotionTokens.CONTENT_CROSSFADE_MS, easing = MotionTokens.ContentCrossfadeEasing)) }
                         innerContentAlpha.animateTo(1f, tween(MotionTokens.CONTENT_CROSSFADE_MS, easing = MotionTokens.ContentCrossfadeEasing))
                     }
@@ -283,6 +280,7 @@ fun IslandOverlayRoot(
 
             IslandMode.EXPANDED -> {
                 val cameFromMedium = showMediumStage
+                val wasExpanded = showExpandedCard
                 showMediumStage = false
                 if (effectiveStyle == AnimationStyle.NONE) {
                     showExpandedCard = true
@@ -294,43 +292,51 @@ fun IslandOverlayRoot(
                     innerContentAlpha.snapTo(1f)
                     innerContentOffsetDp.snapTo(0f)
                 } else {
-                    if (!cameFromMedium) {
+                    if (!cameFromMedium && !wasExpanded) {
                         pillPreStretchX.animateTo(
-                            targetValue = 1.24f,
+                            targetValue = 1.22f,
                             animationSpec = MotionTokens.spatialFast(effectiveStyle, elasticity, durationScale)
                         )
                         val initScale = when (settings.openingEffect) {
-                            OpeningEffect.POP -> 0.82f
+                            OpeningEffect.POP -> 0.80f
                             OpeningEffect.SMOOTH -> 0.68f
-                            else -> 0.48f
+                            else -> 0.50f
                         }
                         cardScaleX.snapTo(initScale)
-                        cardScaleY.snapTo((initScale * 0.65f).coerceAtLeast(0.28f))
-                        cardAlpha.snapTo(0.15f)
-                    } else {
-                        cardScaleX.snapTo(0.76f)
-                        cardScaleY.snapTo(0.52f)
-                        cardAlpha.snapTo(0.65f)
+                        cardScaleY.snapTo((initScale * 0.68f).coerceAtLeast(0.32f))
+                        cardAlpha.snapTo(0.18f)
+                        innerContentAlpha.snapTo(0f)
+                        innerContentOffsetDp.snapTo(7f)
+                        revealBlurDp.snapTo(if (useLiquidBlur) 12f else 0f)
+                    } else if (cameFromMedium) {
+                        cardScaleX.snapTo(0.84f)
+                        cardScaleY.snapTo(0.68f)
+                        cardAlpha.snapTo(0.75f)
+                        innerContentAlpha.snapTo(0f)
+                        innerContentOffsetDp.snapTo(5f)
+                        revealBlurDp.snapTo(if (useLiquidBlur) 6f else 0f)
                     }
-                    innerContentAlpha.snapTo(0f)
-                    innerContentOffsetDp.snapTo(8f)
-                    revealBlurDp.snapTo(if (useLiquidBlur) 14f else 0f)
                     showExpandedCard = true
-                    val expandSpec = MotionTokens.openingEffectSpec<Float>(
-                        openingEffect = settings.openingEffect,
-                        style = effectiveStyle,
-                        elasticity = elasticity,
-                        durationScale = durationScale
-                    )
+                    val expandSpec = if (cameFromMedium) {
+                        MotionTokens.mediumToFullSpec<Float>(effectiveStyle, elasticity, durationScale)
+                    } else {
+                        MotionTokens.openingEffectSpec<Float>(
+                            openingEffect = settings.openingEffect,
+                            style = effectiveStyle,
+                            elasticity = elasticity,
+                            durationScale = durationScale
+                        )
+                    }
                     launch { pillPreStretchX.snapTo(1f) }
                     launch { cardScaleX.animateTo(1f, expandSpec) }
                     launch { cardScaleY.animateTo(1f, expandSpec) }
                     if (useLiquidBlur) {
                         launch { revealBlurDp.animateTo(0f, MotionTokens.effectsDefault(durationScale)) }
+                    } else {
+                        launch { revealBlurDp.snapTo(0f) }
                     }
                     launch {
-                        // Hold content opacity at 0% for initial ~30% of expand, then 200ms fade + 8dp rise
-                        delay(if (cameFromMedium) 60L else 130L)
+                        if (!wasExpanded) delay(if (cameFromMedium) 45L else 105L)
                         launch { innerContentOffsetDp.animateTo(0f, tween(MotionTokens.CONTENT_CROSSFADE_MS, easing = MotionTokens.ContentCrossfadeEasing)) }
                         innerContentAlpha.animateTo(1f, tween(MotionTokens.CONTENT_CROSSFADE_MS, easing = MotionTokens.ContentCrossfadeEasing))
                     }
@@ -351,14 +357,14 @@ fun IslandOverlayRoot(
                     innerContentOffsetDp.snapTo(0f)
                 } else if (showExpandedCard || showMediumStage) {
                     val collapseSpec = MotionTokens.collapseSpec<Float>(effectiveStyle, durationScale)
-                    launch { innerContentAlpha.animateTo(0f, tween(80)) }
+                    launch { innerContentAlpha.animateTo(0f, tween(75)) }
                     launch { cardScaleX.animateTo(0.46f, collapseSpec) }
                     launch { cardScaleY.animateTo(0.26f, collapseSpec) }
-                    cardAlpha.animateTo(0f, tween(durationMillis = 120))
+                    cardAlpha.animateTo(0f, tween(durationMillis = 115))
                     showExpandedCard = false
                     showMediumStage = false
                     revealBlurDp.snapTo(0f)
-                    pillPreStretchX.snapTo(1.16f)
+                    pillPreStretchX.snapTo(1.14f)
                     pillPreStretchX.animateTo(1f, MotionTokens.spatialDefault(effectiveStyle, elasticity, durationScale))
                 }
             }
@@ -484,8 +490,7 @@ fun IslandOverlayRoot(
                             contentAlphaProvider = { innerContentAlpha.value },
                             contentOffsetYDProvider = { innerContentOffsetDp.value },
                             onRequestHaptic = onRequestHaptic,
-                            onOpenAppSettings = onOpenAppSettings,
-                            onPreviewVaultItem = { previewVaultItem = it }
+                            onOpenAppSettings = onOpenAppSettings
                         )
                     }
                 }
@@ -634,20 +639,6 @@ fun IslandOverlayRoot(
                 app = app,
                 accentColor = accentColor,
                 onDismiss = { app.islandController.setFlashlightCardOpen(false) }
-            )
-        }
-
-        val activePreview = previewVaultItem
-        if (activePreview != null) {
-            VaultFullScreenPreviewOverlay(
-                item = activePreview,
-                app = app,
-                accentColor = accentColor,
-                onClose = { previewVaultItem = null },
-                onCollapseIsland = {
-                    previewVaultItem = null
-                    app.islandController.collapse()
-                }
             )
         }
 
@@ -1359,8 +1350,8 @@ fun MediumPillView(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
-            .widthIn(max = 320.dp)
-            .heightIn(min = 96.dp, max = 120.dp)
+            .widthIn(max = DeadZoneGeometry.MEDIUM_MAX_WIDTH_DP.dp)
+            .heightIn(min = 96.dp, max = DeadZoneGeometry.MEDIUM_MAX_HEIGHT_DP.dp)
             .islandGlassChrome(
                 shape = shape,
                 pillStyle = effectivePillStyle,
@@ -1555,18 +1546,7 @@ fun MediumPillView(
     }
 }
 
-private fun maxPanelHeightForTab(tab: IslandTab) = when (tab) {
-    IslandTab.MUSIC -> 132.dp
-    IslandTab.TIMER -> 124.dp
-    IslandTab.ALERTS -> 144.dp
-    IslandTab.VAULT -> 152.dp
-    IslandTab.NOTES -> 148.dp
-    IslandTab.CLIPS -> 148.dp
-    IslandTab.MEMO -> 148.dp
-    IslandTab.TOOLS -> 160.dp
-    IslandTab.CALC -> 160.dp
-    IslandTab.SEARCH -> 160.dp
-}
+private fun maxPanelHeightForTab(@Suppress("UNUSED_PARAMETER") tab: IslandTab) = 78.dp
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1585,23 +1565,10 @@ fun ExpandedIslandCard(
     contentAlphaProvider: () -> Float = { 1f },
     contentOffsetYDProvider: () -> Float = { 0f },
     onRequestHaptic: () -> Unit = {},
-    onOpenAppSettings: () -> Unit = {},
-    onPreviewVaultItem: (VaultItemEntity) -> Unit = {}
+    onOpenAppSettings: () -> Unit = {}
 ) {
     val mediaState by app.mediaHub.state.collectAsState()
     val timerState by app.timerEngine.state.collectAsState()
-    val calcState by app.calculatorEngine.state.collectAsState()
-
-    var pinnedApps by remember { mutableStateOf<List<LaunchableApp>>(emptyList()) }
-    LaunchedEffect(settings.pinnedAppPackages) {
-        if (settings.pinnedAppPackages.isNotEmpty()) {
-            val all = app.searchEngine.getInstalledApps()
-            val map = all.associateBy { it.packageName }
-            pinnedApps = settings.pinnedAppPackages.mapNotNull { map[it] }
-        } else {
-            pinnedApps = emptyList()
-        }
-    }
 
     val holeW = exclusionZone.holeWidthDp.coerceAtLeast(settings.cutoutWidthDp)
     val holeH = exclusionZone.holeHeightDp.coerceAtLeast(settings.cutoutHeightDp)
@@ -1612,7 +1579,8 @@ fun ExpandedIslandCard(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = IslandColors.ScreenHorizontalMargin)
-            .widthIn(max = 360.dp)
+            .widthIn(max = DeadZoneGeometry.FULL_MAX_WIDTH_DP.dp)
+            .heightIn(max = DeadZoneGeometry.FULL_MAX_HEIGHT_DP.dp)
             .islandGlassChrome(
                 shape = outerShape,
                 pillStyle = effectivePillStyle,
@@ -1638,13 +1606,14 @@ fun ExpandedIslandCard(
                     }
                 }
             )
-            .padding(bottom = 8.dp)
+            .padding(bottom = 3.dp)
+            .testTag("expanded_island_card")
     ) {
-        // Camera-aware Top Header Row: Left control (<= 120dp) + Camera Clearance (holeW + 16dp) + Right controls (<= 120dp)
+        // Camera-aware Top Header Row (43dp at 33dp cutout height, strictly clears exclusionRectDp.bottom = 41dp)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height((holeH + 14f).coerceAtLeast(42f).dp)
+                .height((holeH + 10f).coerceAtLeast(42f).dp)
                 .padding(horizontal = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
@@ -1652,7 +1621,7 @@ fun ExpandedIslandCard(
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
-                    .widthIn(max = 120.dp)
+                    .widthIn(max = 112.dp)
                     .debugCameraDeadZoneGuard(exclusionZone, "expanded_header_left")
             ) {
                 IconButton(
@@ -1660,14 +1629,14 @@ fun ExpandedIslandCard(
                         onRequestHaptic()
                         app.islandController.collapse()
                     },
-                    modifier = Modifier.size(34.dp)
+                    modifier = Modifier.size(30.dp)
                 ) {
-                    Icon(Icons.Filled.Close, contentDescription = "Collapse island", tint = IslandColors.TextSecondary, modifier = Modifier.size(18.dp))
+                    Icon(Icons.Filled.Close, contentDescription = "Collapse island", tint = IslandColors.TextSecondary, modifier = Modifier.size(16.dp))
                 }
                 Text(
                     text = state.activeTab.title,
                     color = IslandColors.TextSecondary,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Medium,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -1680,33 +1649,10 @@ fun ExpandedIslandCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.End,
                 modifier = Modifier
-                    .widthIn(max = 120.dp)
+                    .widthIn(max = 112.dp)
                     .debugCameraDeadZoneGuard(exclusionZone, "expanded_header_right")
             ) {
-                IconButton(
-                    onClick = {
-                        onRequestHaptic()
-                        app.soundManager.playTap()
-                        app.islandController.collapse()
-                        onOpenAppSettings()
-                    },
-                    modifier = Modifier.size(34.dp)
-                ) {
-                    Icon(Icons.Filled.Settings, contentDescription = "Open Settings", tint = IslandColors.TextSecondary, modifier = Modifier.size(18.dp))
-                }
-            }
-        }
-
-        // Expanded Home Layout: Live Activity FIRST + up to 3 User Shortcuts beside it
-        val primaryLive = state.primaryActivity
-        if (primaryLive != null || pinnedApps.isNotEmpty()) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 2.dp)
-            ) {
+                val primaryLive = state.primaryActivity
                 if (primaryLive != null) {
                     val liveTab = when (primaryLive) {
                         is IslandActivity.Music -> IslandTab.MUSIC
@@ -1718,65 +1664,47 @@ fun ExpandedIslandCard(
                     val liveText = when (primaryLive) {
                         is IslandActivity.Music -> primaryLive.title.ifBlank { "Music" }
                         is IslandActivity.Timer -> TimerEngine.formatDuration(primaryLive.remainingMs)
-                        is IslandActivity.Charging -> "${primaryLive.levelPercent}% Charging"
+                        is IslandActivity.Charging -> "${primaryLive.levelPercent}%"
                         is IslandActivity.NotificationPreview -> primaryLive.appName.ifBlank { primaryLive.title }
                         is IslandActivity.Alert -> primaryLive.title
-                        is IslandActivity.VoiceRecording -> "Rec ${TimerEngine.formatDuration(primaryLive.elapsedMs)}"
+                        is IslandActivity.VoiceRecording -> TimerEngine.formatDuration(primaryLive.elapsedMs)
                     }
                     val liveColor = activityAccent(primaryLive, accentColor, musicAccent)
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .weight(1f, fill = false)
+                            .widthIn(max = 76.dp)
                             .clip(CircleShape)
-                            .background(liveColor.copy(alpha = 0.22f))
+                            .background(liveColor.copy(alpha = 0.20f))
                             .clickable {
                                 onRequestHaptic()
                                 app.islandController.selectTab(liveTab)
                             }
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
                     ) {
-                        Box(Modifier.size(6.dp).clip(CircleShape).background(liveColor))
-                        Spacer(Modifier.width(6.dp))
+                        Box(Modifier.size(5.dp).clip(CircleShape).background(liveColor))
+                        Spacer(Modifier.width(4.dp))
                         Text(
                             text = liveText,
                             color = IslandColors.TextPrimary,
-                            fontSize = 11.sp,
+                            fontSize = 10.sp,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 128.dp)
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
+                    Spacer(Modifier.width(2.dp))
                 }
-                if (pinnedApps.isNotEmpty()) {
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        items(pinnedApps.take(3), key = { it.packageName }) { shortcut ->
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF1E2028))
-                                    .clickable {
-                                        onRequestHaptic()
-                                        app.soundManager.playTap()
-                                        app.searchEngine.launchApp(shortcut.packageName)
-                                        app.islandController.collapse()
-                                    }
-                                    .padding(horizontal = 8.dp, vertical = 4.dp)
-                            ) {
-                                val bmp = shortcut.iconBitmap
-                                if (bmp != null) {
-                                    Image(bitmap = bmp, contentDescription = shortcut.label, modifier = Modifier.size(14.dp).clip(CircleShape))
-                                    Spacer(Modifier.width(4.dp))
-                                }
-                                Text(shortcut.label, color = IslandColors.TextPrimary, fontSize = 11.sp, maxLines = 1)
-                            }
-                        }
-                    }
+                IconButton(
+                    onClick = {
+                        onRequestHaptic()
+                        app.soundManager.playTap()
+                        app.islandController.collapse()
+                        onOpenAppSettings()
+                    },
+                    modifier = Modifier.size(30.dp)
+                ) {
+                    Icon(Icons.Filled.Settings, contentDescription = "Open Settings", tint = IslandColors.TextSecondary, modifier = Modifier.size(16.dp))
                 }
             }
         }
@@ -1830,10 +1758,11 @@ fun ExpandedIslandCard(
             Modifier
         }
 
-        // Per-tab content-sized height cap (no forced empty 220dp block!)
+        // Compact content slot (hard-capped at 78dp so full card never exceeds 160dp)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .weight(1f, fill = false)
                 .heightIn(max = maxPanelHeightForTab(state.activeTab))
                 .graphicsLayer {
                     alpha = contentAlphaProvider()
@@ -1851,7 +1780,7 @@ fun ExpandedIslandCard(
                         val fadeSpec = MotionTokens.contentCrossfadeTween(effectiveStyle, durationScale)
                         val moveSpec = MotionTokens.spatialFast<IntOffset>(effectiveStyle, elasticity, durationScale)
                         val scaleSpec = MotionTokens.spatialFast<Float>(effectiveStyle, elasticity, durationScale)
-                        when (settings.contentEffect) {
+                        val transition = when (settings.contentEffect) {
                             ContentEffect.FADE -> fadeIn(fadeSpec) togetherWith fadeOut(tween(90))
                             ContentEffect.SLIDE_UP -> (slideInVertically(moveSpec) { h -> (h * 0.16f).roundToInt() } + fadeIn(fadeSpec))
                                 .togetherWith(slideOutVertically(tween(95)) { h -> -(h * 0.08f).roundToInt() } + fadeOut(tween(80)))
@@ -1870,6 +1799,11 @@ fun ExpandedIslandCard(
                                     )
                             }
                         }
+                        transition.using(
+                            SizeTransform(clip = false) { _, _ ->
+                                MotionTokens.sizeTransformSpec(effectiveStyle, elasticity, durationScale)
+                            }
+                        )
                     }
                 },
                 label = "island_tab_content"
@@ -1918,21 +1852,6 @@ fun ExpandedIslandCard(
                         }
                     )
 
-                    IslandTab.CALC -> CalculatorIslandView(
-                        state = calcState,
-                        onDigit = { app.calculatorEngine.pressDigit(it) },
-                        onDecimal = { app.calculatorEngine.pressDecimal() },
-                        onClear = { app.calculatorEngine.pressClear() },
-                        onToggleSign = { app.calculatorEngine.pressToggleSign() },
-                        onPercent = { app.calculatorEngine.pressPercent() },
-                        onOperator = { app.calculatorEngine.pressOperator(it) },
-                        onEquals = { app.calculatorEngine.pressEquals() },
-                        onBackspace = { app.calculatorEngine.pressBackspace() },
-                        onHaptic = onRequestHaptic,
-                        onKeySound = { app.soundManager.playCalcKey() },
-                        compactMode = true
-                    )
-
                     IslandTab.TIMER -> TimerStopwatchPanel(
                         state = timerState,
                         accentColor = IslandColors.AccentOrange,
@@ -1967,8 +1886,7 @@ fun ExpandedIslandCard(
                     IslandTab.VAULT -> VaultIslandPanel(
                         app = app,
                         accentColor = accentColor,
-                        onCollapse = { app.islandController.collapse() },
-                        onPreviewItem = onPreviewVaultItem
+                        onCollapse = { app.islandController.collapse() }
                     )
 
                     IslandTab.CLIPS -> ClipsIslandPanel(
@@ -1995,9 +1913,9 @@ fun ExpandedIslandCard(
             }
         }
 
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(2.dp))
 
-        // Locked Bottom Chooser strictly honoring user-ordered settings.enabledTabs (Never glass-on-glass)
+        // Locked Single-Row Bottom Chooser strictly honoring user-ordered settings.enabledTabs
         BottomChooserBar(
             settings = settings,
             activeTab = state.activeTab,
@@ -2026,19 +1944,19 @@ private fun DraggableFloatingMiniWindow(
     onClose: () -> Unit
 ) {
     var offsetX by remember { mutableFloatStateOf(20f) }
-    var offsetY by remember { mutableFloatStateOf(160f) }
-    val calcState by app.calculatorEngine.state.collectAsState()
+    var offsetY by remember { mutableFloatStateOf(140f) }
     val timerState by app.timerEngine.state.collectAsState()
 
     Column(
         modifier = Modifier
             .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
-            .widthIn(max = 356.dp)
+            .widthIn(max = DeadZoneGeometry.MEDIUM_MAX_WIDTH_DP.dp)
+            .heightIn(max = DeadZoneGeometry.FULL_MAX_HEIGHT_DP.dp)
             .fillMaxWidth()
             .clip(RoundedCornerShape(IslandColors.CardRadius))
             .background(Color(0xF50C0D12))
             .border(1.dp, accentColor.copy(alpha = 0.65f), RoundedCornerShape(IslandColors.CardRadius))
-            .padding(bottom = 8.dp)
+            .padding(bottom = 6.dp)
             .testTag("floating_mini_window")
     ) {
         Row(
@@ -2051,58 +1969,46 @@ private fun DraggableFloatingMiniWindow(
                         offsetY = (offsetY + dragAmount.y).coerceIn(60f, 1100f)
                     }
                 }
-                .padding(horizontal = 12.dp, vertical = 6.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Filled.DragIndicator, contentDescription = "Drag floating window", tint = IslandColors.TextSecondary, modifier = Modifier.size(16.dp))
+                Icon(Icons.Filled.DragIndicator, contentDescription = "Drag floating window", tint = IslandColors.TextSecondary, modifier = Modifier.size(15.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Floating · ${tab.title}", color = accentColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                Text("Floating · ${tab.title}", color = accentColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onExpandToIsland, modifier = Modifier.size(30.dp)) {
-                    Icon(Icons.Filled.OpenInFull, contentDescription = "Dock to Island", tint = IslandColors.TextSecondary, modifier = Modifier.size(15.dp))
+                IconButton(onClick = onExpandToIsland, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Filled.OpenInFull, contentDescription = "Dock to Island", tint = IslandColors.TextSecondary, modifier = Modifier.size(14.dp))
                 }
-                IconButton(onClick = onClose, modifier = Modifier.size(30.dp)) {
-                    Icon(Icons.Filled.Close, contentDescription = "Close floating window", tint = IslandColors.TextSecondary, modifier = Modifier.size(16.dp))
+                IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close floating window", tint = IslandColors.TextSecondary, modifier = Modifier.size(15.dp))
                 }
             }
         }
 
-        when (tab) {
-            IslandTab.CALC -> CalculatorIslandView(
-                state = calcState,
-                onDigit = { app.calculatorEngine.pressDigit(it) },
-                onDecimal = { app.calculatorEngine.pressDecimal() },
-                onClear = { app.calculatorEngine.pressClear() },
-                onToggleSign = { app.calculatorEngine.pressToggleSign() },
-                onPercent = { app.calculatorEngine.pressPercent() },
-                onOperator = { app.calculatorEngine.pressOperator(it) },
-                onEquals = { app.calculatorEngine.pressEquals() },
-                onBackspace = { app.calculatorEngine.pressBackspace() },
-                onHaptic = onRequestHaptic,
-                onKeySound = { app.soundManager.playCalcKey() },
-                compactMode = true
-            )
-            IslandTab.NOTES -> NotesIslandPanel(app = app, accentColor = accentColor)
-            IslandTab.TIMER -> TimerStopwatchPanel(
-                state = timerState,
-                accentColor = accentColor,
-                onPickerChanged = { h, m, s -> app.timerEngine.setPickerDuration(h, m, s) },
-                onStartTimer = { app.timerEngine.startTimer() },
-                onPauseTimer = { app.timerEngine.pauseTimer() },
-                onResumeTimer = { app.timerEngine.resumeTimer() },
-                onCancelTimer = { app.timerEngine.cancelTimer() },
-                onStartStopwatch = { app.timerEngine.startStopwatch() },
-                onPauseStopwatch = { app.timerEngine.pauseStopwatch() },
-                onResetStopwatch = { app.timerEngine.resetStopwatch() },
-                onLapStopwatch = { app.timerEngine.lapStopwatch() },
-                onHaptic = onRequestHaptic,
-                onTimerSetSound = { app.soundManager.playTimerSet() },
-                onStartSleepTimer = { durationMs -> app.timerEngine.startSleepTimer(durationMs) }
-            )
-            else -> SearchIslandPanel(app = app, accentColor = accentColor, onCollapse = onClose)
+        Box(modifier = Modifier.fillMaxWidth().heightIn(max = 78.dp)) {
+            when (tab) {
+                IslandTab.NOTES -> NotesIslandPanel(app = app, accentColor = accentColor)
+                IslandTab.TIMER -> TimerStopwatchPanel(
+                    state = timerState,
+                    accentColor = accentColor,
+                    onPickerChanged = { h, m, s -> app.timerEngine.setPickerDuration(h, m, s) },
+                    onStartTimer = { app.timerEngine.startTimer() },
+                    onPauseTimer = { app.timerEngine.pauseTimer() },
+                    onResumeTimer = { app.timerEngine.resumeTimer() },
+                    onCancelTimer = { app.timerEngine.cancelTimer() },
+                    onStartStopwatch = { app.timerEngine.startStopwatch() },
+                    onPauseStopwatch = { app.timerEngine.pauseStopwatch() },
+                    onResetStopwatch = { app.timerEngine.resetStopwatch() },
+                    onLapStopwatch = { app.timerEngine.lapStopwatch() },
+                    onHaptic = onRequestHaptic,
+                    onTimerSetSound = { app.soundManager.playTimerSet() },
+                    onStartSleepTimer = { durationMs -> app.timerEngine.startSleepTimer(durationMs) }
+                )
+                else -> SearchIslandPanel(app = app, accentColor = accentColor, onCollapse = onClose)
+            }
         }
     }
 }
@@ -2128,23 +2034,32 @@ fun BottomChooserBar(
         Color(0xFF1A1B23)
     }
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
+            .heightIn(max = 36.dp)
             .padding(horizontal = 10.dp)
             .clip(RoundedCornerShape(IslandColors.ExpandedInnerSheetRadius))
             .background(chooserBg)
             .border(0.75.dp, Color.White.copy(alpha = 0.20f), RoundedCornerShape(IslandColors.ExpandedInnerSheetRadius))
-            .padding(horizontal = 6.dp, vertical = 4.dp)
+            .padding(horizontal = 4.dp, vertical = 2.dp)
     ) {
-        AnimatedVisibility(visible = isMoreOpen && moreTabs.isNotEmpty()) {
+        val showMore = isMoreOpen && moreTabs.isNotEmpty()
+        AnimatedContent(
+            targetState = showMore,
+            transitionSpec = {
+                (fadeIn(tween(140)) + slideInVertically(tween(150)) { if (targetState) it / 2 else -it / 2 })
+                    .togetherWith(fadeOut(tween(100)))
+            },
+            label = "bottom_chooser_row_mode"
+        ) { morePage ->
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 4.dp),
-                horizontalArrangement = Arrangement.SpaceEvenly
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                moreTabs.forEach { tab ->
+                val visibleTabs = if (morePage) moreTabs else mainTabs
+                visibleTabs.forEach { tab ->
                     ChooserChip(
                         tab = tab,
                         selected = activeTab == tab,
@@ -2152,44 +2067,32 @@ fun BottomChooserBar(
                         onClick = { onSelectTab(tab) }
                     )
                 }
-            }
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            mainTabs.forEach { tab ->
-                ChooserChip(
-                    tab = tab,
-                    selected = activeTab == tab,
-                    accentColor = accentColor,
-                    onClick = { onSelectTab(tab) }
-                )
-            }
-            if (moreTabs.isNotEmpty()) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .minimumInteractiveComponentSize()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(if (isMoreOpen) accentColor.copy(alpha = 0.22f) else Color.Transparent)
-                        .clickable(onClick = onToggleMore)
-                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                        .testTag("chooser_more_button")
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.MoreHoriz,
-                        contentDescription = "More tabs",
-                        tint = if (isMoreOpen) accentColor else IslandColors.TextSecondary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Text(
-                        text = "More",
-                        fontSize = 10.sp,
-                        color = if (isMoreOpen) accentColor else IslandColors.TextSecondary
-                    )
+                if (moreTabs.isNotEmpty()) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier
+                            .widthIn(min = 44.dp)
+                            .heightIn(min = 30.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (morePage) accentColor.copy(alpha = 0.22f) else Color.Transparent)
+                            .clickable(onClick = onToggleMore)
+                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .testTag("chooser_more_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.MoreHoriz,
+                            contentDescription = if (morePage) "Main tabs" else "More tabs",
+                            tint = if (morePage) accentColor else IslandColors.TextSecondary,
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = if (morePage) "Back" else "More",
+                            fontSize = 9.sp,
+                            lineHeight = 10.sp,
+                            color = if (morePage) accentColor else IslandColors.TextSecondary
+                        )
+                    }
                 }
             }
         }
@@ -2208,59 +2111,52 @@ private fun ChooserChip(
     val scale by animateFloatAsState(
         targetValue = when {
             pressed -> MotionTokens.BUTTON_PRESS_SCALE
-            selected -> 1.05f
+            selected -> 1.04f
             else -> 1.0f
         },
-        animationSpec = spring(dampingRatio = 0.68f, stiffness = 620f),
+        animationSpec = spring(dampingRatio = 0.66f, stiffness = 680f),
         label = "chip_scale"
     )
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
         modifier = Modifier
-            .minimumInteractiveComponentSize()
+            .widthIn(min = 44.dp)
+            .heightIn(min = 30.dp)
             .graphicsLayer {
                 scaleX = scale
                 scaleY = scale
             }
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(12.dp))
             .background(if (selected) accentColor.copy(alpha = 0.24f) else Color.Transparent)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
                 onClick = onClick
             )
-            .padding(horizontal = 8.dp, vertical = 5.dp)
+            .padding(horizontal = 6.dp, vertical = 2.dp)
             .testTag("chooser_tab_${tab.name.lowercase()}")
     ) {
         Icon(
             imageVector = tabIcon(tab),
             contentDescription = tab.title,
             tint = if (selected) accentColor else IslandColors.TextSecondary,
-            modifier = Modifier.size(18.dp)
+            modifier = Modifier.size(14.dp)
         )
         Text(
             text = tab.title,
-            fontSize = 10.sp,
+            fontSize = 9.sp,
+            lineHeight = 10.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (selected) accentColor else IslandColors.TextSecondary
+            color = if (selected) accentColor else IslandColors.TextSecondary,
+            maxLines = 1
         )
-        if (selected) {
-            Spacer(Modifier.height(2.dp))
-            Box(
-                modifier = Modifier
-                    .width(12.dp)
-                    .height(2.dp)
-                    .clip(CircleShape)
-                    .background(accentColor)
-            )
-        }
     }
 }
 
 fun tabIcon(tab: IslandTab): ImageVector = when (tab) {
     IslandTab.SEARCH -> Icons.Filled.Search
     IslandTab.MUSIC -> Icons.Filled.MusicNote
-    IslandTab.CALC -> Icons.Filled.Calculate
     IslandTab.TIMER -> Icons.Filled.Timer
     IslandTab.TOOLS -> Icons.Filled.Tune
     IslandTab.VAULT -> Icons.Filled.PhotoLibrary

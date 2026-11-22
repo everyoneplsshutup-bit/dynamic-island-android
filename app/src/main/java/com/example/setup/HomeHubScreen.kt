@@ -33,6 +33,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -93,7 +94,6 @@ import com.example.island.VaultIslandPanel
 import com.example.media.MusicExpandedView
 import com.example.system.AccentTheme
 import com.example.system.AnimationStyle
-import com.example.system.CalculatorIslandView
 import com.example.system.IslandSettings
 import com.example.system.IslandTab
 import com.example.system.PillStyle
@@ -120,7 +120,6 @@ fun HomeHubScreen(
     val isServiceRunning by IslandService.isRunning.collectAsState()
     val mediaState by app.mediaHub.state.collectAsState()
     val timerState by app.timerEngine.state.collectAsState()
-    val calcState by app.calculatorEngine.state.collectAsState()
 
     val accentColor = when (settings.accentTheme) {
         AccentTheme.ORANGE -> IslandColors.AccentOrange
@@ -207,7 +206,7 @@ fun HomeHubScreen(
                 }
             }
 
-            // Live Interactive Island Sandbox (matching live overlay: 44dp concentric radius, 408dp max width, 220dp unified panel cap)
+            // Live Interactive Island Sandbox (matching live overlay: compact max 360dp x 160dp)
             val sandboxBorder = IslandColors.liquidBorderBrush(
                 useGlass = useGlass,
                 isHighlighted = false,
@@ -229,7 +228,8 @@ fun HomeHubScreen(
                 color = Color.Transparent,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .widthIn(max = 408.dp)
+                    .widthIn(max = com.example.island.DeadZoneGeometry.FULL_MAX_WIDTH_DP.dp)
+                    .heightIn(max = com.example.island.DeadZoneGeometry.FULL_MAX_HEIGHT_DP.dp)
                     .align(Alignment.CenterHorizontally)
                     .border(1.dp, sandboxBorder, outerShape)
             ) {
@@ -238,7 +238,7 @@ fun HomeHubScreen(
                         .fillMaxWidth()
                         .clip(outerShape)
                         .background(sandboxBg)
-                        .padding(vertical = 10.dp),
+                        .padding(top = 6.dp, bottom = 4.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Row(
@@ -298,12 +298,13 @@ fun HomeHubScreen(
                         }
                     }
 
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(4.dp))
 
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(220.dp)
+                            .weight(1f, fill = false)
+                            .heightIn(max = 78.dp)
                     ) {
                         AnimatedContent(
                             targetState = islandState.activeTab,
@@ -322,6 +323,11 @@ fun HomeHubScreen(
                                         scaleIn(initialScale = 0.95f, animationSpec = scaleSpec))
                                         .togetherWith(
                                             slideOutHorizontally(tween(110), targetOffsetX = exitOffset) + fadeOut(tween(95))
+                                        )
+                                        .using(
+                                            androidx.compose.animation.SizeTransform(clip = false) { _, _ ->
+                                                MotionTokens.sizeTransformSpec(effectiveStyle, settings.animationElasticity, settings.animationSpeed)
+                                            }
                                         )
                                 }
                             },
@@ -362,20 +368,6 @@ fun HomeHubScreen(
                                     }
                                 )
 
-                                IslandTab.CALC -> CalculatorIslandView(
-                                    state = calcState,
-                                    onDigit = { app.calculatorEngine.pressDigit(it) },
-                                    onDecimal = { app.calculatorEngine.pressDecimal() },
-                                    onClear = { app.calculatorEngine.pressClear() },
-                                    onToggleSign = { app.calculatorEngine.pressToggleSign() },
-                                    onPercent = { app.calculatorEngine.pressPercent() },
-                                    onOperator = { app.calculatorEngine.pressOperator(it) },
-                                    onEquals = { app.calculatorEngine.pressEquals() },
-                                    onBackspace = { app.calculatorEngine.pressBackspace() },
-                                    onKeySound = { app.soundManager.playCalcKey() },
-                                    compactMode = true
-                                )
-
                                 IslandTab.TIMER -> TimerStopwatchPanel(
                                     state = timerState,
                                     accentColor = accentColor,
@@ -403,7 +395,7 @@ fun HomeHubScreen(
                         }
                     }
 
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(2.dp))
 
                     BottomChooserBar(
                         settings = settings,

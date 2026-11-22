@@ -4,6 +4,8 @@ import android.content.ComponentName
 import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.content.pm.ResolveInfo
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Rect
 import androidx.compose.animation.core.SnapSpec
 import androidx.compose.ui.test.assertIsDisplayed
@@ -13,6 +15,7 @@ import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -43,6 +46,7 @@ import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -86,9 +90,11 @@ class DynamicIslandRobolectricTest {
         )
         assertEquals(IslandMode.SPLIT, controller.state.value.mode)
 
-        controller.expand(IslandTab.CALC)
+        assertTrue(IslandTab.entries.none { it.name == "CALC" })
+
+        controller.expand(IslandTab.TOOLS)
         assertEquals(IslandMode.EXPANDED, controller.state.value.mode)
-        assertEquals(IslandTab.CALC, controller.state.value.activeTab)
+        assertEquals(IslandTab.TOOLS, controller.state.value.activeTab)
 
         controller.selectTab(IslandTab.TIMER)
         controller.selectTab(IslandTab.SEARCH)
@@ -99,13 +105,20 @@ class DynamicIslandRobolectricTest {
         assertEquals(IslandMode.SPLIT, controller.state.value.mode)
         assertFalse(controller.state.value.needsKeyboardFocus)
 
+        // Timer always attaches directly to the Dynamic Island pill rather than a floating mini window
+        controller.setFloatingMiniTab(IslandTab.TIMER)
+        assertEquals(IslandMode.EXPANDED, controller.state.value.mode)
+        assertEquals(IslandTab.TIMER, controller.state.value.activeTab)
+        assertNull(controller.state.value.activeFloatingMiniTab)
+
         assertEquals(
             listOf(
                 IslandSoundEvent.EXPAND,
                 IslandSoundEvent.TAP,
                 IslandSoundEvent.SEARCH_OPEN,
                 IslandSoundEvent.TAP,
-                IslandSoundEvent.COLLAPSE
+                IslandSoundEvent.COLLAPSE,
+                IslandSoundEvent.EXPAND
             ),
             events
         )
@@ -340,15 +353,15 @@ class DynamicIslandRobolectricTest {
         val initial = repo.settingsFlow.first()
         assertEquals(IslandSettings.MAX_ISLAND_FEATURES, initial.enabledTabs.size)
 
-        // Adding a 9th tab must be rejected while at 8/8
-        val added9th = repo.toggleTabInIsland(IslandTab.CLIPS)
+        // Adding a 9th tab (MEMO) must be rejected while at 8/8
+        val added9th = repo.toggleTabInIsland(IslandTab.MEMO)
         assertFalse(added9th)
         assertEquals(8, repo.settingsFlow.first().enabledTabs.size)
 
         // Removing one allows adding another
         assertTrue(repo.toggleTabInIsland(IslandTab.ALERTS))
         assertEquals(7, repo.settingsFlow.first().enabledTabs.size)
-        assertTrue(repo.toggleTabInIsland(IslandTab.CLIPS))
+        assertTrue(repo.toggleTabInIsland(IslandTab.MEMO))
         assertEquals(8, repo.settingsFlow.first().enabledTabs.size)
 
         // Tier A refuses without consent even if called directly
@@ -393,8 +406,72 @@ class DynamicIslandRobolectricTest {
     }
 
     @Test
-    fun `main screen opens settings 6 groups, setup wizard, tools screenshot vault, sleep dial, and interactive calculator`() {
+    fun `shelf photo crop creates cropped PNG and updates item file path`() = kotlinx.coroutines.runBlocking {
+        val app = composeRule.activity.application as DynamicIslandApp
+        val bmp = Bitmap.createBitmap(100, 80, Bitmap.Config.ARGB_8888)
+        val saved = app.vaultManager.saveBitmap(bmp, sourceType = "PHOTO_TEST", namePrefix = "crop_src")
+        bmp.recycle()
+        assertNotNull("VaultManager.saveBitmap returned null", saved)
+        val savedItem = saved!!
+
+        val croppedItem = app.vaultManager.cropVaultItem(
+            itemId = savedItem.id,
+            leftFrac = 0.1f,
+            topFrac = 0.2f,
+            rightFrac = 0.7f,
+            bottomFrac = 0.8f
+        )
+        assertNotNull(croppedItem)
+        val updated = croppedItem!!
+        assertTrue(updated.filePath != savedItem.filePath)
+        val outFile = java.io.File(updated.filePath)
+        assertTrue(outFile.exists())
+        val decoded = BitmapFactory.decodeFile(outFile.absolutePath)
+        assertNotNull(decoded)
+        assertEquals(60, decoded.width)
+        assertEquals(48, decoded.height)
+        decoded.recycle()
+
+        val dbItem = app.database.vaultDao().getById(savedItem.id)
+        assertNotNull(dbItem)
+        assertEquals(updated.filePath, dbItem!!.filePath)
+        app.vaultManager.purgeItemNow(savedItem.id)
+    }
+
+    @Test
+    fun `main screen opens settings 6 groups, setup wizard, tools screenshot vault, sleep dial, search pinned apps, and no calc tab`() {
+        val app = composeRule.activity.application as DynamicIslandApp
+        val shadowPm = Shadows.shadowOf(composeRule.activity.packageManager)
+        val calcPkg = "com.android.calculator2"
+        val calcAct = "$calcPkg.Calculator"
+        val calcComp = ComponentName(calcPkg, calcAct)
+        shadowPm.addActivityIfNotPresent(calcComp)
+        shadowPm.addIntentFilterForActivity(
+            calcComp,
+            IntentFilter(android.content.Intent.ACTION_MAIN).apply {
+                addCategory(android.content.Intent.CATEGORY_LAUNCHER)
+            }
+        )
+        shadowPm.addResolveInfoForIntent(
+            android.content.Intent(android.content.Intent.ACTION_MAIN).addCategory(android.content.Intent.CATEGORY_LAUNCHER),
+            ResolveInfo().apply {
+                activityInfo = ActivityInfo().apply {
+                    packageName = calcPkg
+                    name = calcAct
+                }
+                nonLocalizedLabel = "Calculator"
+            }
+        )
+        val installed = kotlinx.coroutines.runBlocking {
+            app.searchEngine.getInstalledApps(forceRefresh = true)
+        }
+        assertTrue("Expected Calculator in installed apps, got ${installed.map { it.packageName }}", installed.any { it.packageName == calcPkg })
+        app.searchEngine.refreshApps()
+
         composeRule.waitForIdle()
+
+        // Calculator tab/feature is removed from chooser dock
+        composeRule.onNodeWithTag("chooser_tab_calc").assertDoesNotExist()
 
         // Switch sandbox tab to Tools: Screenshot->Vault exists and Floating Apps button does NOT exist
         composeRule.onNodeWithTag("chooser_tab_tools").performClick()
@@ -409,16 +486,28 @@ class DynamicIslandRobolectricTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("sleep_start_button").assertIsDisplayed()
 
-        // Switch sandbox tab to Calc and verify 7 * 8 = 56
-        composeRule.onNodeWithTag("chooser_tab_calc").performClick()
+        // Switch sandbox tab to Search, pin Calculator, and verify PINNED APPS section renders
+        composeRule.onNodeWithTag("chooser_tab_search").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("calc_key_7").performClick()
-        composeRule.onNodeWithTag("calc_key_multiply").performClick()
-        composeRule.onNodeWithTag("calc_key_8").performClick()
-        composeRule.onNodeWithTag("calc_key_equals").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000L) {
+            runCatching {
+                composeRule.onNodeWithTag("search_app_opener_list")
+                    .performScrollToNode(hasTestTag("search_pin_$calcPkg"))
+                true
+            }.getOrDefault(false)
+        }
+        composeRule.onNodeWithTag("search_pin_$calcPkg").performClick()
+        composeRule.waitUntil(timeoutMillis = 5_000L) {
+            composeRule.onAllNodesWithTag("search_pinned_section").fetchSemanticsNodes().isNotEmpty()
+        }
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("calc_display").assertIsDisplayed()
-        composeRule.onNodeWithText("56").assertIsDisplayed()
+        composeRule.onNodeWithTag("search_pinned_section").assertIsDisplayed()
+        composeRule.onNodeWithTag("search_pinned_chip_$calcPkg").assertIsDisplayed()
+
+        // Verify Shelf tab is directly accessible in main chooser bar
+        composeRule.onNodeWithTag("chooser_tab_vault").assertIsDisplayed().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("vault_filter_all").assertIsDisplayed()
 
         // Open Settings and verify all 6 groups render
         composeRule.onNodeWithTag("open_settings_button").performClick()

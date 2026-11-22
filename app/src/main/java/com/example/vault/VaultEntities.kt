@@ -57,6 +57,9 @@ interface VaultDao {
     @Query("UPDATE vault_items SET isTrashed = 0, trashedAt = NULL, purgeAt = NULL, expiresAt = :newExpiresAt WHERE id = :id")
     suspend fun restore(id: Long, newExpiresAt: Long)
 
+    @Query("UPDATE vault_items SET filePath = :filePath, mimeType = :mimeType WHERE id = :id")
+    suspend fun updateFilePath(id: Long, filePath: String, mimeType: String)
+
     @Query("DELETE FROM vault_items WHERE id = :id")
     suspend fun deleteById(id: Long)
 

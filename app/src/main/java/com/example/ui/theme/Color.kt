@@ -53,17 +53,6 @@ object IslandColors {
     val ChipRadius = 8.dp
     val ScreenHorizontalMargin = 16.dp
 
-    // Exact iOS Calculator tokens (non-clipping press blend)
-    val CalcBackground = Color(0xFF06070A)
-    val CalcDigitBg = Color(0xFF2E3038)
-    val CalcDigitText = Color(0xFFFFFFFF)
-    val CalcFunctionBg = Color(0xFFA5A7AE)
-    val CalcFunctionText = Color(0xFF090A0D)
-    val CalcOperatorBg = Color(0xFFFF9F0A)
-    val CalcOperatorText = Color(0xFFFFFFFF)
-    val CalcOperatorActiveBg = Color(0xFFF3F4F6)
-    val CalcOperatorActiveText = Color(0xFFFF9F0A)
-
     // App Settings surface tokens
     val AppBgDark = Color(0xFF08090D)
     val AppSurfaceDark = Color(0xFF13141C)

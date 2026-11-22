@@ -22,15 +22,15 @@ object Build4Checklist {
         ),
         ChecklistEntry(
             id = 2,
-            area = "13 Cohesive Micro-Acoustic Sounds (12 kHz LPF)",
-            summary = "Regenerated 13 mono 44.1 kHz WAVs with harmonic marimba-glass warmth, 12 kHz LPF, +/-2% pitch randomization, 25 ms rate limit, and full UI action coverage.",
+            area = "13 Cohesive Micro-Acoustic Sounds (<= 9.6 kHz LPF)",
+            summary = "Regenerated 13 mono 44.1 kHz WAVs with click-free raised-cosine attacks, marimba-glass warmth, subtle +/-1.5% pitch variance, and 28 ms rapid replay debounce.",
             implementationRef = "res/raw/sfx_*.wav, IslandSoundManager.kt"
         ),
         ChecklistEntry(
             id = 3,
-            area = "Three-Way Glass Chrome & Per-Tab Heights",
-            summary = "Dark, Apple Glass, and real Kyant Backdrop Liquid Glass refraction, Material 3 Expressive Theme tokens, 360 dp max card width, and per-tab compact height caps.",
-            implementationRef = "GlassSurface.kt, Color.kt, Theme.kt, IslandOverlayRoot.kt"
+            area = "Compact Expansion Hard Caps & Three-Way Glass",
+            summary = "Dark, Apple Glass, and real Kyant Backdrop Liquid Glass chrome with strict 320x120 dp Medium and 360x160 dp Full hard caps keeping the screen behind visible.",
+            implementationRef = "DeadZoneGeometry.kt, GlassSurface.kt, Color.kt, IslandOverlayRoot.kt"
         ),
         ChecklistEntry(
             id = 4,
@@ -52,21 +52,21 @@ object Build4Checklist {
         ),
         ChecklistEntry(
             id = 7,
-            area = "Shelf (10-Min Grid, Attach Clipboard & Save)",
-            summary = "Renamed Vault -> Shelf everywhere, clean 3-column grid with perimeter countdown rings, long-press delete, Attach to clipboard + Save to gallery (zero Share), and Clear all.",
+            area = "Shelf (10-Min Grid, Photo Cropping, Attach & Save)",
+            summary = "Shelf with perimeter countdown rings, in-Shelf bitmap photo cropping, long-press delete, Attach to clipboard + Save to gallery (zero Share), and Clear all.",
             implementationRef = "VaultManager.kt, IslandToolsAndModules.kt (VaultIslandPanel), HomeHubScreen.kt"
         ),
         ChecklistEntry(
             id = 8,
             area = "Quick Toggles, Keep Awake & Uncapped Sidebar",
-            summary = "Keep Awake toggle wiring FLAG_KEEP_SCREEN_ON, Volumetric Torch Beam card, Screenshot -> Shelf action, and uncapped curved 56/280 dp Floating Sidebar with unread badges.",
+            summary = "Keep Awake toggle wiring FLAG_KEEP_SCREEN_ON, compact Torch Beam card, Screenshot -> Shelf action, and uncapped curved 56/280 dp Floating Sidebar with unread badges.",
             implementationRef = "QuickTogglesManager.kt, IslandToolsAndModules.kt (ToolsIslandPanel), FloatingSidebarOverlay.kt"
         ),
         ChecklistEntry(
             id = 9,
-            area = "Auto-Saving Notes & Staggered Clips",
-            summary = "Single-column ~56 dp note rows with 4 dp lime strip and inline auto-saving editor (no Save button), plus 45 ms per-row stagger entrance in Clips.",
-            implementationRef = "IslandToolsAndModules.kt (NotesIslandPanel, ClipsIslandPanel)"
+            area = "Auto-Saving Notes, Pinned Apps & Clips",
+            summary = "Single-column notes with 4 dp lime strip and inline auto-saving editor, Search Pinned Apps section persisted in DataStore, plus 40 ms staggered Clips.",
+            implementationRef = "IslandToolsAndModules.kt (SearchIslandPanel, NotesIslandPanel, ClipsIslandPanel)"
         ),
         ChecklistEntry(
             id = 10,
@@ -83,7 +83,7 @@ object Build4Checklist {
         ChecklistEntry(
             id = 12,
             area = "Tips Onboarding, Settings Studio & Dock Ordering",
-            summary = "6-group M3 Settings Studio with Try It demo (portrait/landscape), 5 main tabs + More dock ordering with smooth 6-dot drag, and interactive Tips sheet.",
+            summary = "6-group M3 Settings Studio with Try It demo, attached pill Timer, 5 main tabs + More single-row dock ordering with smooth 6-dot drag, and interactive Tips sheet.",
             implementationRef = "SettingsScreens.kt, FeaturePickerScreen.kt, HomeHubScreen.kt, SetupWizardScreen.kt"
         )
     )
