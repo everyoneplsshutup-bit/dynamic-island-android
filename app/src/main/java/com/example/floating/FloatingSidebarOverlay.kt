@@ -1,5 +1,6 @@
 package com.example.floating
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Image
@@ -23,6 +24,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Close
@@ -43,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -56,6 +60,8 @@ import com.example.search.LaunchableApp
 import com.example.system.IslandSettings
 import com.example.system.IslandTab
 import com.example.ui.theme.IslandColors
+import com.example.ui.theme.LocalAppBackdrop
+import com.example.ui.theme.islandGlassChrome
 
 @Composable
 fun FloatingSidebarOverlay(
@@ -65,157 +71,278 @@ fun FloatingSidebarOverlay(
     onClose: () -> Unit
 ) {
     var allApps by remember { mutableStateOf<List<LaunchableApp>>(emptyList()) }
+    var collapsedToRail by remember { mutableStateOf(false) }
     val lastResult by app.floatingWindowManager.lastResult.collectAsState()
+    val islandState by app.islandController.state.collectAsState()
 
     LaunchedEffect(Unit) {
         allApps = app.searchEngine.getInstalledApps()
     }
 
+    val unreadCounts = remember(islandState.notificationsHistory) {
+        islandState.notificationsHistory.groupingBy { it.packageName }.eachCount()
+    }
+
+    // Uncapped app list when no manual subset configured (deleted .take(8))
     val selectedApps = remember(allApps, settings.floatingAppPackages) {
         if (settings.floatingAppPackages.isEmpty()) {
-            allApps.take(8)
+            allApps
         } else {
             val map = allApps.associateBy { it.packageName }
-            settings.floatingAppPackages.mapNotNull { map[it] }
+            settings.floatingAppPackages.mapNotNull { map[it] }.ifEmpty { allApps }
         }
     }
 
-    Column(
-        modifier = Modifier
-            .width(248.dp)
-            .clip(RoundedCornerShape(26.dp))
-            .background(Color(0xF20B0B10))
-            .border(1.dp, IslandColors.GlassSpecularBorder, RoundedCornerShape(26.dp))
-            .padding(12.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = "Floating Windows",
-                color = IslandColors.TextPrimary,
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            IconButton(
-                onClick = {
-                    app.soundManager.playCollapse()
-                    onClose()
-                },
-                modifier = Modifier.minimumInteractiveComponentSize()
-            ) {
-                Icon(Icons.Filled.Close, contentDescription = "Close sidebar", tint = IslandColors.TextSecondary)
-            }
-        }
+    val sidebarShape = RoundedCornerShape(
+        topStart = 28.dp,
+        bottomStart = 28.dp,
+        topEnd = 8.dp,
+        bottomEnd = 8.dp
+    )
+    val effectiveAccent = if (settings.purpleSidebarTheme) IslandColors.AccentPurple else accentColor
+    val bgBrush = if (settings.purpleSidebarTheme) {
+        Brush.verticalGradient(listOf(Color(0xF5191026), Color(0xF50B0812)))
+    } else {
+        null
+    }
 
-        // Built-in draggable overlay Floating Mini-Windows (always work on any app/ROM)
-        Text(
-            text = "Overlay Mini-Windows (Draggable)",
-            color = IslandColors.TextSecondary,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Medium
-        )
-        Spacer(Modifier.height(6.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            MiniWindowShortcut(
-                label = "Calc",
-                icon = Icons.Filled.Calculate,
-                accentColor = accentColor,
-                modifier = Modifier.weight(1f),
-                testTag = "floating_mini_calc"
+    AnimatedContent(targetState = collapsedToRail, label = "sidebar_rail_toggle") { isRail ->
+        if (isRail) {
+            // Compact 56 dp curved rail mode
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier
+                    .width(56.dp)
+                    .islandGlassChrome(
+                        shape = sidebarShape,
+                        pillStyle = if (settings.solidFallback) com.example.system.PillStyle.BLACK else settings.pillStyle,
+                        glassDensity = settings.glassDensity,
+                        reduceGlass = settings.reduceGlass,
+                        solidFallback = settings.solidFallback,
+                        accentColor = effectiveAccent,
+                        backdrop = LocalAppBackdrop.current
+                    )
+                    .let { if (bgBrush != null) it.background(bgBrush) else it }
+                    .padding(vertical = 8.dp, horizontal = 4.dp)
             ) {
-                app.soundManager.playExpand()
-                app.islandController.setFloatingMiniTab(IslandTab.CALC)
-                app.islandController.collapse()
-            }
-            MiniWindowShortcut(
-                label = "Notes",
-                icon = Icons.Filled.Description,
-                accentColor = accentColor,
-                modifier = Modifier.weight(1f),
-                testTag = "floating_mini_notes"
-            ) {
-                app.soundManager.playExpand()
-                app.islandController.setFloatingMiniTab(IslandTab.NOTES)
-                app.islandController.collapse()
-            }
-            MiniWindowShortcut(
-                label = "Timer",
-                icon = Icons.Filled.Timer,
-                accentColor = accentColor,
-                modifier = Modifier.weight(1f),
-                testTag = "floating_mini_timer"
-            ) {
-                app.soundManager.playExpand()
-                app.islandController.setFloatingMiniTab(IslandTab.TIMER)
-                app.islandController.collapse()
-            }
-            MiniWindowShortcut(
-                label = "Search",
-                icon = Icons.Filled.Search,
-                accentColor = accentColor,
-                modifier = Modifier.weight(1f),
-                testTag = "floating_mini_search"
-            ) {
-                app.soundManager.playSearchOpen()
-                app.islandController.setFloatingMiniTab(IslandTab.SEARCH)
-                app.islandController.collapse()
-            }
-        }
-
-        Spacer(Modifier.height(10.dp))
-
-        Text(
-            text = if (lastResult != null) {
-                lastResult!!.pathUsed.title
-            } else {
-                "Apps (MIUI Freeform · Configure in Settings)"
-            },
-            color = accentColor,
-            fontSize = 10.sp,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis
-        )
-
-        Spacer(Modifier.height(6.dp))
-
-        LazyColumn(modifier = Modifier.height(176.dp)) {
-            items(selectedApps, key = { it.packageName }) { item ->
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .minimumInteractiveComponentSize()
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable {
-                            app.soundManager.playTap()
-                            app.floatingWindowManager.launchAppInFloatingWindow(item.packageName)
-                            onClose()
-                            app.islandController.collapse()
+                IconButton(
+                    onClick = { collapsedToRail = false },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Expand sidebar", tint = effectiveAccent)
+                }
+                selectedApps.take(6).forEach { item ->
+                    val unread = unreadCounts[item.packageName] ?: 0
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .clickable {
+                                app.soundManager.playTap()
+                                app.floatingWindowManager.launchAppInFloatingWindow(item.packageName)
+                                onClose()
+                                app.islandController.collapse()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        val bmp = item.iconBitmap
+                        if (bmp != null) {
+                            Image(bitmap = bmp, contentDescription = item.label, modifier = Modifier.size(30.dp).clip(CircleShape))
+                        } else {
+                            Box(Modifier.size(30.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.14f)))
                         }
-                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                        if (unread > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .size(14.dp)
+                                    .clip(CircleShape)
+                                    .background(effectiveAccent),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(unread.coerceAtMost(9).toString(), color = Color.Black, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
+                IconButton(onClick = { app.soundManager.playCollapse(); onClose() }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close sidebar", tint = IslandColors.TextSecondary, modifier = Modifier.size(16.dp))
+                }
+            }
+        } else {
+            // Full 280 dp curved Floating Windows Panel
+            Column(
+                modifier = Modifier
+                    .width(280.dp)
+                    .islandGlassChrome(
+                        shape = sidebarShape,
+                        pillStyle = if (settings.solidFallback) com.example.system.PillStyle.BLACK else settings.pillStyle,
+                        glassDensity = settings.glassDensity,
+                        reduceGlass = settings.reduceGlass,
+                        solidFallback = settings.solidFallback,
+                        accentColor = effectiveAccent,
+                        backdrop = LocalAppBackdrop.current
+                    )
+                    .let { if (bgBrush != null) it.background(bgBrush) else it }
+                    .padding(12.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    val bmp = item.iconBitmap
-                    if (bmp != null) {
-                        Image(bitmap = bmp, contentDescription = item.label, modifier = Modifier.size(28.dp).clip(CircleShape))
-                    } else {
-                        Box(Modifier.size(28.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.14f)))
-                    }
-                    Spacer(Modifier.width(10.dp))
                     Text(
-                        text = item.label,
+                        text = "Floating Windows",
                         color = IslandColors.TextPrimary,
-                        fontSize = 13.sp,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f)
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
-                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, tint = IslandColors.TextSecondary, modifier = Modifier.size(14.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        IconButton(
+                            onClick = {
+                                app.soundManager.playTap()
+                                collapsedToRail = true
+                            },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Dock as narrow rail", tint = IslandColors.TextSecondary)
+                        }
+                        IconButton(
+                            onClick = {
+                                app.soundManager.playCollapse()
+                                onClose()
+                            },
+                            modifier = Modifier.minimumInteractiveComponentSize()
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = "Close sidebar", tint = IslandColors.TextSecondary)
+                        }
+                    }
+                }
+
+                // Built-in draggable overlay Floating Mini-Windows
+                Text(
+                    text = "Overlay Mini-Windows (Draggable)",
+                    color = IslandColors.TextSecondary,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(Modifier.height(6.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    MiniWindowShortcut(
+                        label = "Calc",
+                        icon = Icons.Filled.Calculate,
+                        accentColor = effectiveAccent,
+                        modifier = Modifier.weight(1f),
+                        testTag = "floating_mini_calc"
+                    ) {
+                        app.soundManager.playExpand()
+                        app.islandController.setFloatingMiniTab(IslandTab.CALC)
+                        app.islandController.collapse()
+                    }
+                    MiniWindowShortcut(
+                        label = "Notes",
+                        icon = Icons.Filled.Description,
+                        accentColor = effectiveAccent,
+                        modifier = Modifier.weight(1f),
+                        testTag = "floating_mini_notes"
+                    ) {
+                        app.soundManager.playExpand()
+                        app.islandController.setFloatingMiniTab(IslandTab.NOTES)
+                        app.islandController.collapse()
+                    }
+                    MiniWindowShortcut(
+                        label = "Timer",
+                        icon = Icons.Filled.Timer,
+                        accentColor = effectiveAccent,
+                        modifier = Modifier.weight(1f),
+                        testTag = "floating_mini_timer"
+                    ) {
+                        app.soundManager.playExpand()
+                        app.islandController.setFloatingMiniTab(IslandTab.TIMER)
+                        app.islandController.collapse()
+                    }
+                    MiniWindowShortcut(
+                        label = "Search",
+                        icon = Icons.Filled.Search,
+                        accentColor = effectiveAccent,
+                        modifier = Modifier.weight(1f),
+                        testTag = "floating_mini_search"
+                    ) {
+                        app.soundManager.playSearchOpen()
+                        app.islandController.setFloatingMiniTab(IslandTab.SEARCH)
+                        app.islandController.collapse()
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                Text(
+                    text = if (lastResult != null) {
+                        lastResult!!.pathUsed.title
+                    } else {
+                        "All Apps (${selectedApps.size}) · Tap for Floating Window"
+                    },
+                    color = effectiveAccent,
+                    fontSize = 10.sp,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(Modifier.height(6.dp))
+
+                LazyColumn(modifier = Modifier.height(188.dp)) {
+                    items(selectedApps, key = { it.packageName }) { item ->
+                        val unread = unreadCounts[item.packageName] ?: 0
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .minimumInteractiveComponentSize()
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable {
+                                    app.soundManager.playTap()
+                                    app.floatingWindowManager.launchAppInFloatingWindow(item.packageName)
+                                    onClose()
+                                    app.islandController.collapse()
+                                }
+                                .padding(horizontal = 8.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box {
+                                val bmp = item.iconBitmap
+                                if (bmp != null) {
+                                    Image(bitmap = bmp, contentDescription = item.label, modifier = Modifier.size(28.dp).clip(CircleShape))
+                                } else {
+                                    Box(Modifier.size(28.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.14f)))
+                                }
+                                if (unread > 0) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.TopEnd)
+                                            .size(13.dp)
+                                            .clip(CircleShape)
+                                            .background(effectiveAccent),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(unread.coerceAtMost(9).toString(), color = Color.Black, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                text = item.label,
+                                color = IslandColors.TextPrimary,
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, tint = IslandColors.TextSecondary, modifier = Modifier.size(14.dp))
+                        }
+                    }
                 }
             }
         }

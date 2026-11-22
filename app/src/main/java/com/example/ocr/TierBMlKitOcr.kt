@@ -20,9 +20,9 @@ data class TierBSelectionResult(
 
 /**
  * Tier B OCR: Opt-in fallback only when Tier A finds no text.
- * Crops strictly around the pressed element / tap point, runs bundled on-device ML Kit
- * (Latin + Devanagari), builds word-level tokens in screen coordinates for interactive
- * iOS-style handle selection, and immediately recycles all bitmaps.
+ * Crops around the pressed element / tap point (up to ~900x520 px for multi-line photo blocks),
+ * runs bundled on-device ML Kit (Latin + Devanagari), builds word-level tokens in screen
+ * coordinates across multi-line blocks, and immediately recycles all bitmaps.
  */
 object TierBMlKitOcr {
 
@@ -43,12 +43,12 @@ object TierBMlKitOcr {
         return try {
             val inputImage = InputImage.fromBitmap(cropped, 0)
             val latinResult = runLatinRecognizer(inputImage)
-            val latinMatch = latinResult?.let { selectPressedLine(it, cropRect, localTapX, localTapY, tapX, tapY) }
+            val latinMatch = latinResult?.let { selectPressedBlock(it, cropRect, localTapX, localTapY, tapX, tapY) }
             if (latinMatch != null) {
                 latinMatch
             } else {
                 val devResult = runDevanagariRecognizer(inputImage)
-                devResult?.let { selectPressedLine(it, cropRect, localTapX, localTapY, tapX, tapY) }
+                devResult?.let { selectPressedBlock(it, cropRect, localTapX, localTapY, tapX, tapY) }
             }
         } finally {
             if (!cropped.isRecycled) {
@@ -73,7 +73,7 @@ object TierBMlKitOcr {
     ): Rect {
         val w = bitmapW.coerceAtLeast(1)
         val h = bitmapH.coerceAtLeast(1)
-        if (bounds != null && !bounds.isEmpty && bounds.width() <= 680 && bounds.height() <= 260) {
+        if (bounds != null && !bounds.isEmpty && bounds.width() <= 960 && bounds.height() <= 600) {
             return Rect(
                 bounds.left.coerceIn(0, w - 1),
                 bounds.top.coerceIn(0, h - 1),
@@ -83,8 +83,8 @@ object TierBMlKitOcr {
         }
         val cx = if (tapX >= 0) tapX.coerceIn(0, w - 1) else w / 2
         val cy = if (tapY >= 0) tapY.coerceIn(0, h - 1) else h / 2
-        val halfW = 260
-        val halfH = 100
+        val halfW = 450
+        val halfH = 260
         val left = (cx - halfW).coerceIn(0, (w - 2).coerceAtLeast(0))
         val top = (cy - halfH).coerceIn(0, (h - 2).coerceAtLeast(0))
         val right = (cx + halfW).coerceIn(left + 1, w)
@@ -92,7 +92,7 @@ object TierBMlKitOcr {
         return Rect(left, top, right, bottom)
     }
 
-    private fun selectPressedLine(
+    private fun selectPressedBlock(
         visionText: Text,
         cropRect: Rect,
         localX: Int,
@@ -100,14 +100,14 @@ object TierBMlKitOcr {
         rawX: Int,
         rawY: Int
     ): TierBSelectionResult? {
-        val allLines = visionText.textBlocks.flatMap { it.lines }
-        if (allLines.isEmpty()) return null
+        val blocks = visionText.textBlocks
+        if (blocks.isEmpty()) return null
 
-        val hitLine = allLines.firstOrNull { line ->
-            val box = line.boundingBox
+        val hitBlock = blocks.firstOrNull { block ->
+            val box = block.boundingBox
             box != null && box.contains(localX, localY)
-        } ?: allLines.minByOrNull { line ->
-            val box = line.boundingBox ?: return@minByOrNull Double.MAX_VALUE
+        } ?: blocks.minByOrNull { block ->
+            val box = block.boundingBox ?: return@minByOrNull Double.MAX_VALUE
             val dx = when {
                 localX < box.left -> (box.left - localX).toDouble()
                 localX > box.right -> (localX - box.right).toDouble()
@@ -121,66 +121,157 @@ object TierBMlKitOcr {
             hypot(dx, dy)
         } ?: return null
 
-        val lineText = hitLine.text.trim().takeIf { it.isNotEmpty() } ?: return null
-        val screenLineRect = hitLine.boundingBox?.let {
-            Rect(cropRect.left + it.left, cropRect.top + it.top, cropRect.left + it.right, cropRect.top + it.bottom)
-        } ?: cropRect
+        val blockLines = hitBlock.lines
+        val hitLine = blockLines.firstOrNull { line ->
+            val box = line.boundingBox
+            box != null && box.contains(localX, localY)
+        } ?: blockLines.minByOrNull { line ->
+            val box = line.boundingBox ?: return@minByOrNull Double.MAX_VALUE
+            val dx = when {
+                localX < box.left -> (box.left - localX).toDouble()
+                localX > box.right -> (localX - box.right).toDouble()
+                else -> 0.0
+            }
+            val dy = when {
+                localY < box.top -> (box.top - localY).toDouble()
+                localY > box.bottom -> (localY - box.bottom).toDouble()
+                else -> 0.0
+            }
+            hypot(dx, dy)
+        }
 
-        val elements = hitLine.elements
-        val selectionState = if (elements.isNotEmpty()) {
-            var cursor = 0
-            val tokens = mutableListOf<OcrTextToken>()
-            for (el in elements) {
-                val word = el.text.trim()
-                if (word.isEmpty()) continue
-                val startChar = lineText.indexOf(word, startIndex = cursor).takeIf { it >= 0 } ?: cursor
-                val endChar = (startChar + word.length).coerceAtMost(lineText.length)
-                cursor = endChar
-                val eb = el.boundingBox
-                val tokenRect = if (eb != null) {
-                    Rect(cropRect.left + eb.left, cropRect.top + eb.top, cropRect.left + eb.right, cropRect.top + eb.bottom)
-                } else {
-                    screenLineRect
+        // Select up to 4 contiguous lines around hitLine within the block
+        val linesToUse = if (blockLines.size <= 4) {
+            blockLines
+        } else {
+            val hitIdx = blockLines.indexOf(hitLine).coerceAtLeast(0)
+            val from = (hitIdx - 1).coerceAtLeast(0)
+            val to = (from + 4).coerceAtMost(blockLines.size)
+            blockLines.subList(from, to)
+        }
+        if (linesToUse.isEmpty()) return null
+
+        val fullBuilder = StringBuilder()
+        val tokens = mutableListOf<OcrTextToken>()
+        var minL = Int.MAX_VALUE
+        var minT = Int.MAX_VALUE
+        var maxR = Int.MIN_VALUE
+        var maxB = Int.MIN_VALUE
+
+        linesToUse.forEachIndexed { lineIdx, line ->
+            val cleanLine = line.text.trim()
+            if (cleanLine.isEmpty()) return@forEachIndexed
+            if (lineIdx > 0 && fullBuilder.isNotEmpty()) {
+                fullBuilder.append('\n')
+            }
+            val lineStartInFull = fullBuilder.length
+            fullBuilder.append(cleanLine)
+
+            line.boundingBox?.let { lb ->
+                minL = minOf(minL, cropRect.left + lb.left)
+                minT = minOf(minT, cropRect.top + lb.top)
+                maxR = maxOf(maxR, cropRect.left + lb.right)
+                maxB = maxOf(maxB, cropRect.top + lb.bottom)
+            }
+
+            var lineCursor = 0
+            val elements = line.elements
+            if (elements.isNotEmpty()) {
+                for (el in elements) {
+                    val word = el.text.trim()
+                    if (word.isEmpty()) continue
+                    val relStart = cleanLine.indexOf(word, startIndex = lineCursor).takeIf { it >= 0 } ?: lineCursor
+                    val relEnd = (relStart + word.length).coerceAtMost(cleanLine.length)
+                    lineCursor = relEnd
+                    val eb = el.boundingBox
+                    val screenRect = if (eb != null) {
+                        Rect(cropRect.left + eb.left, cropRect.top + eb.top, cropRect.left + eb.right, cropRect.top + eb.bottom)
+                    } else {
+                        val lb = line.boundingBox
+                        if (lb != null) {
+                            Rect(cropRect.left + lb.left, cropRect.top + lb.top, cropRect.left + lb.right, cropRect.top + lb.bottom)
+                        } else {
+                            cropRect
+                        }
+                    }
+                    tokens.add(
+                        OcrTextToken(
+                            text = word,
+                            startChar = lineStartInFull + relStart,
+                            endChar = lineStartInFull + relEnd,
+                            leftPx = screenRect.left,
+                            topPx = screenRect.top,
+                            rightPx = screenRect.right,
+                            bottomPx = screenRect.bottom
+                        )
+                    )
                 }
+            } else {
+                val lb = line.boundingBox
+                val screenRect = if (lb != null) {
+                    Rect(cropRect.left + lb.left, cropRect.top + lb.top, cropRect.left + lb.right, cropRect.top + lb.bottom)
+                } else cropRect
                 tokens.add(
                     OcrTextToken(
-                        text = word,
-                        startChar = startChar,
-                        endChar = endChar,
-                        leftPx = tokenRect.left,
-                        topPx = tokenRect.top,
-                        rightPx = tokenRect.right,
-                        bottomPx = tokenRect.bottom
+                        text = cleanLine,
+                        startChar = lineStartInFull,
+                        endChar = lineStartInFull + cleanLine.length,
+                        leftPx = screenRect.left,
+                        topPx = screenRect.top,
+                        rightPx = screenRect.right,
+                        bottomPx = screenRect.bottom
                     )
                 )
             }
-            val hitTokenIdx = tokens.indices.minByOrNull { idx ->
-                val tok = tokens[idx]
-                hypot(((tok.leftPx + tok.rightPx) / 2.0) - rawX, ((tok.topPx + tok.bottomPx) / 2.0) - rawY)
-            } ?: 0
-            OcrSelectionState(
-                fullText = lineText,
-                elementBounds = screenLineRect,
-                tokens = tokens.ifEmpty {
-                    TierAAccessibilityReader.buildSelectionState(lineText, screenLineRect, rawX, rawY, isFromTierB = true).tokens
-                },
-                startTokenIndex = hitTokenIdx,
-                endTokenIndex = hitTokenIdx,
-                anchorX = rawX.toFloat(),
-                anchorY = rawY.toFloat(),
-                isFromTierB = true
-            )
+        }
+
+        val combinedText = fullBuilder.toString().trim().takeIf { it.isNotEmpty() } ?: return null
+        val screenBlockRect = if (minL < maxR && minT < maxB) {
+            Rect(minL, minT, maxR, maxB)
+        } else {
+            hitBlock.boundingBox?.let {
+                Rect(cropRect.left + it.left, cropRect.top + it.top, cropRect.left + it.right, cropRect.top + it.bottom)
+            } ?: cropRect
+        }
+
+        val finalTokens = if (tokens.isNotEmpty()) {
+            tokens
         } else {
             TierAAccessibilityReader.buildSelectionState(
-                text = lineText,
-                bounds = screenLineRect,
+                text = combinedText,
+                bounds = screenBlockRect,
                 tapX = rawX,
                 tapY = rawY,
                 isFromTierB = true
-            )
+            ).tokens
         }
 
-        return TierBSelectionResult(lineText, selectionState)
+        val hitTokenIdx = finalTokens.indices.minByOrNull { idx ->
+            val tok = finalTokens[idx]
+            val dx = when {
+                rawX < tok.leftPx -> (tok.leftPx - rawX).toDouble()
+                rawX > tok.rightPx -> (rawX - tok.rightPx).toDouble()
+                else -> 0.0
+            }
+            val dy = when {
+                rawY < tok.topPx -> (tok.topPx - rawY).toDouble()
+                rawY > tok.bottomPx -> (rawY - tok.bottomPx).toDouble()
+                else -> 0.0
+            }
+            hypot(dx, dy)
+        } ?: 0
+
+        val selectionState = OcrSelectionState(
+            fullText = combinedText,
+            elementBounds = screenBlockRect,
+            tokens = finalTokens,
+            startTokenIndex = hitTokenIdx,
+            endTokenIndex = hitTokenIdx,
+            anchorX = rawX.toFloat(),
+            anchorY = rawY.toFloat(),
+            isFromTierB = true
+        )
+        return TierBSelectionResult(combinedText, selectionState)
     }
 
     private fun cropSafely(bitmap: Bitmap, bounds: Rect): Bitmap {

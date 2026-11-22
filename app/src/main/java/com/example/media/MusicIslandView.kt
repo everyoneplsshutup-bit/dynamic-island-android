@@ -1,6 +1,6 @@
 package com.example.media
 
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -10,13 +10,10 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +21,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -51,7 +49,7 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -65,12 +63,9 @@ import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -79,9 +74,14 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.system.TimerEngine
 import com.example.ui.theme.IslandColors
+import com.example.ui.theme.MotionTokens
+import com.example.ui.theme.WavyProgressBar
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 /**
- * 120Hz RenderThread-only waveform using graphicsLayer scaleY (zero Measure/Layout passes per frame).
+ * 120Hz RenderThread-only visualizer bars (~12 Hz stepped easing cadence) using graphicsLayer scaleY only.
+ * Zero Measure/Layout passes per frame; freezes cleanly when paused.
  */
 @Composable
 fun MusicCompactWaveform(isPlaying: Boolean, accentColor: Color) {
@@ -89,54 +89,59 @@ fun MusicCompactWaveform(isPlaying: Boolean, accentColor: Color) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(2.dp),
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.height(16.dp)
+            modifier = Modifier.height(14.dp)
         ) {
             repeat(4) {
                 Box(
                     modifier = Modifier
                         .width(2.5.dp)
-                        .height(5.dp)
+                        .height(4.dp)
                         .clip(CircleShape)
-                        .background(accentColor.copy(alpha = 0.7f))
+                        .background(accentColor.copy(alpha = 0.65f))
                 )
             }
         }
         return
     }
 
-    val infinite = rememberInfiniteTransition(label = "wave")
-    val p1 by infinite.animateFloat(
-        initialValue = 0.25f, targetValue = 1f,
-        animationSpec = infiniteRepeatable(tween(420, easing = LinearEasing), RepeatMode.Reverse),
-        label = "w1"
+    var tick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(isPlaying) {
+        while (isActive) {
+            delay(84L) // ~12 Hz cadence
+            tick = (tick + 1) and 0x7FFFFFFF
+        }
+    }
+    val p0 by animateFloatAsState(
+        targetValue = 0.28f + 0.72f * (((tick * 3 + 1) % 7) / 6f),
+        animationSpec = tween(78),
+        label = "cw0"
     )
-    val p2 by infinite.animateFloat(
-        initialValue = 0.9f, targetValue = 0.22f,
-        animationSpec = infiniteRepeatable(tween(340, easing = LinearEasing), RepeatMode.Reverse),
-        label = "w2"
+    val p1 by animateFloatAsState(
+        targetValue = 0.25f + 0.75f * (((tick * 5 + 3) % 7) / 6f),
+        animationSpec = tween(78),
+        label = "cw1"
     )
-    val p3 by infinite.animateFloat(
-        initialValue = 0.35f, targetValue = 0.96f,
-        animationSpec = infiniteRepeatable(tween(490, easing = LinearEasing), RepeatMode.Reverse),
-        label = "w3"
+    val p2 by animateFloatAsState(
+        targetValue = 0.30f + 0.70f * (((tick * 2 + 5) % 7) / 6f),
+        animationSpec = tween(78),
+        label = "cw2"
     )
-    val p4 by infinite.animateFloat(
-        initialValue = 0.8f, targetValue = 0.28f,
-        animationSpec = infiniteRepeatable(tween(380, easing = LinearEasing), RepeatMode.Reverse),
-        label = "w4"
+    val p3 by animateFloatAsState(
+        targetValue = 0.24f + 0.76f * (((tick * 4 + 2) % 7) / 6f),
+        animationSpec = tween(78),
+        label = "cw3"
     )
-    val bars = listOf(p1, p2, p3, p4)
 
     Row(
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.height(16.dp)
+        modifier = Modifier.height(14.dp)
     ) {
-        bars.forEach { frac ->
+        listOf(p0, p1, p2, p3).forEach { frac ->
             Box(
                 modifier = Modifier
                     .width(2.5.dp)
-                    .height(14.dp)
+                    .height(13.dp)
                     .graphicsLayer { scaleY = frac }
                     .clip(CircleShape)
                     .background(accentColor)
@@ -147,42 +152,59 @@ fun MusicCompactWaveform(isPlaying: Boolean, accentColor: Color) {
 
 @Composable
 private fun MusicLiveEqualizer(isPlaying: Boolean, accentColor: Color) {
-    val heights = if (isPlaying) {
-        val infinite = rememberInfiniteTransition(label = "eq")
-        val e1 by infinite.animateFloat(0.24f, 0.92f, infiniteRepeatable(tween(340, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "e1")
-        val e2 by infinite.animateFloat(0.95f, 0.28f, infiniteRepeatable(tween(420, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "e2")
-        val e3 by infinite.animateFloat(0.38f, 1.00f, infiniteRepeatable(tween(290, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "e3")
-        val e4 by infinite.animateFloat(0.88f, 0.24f, infiniteRepeatable(tween(390, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "e4")
-        val e5 by infinite.animateFloat(0.32f, 0.94f, infiniteRepeatable(tween(450, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "e5")
-        val e6 by infinite.animateFloat(0.84f, 0.26f, infiniteRepeatable(tween(360, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "e6")
-        listOf(e1, e2, e3, e4, e5, e6)
+    var tick by remember { mutableIntStateOf(0) }
+    LaunchedEffect(isPlaying) {
+        if (!isPlaying) return@LaunchedEffect
+        while (isActive) {
+            delay(84L) // ~12 Hz update, eased smoothly on RenderThread
+            tick = (tick + 1) and 0x7FFFFFFF
+        }
+    }
+
+    val targets = if (isPlaying) {
+        listOf(
+            0.24f + 0.70f * (((tick * 3 + 0) % 8) / 7f),
+            0.30f + 0.70f * (((tick * 5 + 2) % 8) / 7f),
+            0.26f + 0.74f * (((tick * 7 + 4) % 8) / 7f),
+            0.22f + 0.72f * (((tick * 2 + 6) % 8) / 7f)
+        )
     } else {
-        listOf(0.22f, 0.28f, 0.24f, 0.28f, 0.22f, 0.20f)
+        listOf(0.22f, 0.28f, 0.24f, 0.20f)
     }
 
     Row(
         horizontalArrangement = Arrangement.spacedBy(2.dp),
         verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.height(20.dp)
+        modifier = Modifier.height(16.dp)
     ) {
-        heights.forEachIndexed { idx, frac ->
-            val alpha = if (isPlaying) (0.72f + (idx % 2) * 0.28f) else 0.36f
+        targets.forEachIndexed { idx, targetFrac ->
+            val animFrac by animateFloatAsState(
+                targetValue = targetFrac,
+                animationSpec = tween(78, easing = FastOutSlowInEasing),
+                label = "eq_$idx"
+            )
             Box(
                 modifier = Modifier
                     .width(2.5.dp)
-                    .height(18.dp)
-                    .graphicsLayer { scaleY = frac }
+                    .height(15.dp)
+                    .graphicsLayer { scaleY = animFrac }
                     .clip(CircleShape)
-                    .background((if (isPlaying) accentColor else IslandColors.TextSecondary).copy(alpha = alpha))
+                    .background((if (isPlaying) accentColor else IslandColors.TextSecondary).copy(alpha = if (isPlaying) 0.88f else 0.36f))
             )
         }
     }
 }
 
+/**
+ * Compact Build #5 Music Card strictly capped at <= 132 dp height.
+ * Features rotating circular album art (pauses when paused; toggleable via [rotateAlbumArt]),
+ * RenderThread M3E WavyProgressBar seekbar, 12Hz visualizer bars, and on-device lyrics + designed empty state.
+ */
 @Composable
 fun MusicExpandedView(
     state: MediaUiState,
     accentColor: Color,
+    rotateAlbumArt: Boolean = true,
     onTogglePlayPause: () -> Unit,
     onPrevious: () -> Unit,
     onNext: () -> Unit,
@@ -192,34 +214,43 @@ fun MusicExpandedView(
     onToggleLike: () -> Unit,
     onOpenPlayer: () -> Unit
 ) {
-    // Dynamic artwork-derived accent takes precedence when track has cover art
     val effectiveAccent = remember(state.artworkAccentArgb, accentColor) {
         state.artworkAccentArgb?.let { Color(it) } ?: accentColor
     }
-    var lyricsFocusMode by remember { mutableStateOf(false) }
+    var showLyricsPane by remember { mutableStateOf(false) }
 
-    val infinite = rememberInfiniteTransition(label = "art_pulse")
-    val playingPulse by infinite.animateFloat(
-        initialValue = 1.0f,
-        targetValue = 1.06f,
-        animationSpec = infiniteRepeatable(tween(880, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "pulse_val"
-    )
+    // Continuous vinyl spin while playing & enabled; freezes cleanly on pause without snapping back to 0°
+    val artRotation = remember { Animatable(0f) }
+    LaunchedEffect(state.isPlaying, rotateAlbumArt) {
+        if (state.isPlaying && rotateAlbumArt) {
+            while (isActive) {
+                val start = artRotation.value % 360f
+                artRotation.snapTo(start)
+                artRotation.animateTo(
+                    targetValue = start + 360f,
+                    animationSpec = tween(durationMillis = 12_000, easing = LinearEasing)
+                )
+            }
+        } else if (!rotateAlbumArt) {
+            artRotation.snapTo(0f)
+        }
+    }
+
     val artScale by animateFloatAsState(
-        targetValue = if (state.isPlaying) playingPulse else 0.94f,
-        animationSpec = spring(dampingRatio = 0.70f, stiffness = 420f),
+        targetValue = if (state.isPlaying) 1.0f else 0.94f,
+        animationSpec = spring(dampingRatio = 0.72f, stiffness = 420f),
         label = "art_scale"
     )
     val playBtnScale by animateFloatAsState(
         targetValue = if (state.isPlaying) 1.06f else 1.0f,
-        animationSpec = spring(dampingRatio = 0.58f, stiffness = 500f),
+        animationSpec = spring(dampingRatio = 0.62f, stiffness = 520f),
         label = "play_btn_scale"
     )
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(220.dp)
+            .heightIn(max = 132.dp)
             .drawBehind {
                 if (state.hasActiveSession) {
                     drawCircle(
@@ -228,18 +259,18 @@ fun MusicExpandedView(
                                 effectiveAccent.copy(alpha = if (state.isPlaying) 0.22f else 0.08f),
                                 Color.Transparent
                             ),
-                            center = Offset(42.dp.toPx(), 38.dp.toPx()),
-                            radius = 136.dp.toPx()
+                            center = Offset(34.dp.toPx(), 26.dp.toPx()),
+                            radius = 110.dp.toPx()
                         ),
-                        center = Offset(42.dp.toPx(), 38.dp.toPx()),
-                        radius = 136.dp.toPx()
+                        center = Offset(34.dp.toPx(), 26.dp.toPx()),
+                        radius = 110.dp.toPx()
                     )
                 }
             }
-            .padding(horizontal = 14.dp, vertical = 4.dp),
+            .padding(horizontal = 12.dp, vertical = 2.dp),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // Header: Artwork + Track Info + Live Equalizer + Lyrics toggle + Like
+        // Row 1 (Top): Rotating Artwork + Title/Artist + Visualizer + Lyrics Toggle + Like
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -248,14 +279,15 @@ fun MusicExpandedView(
         ) {
             Box(
                 modifier = Modifier
-                    .size(48.dp)
+                    .size(40.dp)
                     .graphicsLayer {
                         scaleX = artScale
                         scaleY = artScale
+                        rotationZ = artRotation.value
                     }
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(if (rotateAlbumArt) CircleShape else RoundedCornerShape(12.dp))
                     .background(Color(0xFF1F2028))
-                    .border(0.75.dp, effectiveAccent.copy(alpha = 0.45f), RoundedCornerShape(14.dp)),
+                    .border(1.dp, effectiveAccent.copy(alpha = 0.55f), if (rotateAlbumArt) CircleShape else RoundedCornerShape(12.dp)),
                 contentAlignment = Alignment.Center
             ) {
                 if (state.albumArt != null) {
@@ -263,39 +295,40 @@ fun MusicExpandedView(
                         bitmap = state.albumArt.asImageBitmap(),
                         contentDescription = "Album art",
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier.size(48.dp)
+                        modifier = Modifier.size(40.dp)
                     )
                 } else {
                     Icon(
                         imageVector = Icons.Filled.MusicNote,
                         contentDescription = "Music",
                         tint = effectiveAccent,
-                        modifier = Modifier.size(24.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
 
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(10.dp))
 
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = if (state.hasActiveSession) state.title else "No Active Music Session",
                     style = MaterialTheme.typography.titleMedium,
-                    fontSize = 15.sp,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
                     color = IslandColors.TextPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = when {
-                        !state.hasNotificationAccess -> "Enable Notification Access for PixelMusic"
+                        !state.hasNotificationAccess -> "Allow Notification Access for PixelMusic"
                         state.hasActiveSession -> listOf(state.artist, state.appLabel)
                             .filter { it.isNotBlank() }
                             .joinToString(" · ")
-                        else -> "Start playing in PixelMusic or Spotify"
+                        else -> "Play music in your selected source app"
                     },
                     style = MaterialTheme.typography.bodyMedium,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     color = IslandColors.TextSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -305,63 +338,84 @@ fun MusicExpandedView(
             Spacer(Modifier.width(6.dp))
             MusicLiveEqualizer(isPlaying = state.isPlaying, accentColor = effectiveAccent)
 
-            if (state.lyrics.isNotEmpty()) {
-                IconButton(
-                    onClick = { lyricsFocusMode = !lyricsFocusMode },
-                    modifier = Modifier
-                        .size(34.dp)
-                        .testTag("music_lyrics_toggle")
-                ) {
-                    Icon(
-                        imageVector = Icons.Filled.Lyrics,
-                        contentDescription = "Toggle expanded lyrics",
-                        tint = if (lyricsFocusMode) effectiveAccent else IslandColors.TextSecondary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
+            IconButton(
+                onClick = { showLyricsPane = !showLyricsPane },
+                modifier = Modifier
+                    .size(32.dp)
+                    .testTag("music_lyrics_toggle")
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Lyrics,
+                    contentDescription = "Toggle on-device lyrics",
+                    tint = if (showLyricsPane) effectiveAccent else IslandColors.TextSecondary,
+                    modifier = Modifier.size(16.dp)
+                )
             }
 
             if (state.supportsLike) {
                 IconButton(
                     onClick = onToggleLike,
                     modifier = Modifier
-                        .minimumInteractiveComponentSize()
+                        .size(32.dp)
                         .testTag("music_like_button")
                 ) {
                     Icon(
                         imageVector = if (state.isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                         contentDescription = "Like track",
-                        tint = if (state.isLiked) IslandColors.AccentRed else IslandColors.TextSecondary
+                        tint = if (state.isLiked) IslandColors.AccentRed else IslandColors.TextSecondary,
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }
         }
 
-        // Live synced lyrics block with vertical edge fade
-        if (state.lyrics.isNotEmpty()) {
-            SyncedLyricsPanel(
-                lyrics = state.lyrics,
-                positionMs = state.positionMs,
-                accentColor = effectiveAccent,
-                expandedHeight = lyricsFocusMode,
-                onSeekTo = onSeekTo,
-                onToggleExpand = { lyricsFocusMode = !lyricsFocusMode }
-            )
-        }
-
-        // Seekbar hides cleanly when Lyrics Focus Mode expands to preserve 220.dp cap
-        AnimatedVisibility(visible = !lyricsFocusMode || state.lyrics.isEmpty()) {
+        // Row 2 (Middle): Wavy Seekbar OR On-Device Lyrics (with designed empty state)
+        if (showLyricsPane) {
+            if (state.lyrics.isNotEmpty()) {
+                SyncedLyricsPanel(
+                    lyrics = state.lyrics,
+                    positionMs = state.positionMs,
+                    accentColor = effectiveAccent,
+                    onSeekTo = onSeekTo,
+                    onClose = { showLyricsPane = false }
+                )
+            } else {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(34.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.White.copy(alpha = 0.05f))
+                        .clickable { showLyricsPane = false }
+                        .padding(horizontal = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Icon(Icons.Filled.Lyrics, contentDescription = null, tint = IslandColors.TextTertiary, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "No lyrics on device",
+                        color = IslandColors.TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        } else {
             KnobSeekBar(
                 positionMs = state.positionMs,
                 durationMs = state.durationMs,
+                isPlaying = state.isPlaying,
                 accentColor = effectiveAccent,
                 onSeekTo = onSeekTo
             )
         }
 
-        // Transport Controls Row
+        // Row 3 (Bottom): Compact Transport Controls
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(40.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -375,7 +429,8 @@ fun MusicExpandedView(
                     Icon(
                         imageVector = Icons.Filled.Shuffle,
                         contentDescription = "Toggle shuffle",
-                        tint = if (state.isShuffled) effectiveAccent else IslandColors.TextSecondary
+                        tint = if (state.isShuffled) effectiveAccent else IslandColors.TextSecondary,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
@@ -390,13 +445,13 @@ fun MusicExpandedView(
                     imageVector = Icons.Filled.SkipPrevious,
                     contentDescription = "Previous track",
                     tint = IslandColors.TextPrimary,
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
 
             Box(
                 modifier = Modifier
-                    .size(48.dp)
+                    .size(40.dp)
                     .graphicsLayer {
                         scaleX = playBtnScale
                         scaleY = playBtnScale
@@ -411,7 +466,7 @@ fun MusicExpandedView(
                     imageVector = if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                     contentDescription = if (state.isPlaying) "Pause" else "Play",
                     tint = if (state.isPlaying) effectiveAccent else IslandColors.TextPrimary,
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
 
@@ -425,7 +480,7 @@ fun MusicExpandedView(
                     imageVector = Icons.Filled.SkipNext,
                     contentDescription = "Next track",
                     tint = IslandColors.TextPrimary,
-                    modifier = Modifier.size(28.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
 
@@ -439,7 +494,8 @@ fun MusicExpandedView(
                     Icon(
                         imageVector = Icons.Filled.Repeat,
                         contentDescription = "Cycle repeat (${state.repeatModeLabel})",
-                        tint = if (state.repeatModeLabel != "Off") effectiveAccent else IslandColors.TextSecondary
+                        tint = if (state.repeatModeLabel != "Off") effectiveAccent else IslandColors.TextSecondary,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
@@ -452,60 +508,58 @@ private fun SyncedLyricsPanel(
     lyrics: List<LyricLine>,
     positionMs: Long,
     accentColor: Color,
-    expandedHeight: Boolean,
     onSeekTo: (Long) -> Unit,
-    onToggleExpand: () -> Unit
+    onClose: () -> Unit
 ) {
     val activeIndex = remember(lyrics, positionMs) {
         val timed = lyrics.indexOfLast { it.timestampMs in 0..positionMs }
         if (timed >= 0) timed else 0
     }
     val listState = rememberLazyListState()
-    LaunchedEffect(activeIndex, expandedHeight) {
+    LaunchedEffect(activeIndex) {
         if (activeIndex in lyrics.indices) {
             listState.animateScrollToItem((activeIndex - 1).coerceAtLeast(0))
         }
     }
 
-    val panelHeight = if (expandedHeight) 104.dp else 46.dp
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(panelHeight)
-            .clip(RoundedCornerShape(14.dp))
+            .height(36.dp)
+            .clip(RoundedCornerShape(10.dp))
             .background(Color.White.copy(alpha = 0.06f))
-            .clickable(onClick = onToggleExpand)
+            .clickable(onClick = onClose)
             .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
             .drawWithContent {
                 drawContent()
                 drawRect(
                     brush = Brush.verticalGradient(
                         0.0f to Color.Transparent,
-                        0.18f to Color.Black,
-                        0.82f to Color.Black,
+                        0.2f to Color.Black,
+                        0.8f to Color.Black,
                         1.0f to Color.Transparent
                     ),
                     blendMode = BlendMode.DstIn
                 )
             }
-            .padding(horizontal = 10.dp, vertical = 4.dp)
+            .padding(horizontal = 8.dp, vertical = 2.dp)
     ) {
         LazyColumn(state = listState) {
             itemsIndexed(lyrics) { index, line ->
                 val isCurrent = index == activeIndex
                 Text(
                     text = line.text,
-                    color = if (isCurrent) accentColor else IslandColors.TextSecondary.copy(alpha = 0.58f),
-                    fontSize = if (isCurrent) 13.sp else 11.sp,
+                    color = if (isCurrent) accentColor else IslandColors.TextSecondary.copy(alpha = 0.6f),
+                    fontSize = if (isCurrent) 12.sp else 10.sp,
                     fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable {
-                            if (line.timestampMs >= 0L) onSeekTo(line.timestampMs) else onToggleExpand()
+                            if (line.timestampMs >= 0L) onSeekTo(line.timestampMs) else onClose()
                         }
-                        .padding(vertical = 2.dp)
+                        .padding(vertical = 1.dp)
                 )
             }
         }
@@ -517,94 +571,34 @@ fun KnobSeekBar(
     positionMs: Long,
     durationMs: Long,
     accentColor: Color,
+    isPlaying: Boolean = true,
     onSeekTo: (Long) -> Unit
 ) {
     val safeDuration = durationMs.coerceAtLeast(1L)
     val liveFraction = (positionMs.toFloat() / safeDuration.toFloat()).coerceIn(0f, 1f)
 
-    var isDragging by remember { mutableStateOf(false) }
-    var dragFraction by remember { mutableFloatStateOf(liveFraction) }
-    var widthPx by remember { mutableFloatStateOf(1f) }
-
-    val displayFraction = if (isDragging) dragFraction else liveFraction
-    val displayedPositionMs = (displayFraction * safeDuration).toLong()
-
     Column(modifier = Modifier.fillMaxWidth()) {
-        Canvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(24.dp)
-                .onSizeChanged { widthPx = it.width.toFloat().coerceAtLeast(1f) }
-                .pointerInput(safeDuration) {
-                    detectTapGestures { offset ->
-                        val frac = (offset.x / widthPx).coerceIn(0f, 1f)
-                        onSeekTo((frac * safeDuration).toLong())
-                    }
-                }
-                .pointerInput(safeDuration) {
-                    detectDragGestures(
-                        onDragStart = { offset ->
-                            isDragging = true
-                            dragFraction = (offset.x / widthPx).coerceIn(0f, 1f)
-                        },
-                        onDrag = { change, _ ->
-                            change.consume()
-                            dragFraction = (change.position.x / widthPx).coerceIn(0f, 1f)
-                        },
-                        onDragEnd = {
-                            onSeekTo((dragFraction * safeDuration).toLong())
-                            isDragging = false
-                        },
-                        onDragCancel = { isDragging = false }
-                    )
-                }
-                .testTag("music_knob_seekbar")
-        ) {
-            val cy = size.height / 2f
-            val pad = 8.dp.toPx()
-            val trackStart = pad
-            val trackEnd = (size.width - pad).coerceAtLeast(pad + 1f)
-            val knobX = trackStart + (trackEnd - trackStart) * displayFraction
-
-            drawLine(
-                color = Color.White.copy(alpha = 0.22f),
-                start = Offset(trackStart, cy),
-                end = Offset(trackEnd, cy),
-                strokeWidth = 4.dp.toPx(),
-                cap = StrokeCap.Round
-            )
-            drawLine(
-                color = accentColor,
-                start = Offset(trackStart, cy),
-                end = Offset(knobX, cy),
-                strokeWidth = if (isDragging) 5.dp.toPx() else 4.dp.toPx(),
-                cap = StrokeCap.Round
-            )
-            if (isDragging) {
-                drawCircle(
-                    color = accentColor.copy(alpha = 0.30f),
-                    radius = 13.dp.toPx(),
-                    center = Offset(knobX, cy)
-                )
-            }
-            drawCircle(
-                color = Color.White,
-                radius = if (isDragging) 8.dp.toPx() else 6.5.dp.toPx(),
-                center = Offset(knobX, cy)
-            )
-        }
+        WavyProgressBar(
+            progress = liveFraction,
+            isActiveWave = isPlaying,
+            accentColor = accentColor,
+            height = 18.dp,
+            interactive = true,
+            onSeekFraction = { frac -> onSeekTo((frac * safeDuration).toLong()) },
+            modifier = Modifier.testTag("music_knob_seekbar")
+        )
 
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
-                text = TimerEngine.formatDuration(displayedPositionMs),
-                style = TextStyle(fontSize = 11.sp, color = IslandColors.TextSecondary, fontFeatureSettings = "tnum")
+                text = TimerEngine.formatDuration(positionMs),
+                style = TextStyle(fontSize = 10.sp, color = IslandColors.TextSecondary, fontFeatureSettings = "tnum")
             )
             Text(
                 text = TimerEngine.formatDuration(durationMs),
-                style = TextStyle(fontSize = 11.sp, color = IslandColors.TextSecondary, fontFeatureSettings = "tnum")
+                style = TextStyle(fontSize = 10.sp, color = IslandColors.TextSecondary, fontFeatureSettings = "tnum")
             )
         }
     }

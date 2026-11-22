@@ -25,6 +25,7 @@ data class VaultItemEntity(
 object VaultConstants {
     const val EXPIRY_MILLIS = 10L * 60L * 1000L // 10 minutes
     const val TRASH_RETENTION_MILLIS = 24L * 60L * 60L * 1000L // 24 hours
+    const val MAX_ACTIVE_ITEMS = 12
 }
 
 @Dao
@@ -37,6 +38,9 @@ interface VaultDao {
 
     @Query("SELECT * FROM vault_items WHERE id = :id LIMIT 1")
     suspend fun getById(id: Long): VaultItemEntity?
+
+    @Query("SELECT * FROM vault_items WHERE isTrashed = 0 ORDER BY createdAt ASC")
+    suspend fun getActiveOldestFirst(): List<VaultItemEntity>
 
     @Query("SELECT * FROM vault_items WHERE isTrashed = 0 AND expiresAt <= :now")
     suspend fun findExpiredActive(now: Long): List<VaultItemEntity>

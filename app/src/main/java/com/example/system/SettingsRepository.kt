@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
@@ -17,53 +18,98 @@ import kotlinx.serialization.json.Json
 
 private val Context.settingsDataStore: DataStore<Preferences> by preferencesDataStore(name = "dynamic_island_settings")
 
-enum class PillStyle { BLACK, GLASS }
+enum class PillStyle(val label: String) {
+    BLACK("Dark"),
+    APPLE_GLASS("Apple Glass"),
+    LIQUID_GLASS("Liquid Glass")
+}
+
+enum class WhenIdleMode(val label: String, val subtitle: String) {
+    CAMERA_ONLY("Camera Only", "Thin minimal border around the front camera"),
+    INFO_PILL("Info Pill", "Show two quiet widgets left & right of the camera"),
+    HIDDEN("Hidden", "Completely invisible until an activity or alert arrives")
+}
+
+enum class MiniCapsuleSize(val label: String, val widthDp: Float, val heightDp: Float) {
+    COMPACT("Compact", 204f, 48f),
+    STANDARD("Standard", 252f, 58f)
+}
+
 enum class AccentTheme { ORANGE, CYAN, GREEN, DYNAMIC }
 enum class SpringFeel { SNAPPY, BALANCED, GENTLE }
+
 enum class AnimationStyle(val label: String, val subtitle: String) {
     FRUIT("Springy", "Playful bouncy overshoot"),
     SPRING("Standard", "Balanced M3 Expressive spring"),
     SMOOTH("Calm", "Minimal bounce, fastest settle"),
     NONE("Off", "Instant snap with zero animation")
 }
+
 enum class OpeningEffect(val label: String) {
     LIQUID("Liquid"),
     SPRING("Spring"),
     SMOOTH("Smooth"),
     POP("Pop")
 }
+
 enum class ContentEffect(val label: String) {
     FADE("Fade"),
     SLIDE_UP("Slide Up"),
     SCALE_IN("Scale In"),
     BLUR_IN("Blur In")
 }
+
 enum class PillSwipeAction(val label: String) {
     TRACK_OR_NOTIF("Track / Cycle Notif"),
     VOLUME("Media Volume"),
     SEARCH("Open Search"),
     NONE("Off")
 }
+
 enum class ExpandedSwipeAction(val label: String) {
     NEXT_NOTIFICATION("Next Notif"),
     DISMISS("Dismiss"),
     COLLAPSE("Collapse"),
     NONE("Off")
 }
+
 enum class CompanionPosition { LEFT, RIGHT }
 enum class HapticsStrength { OFF, LIGHT, MEDIUM }
 enum class CompactPreference { AUTO, MUSIC, TIMER, BATTERY, NOTIFICATIONS }
-enum class IdleWidgetType { NONE, CLOCK, BATTERY_RING, SEARCH_SHORTCUT, QUICK_NOTE }
+
+enum class IdleWidgetType(val label: String) {
+    NONE("Nothing"),
+    TIME("Time"),
+    BATTERY("Battery"),
+    DATE("Date"),
+    NEXT_ALARM("Next Alarm"),
+    UNREAD_COUNT("Unread Count"),
+    NETWORK("Network"),
+    NET_SPEED("Net Speed"),
+    CLOCK("Clock"),
+    BATTERY_RING("Battery Ring"),
+    SEARCH_SHORTCUT("Search"),
+    QUICK_NOTE("Quick Note")
+}
+
 enum class LockScreenPreset { MINIMAL, PRIVACY_HIDE_TEXT, HIDDEN }
 enum class IslandGesture { OPEN_APP, EXPAND, TOGGLE_PLAY, OPEN_CUSTOMISE, SELECT_OCR }
 
-enum class EventKind(val label: String, val subtitle: String) {
-    CHARGING("Charging Mini Capsule", "Show 3s battery level & wattage capsule when plugged in"),
-    TIMER("Timer & Sleep", "Show countdown ring in compact/split pill"),
-    MUSIC("Music Playback", "Show PixelMusic/media session in island pill"),
-    NOTIFICATIONS("Notifications", "Show incoming notification preview pill"),
-    VAULT("Vault Expiry & Capture", "Show confirmation & expiry alerts from 10-min Vault"),
-    VOICE_MEMO("Voice Memo", "Show live recording elapsed badge in island")
+enum class EventGroup(val label: String) {
+    MUSIC("Music"),
+    SYSTEM("System"),
+    NOTIFICATIONS("Notifications"),
+    TIMERS_SHELF("Timers & Shelf")
+}
+
+enum class EventKind(val label: String, val subtitle: String, val group: EventGroup) {
+    CHARGING("Charging Mini Capsule", "Show transient battery level & wattage capsule when plugged in", EventGroup.SYSTEM),
+    LOW_BATTERY("Low Battery Warning", "Transient warning at 20%, 15%, and 10% + red glyph <=15%", EventGroup.SYSTEM),
+    TIMER("Timer & Sleep", "Show countdown ring in compact/split pill", EventGroup.TIMERS_SHELF),
+    MUSIC("Music Playback", "Show chosen music player session in island pill", EventGroup.MUSIC),
+    NOTIFICATIONS("Notifications", "Show incoming notification preview pill (app icon + name only)", EventGroup.NOTIFICATIONS),
+    VAULT("Shelf Expiry & Capture", "Show confirmation & expiry alerts from 10-min Shelf", EventGroup.TIMERS_SHELF),
+    VOICE_MEMO("Voice Memo", "Show live recording elapsed badge in island", EventGroup.SYSTEM)
 }
 
 @Serializable
@@ -78,34 +124,38 @@ enum class IslandTab(
     val isMainRow: Boolean
 ) {
     SEARCH("Search", "Apps, contacts, notes & inline math", true),
-    MUSIC("Music", "PixelMusic-first player & live lyrics", true),
-    CALC("Calc", "iOS-style working calculator", true),
-    TIMER("Timer", "Countdown rings, Clock mirror & stopwatch", true),
-    TOOLS("Tools", "Flashlight, DND, brightness & panels", true),
-    VAULT("Vault", "10-minute auto-expiring photo vault", false),
-    CLIPS("Clips", "Foreground-only clipboard history", false),
-    NOTES("Notes", "On-device quick notes & links", false),
+    MUSIC("Music", "On-device media player & local lyrics", true),
+    CALC("Calc", "Compact iOS-style calculator", true),
+    TIMER("Timer", "Countdown rings, sleep dial & stopwatch", true),
+    TOOLS("Tools", "Torch beam, Keep Awake, brightness & OCR", true),
+    VAULT("Shelf", "10-minute auto-expiring photo shelf", false),
+    CLIPS("Clips", "Foreground-only saved clip history", false),
+    NOTES("Notes", "On-device auto-saved quick notes", false),
     MEMO("Memo", "One-tap voice memo recorder", false),
-    ALERTS("Alerts", "Timer, charging & vault expiry alerts", false)
+    ALERTS("Alerts", "App-grouped notifications & activity alerts", false)
 }
 
 enum class QuickToggleType(val label: String) {
     FLASHLIGHT("Torch"),
     DND("DND"),
+    KEEP_AWAKE("Keep Awake"),
     BRIGHTNESS("Bright"),
     WIFI("Wi-Fi"),
     BLUETOOTH("Bluetooth"),
     SELECT_OCR("Select OCR"),
-    VAULT_CAPTURE("Shot->Vault")
+    VAULT_CAPTURE("Shot->Shelf")
 }
 
 @Serializable
 data class IslandSettings(
     // 1. Look
-    val pillStyle: PillStyle = PillStyle.BLACK,
-    val glassDensity: Float = 0.62f,
+    val pillStyle: PillStyle = PillStyle.APPLE_GLASS,
+    val glassDensity: Float = 0.65f,
+    val reduceGlass: Boolean = false,
     val solidFallback: Boolean = false,
     val accentTheme: AccentTheme = AccentTheme.ORANGE,
+    val rotateAlbumArt: Boolean = true,
+    val purpleSidebarTheme: Boolean = false,
 
     // 2. Motion
     val animationSpeed: Float = 1.0f,
@@ -123,16 +173,25 @@ data class IslandSettings(
     val pillSwipeRightGesture: PillSwipeAction = PillSwipeAction.TRACK_OR_NOTIF,
     val expandedSwipeLeftGesture: ExpandedSwipeAction = ExpandedSwipeAction.DISMISS,
     val expandedSwipeRightGesture: ExpandedSwipeAction = ExpandedSwipeAction.NEXT_NOTIFICATION,
+    val expandedLongPressGesture: ExpandedSwipeAction = ExpandedSwipeAction.COLLAPSE,
+    val miniCapsuleSize: MiniCapsuleSize = MiniCapsuleSize.COMPACT,
+    val miniCapsuleDurationMs: Long = 3000L,
 
-    // 3. Pill & Calibration
+    // 3. Pill & Calibration (Redmi Note 10 Pro default cutout ~26x33 dp)
     val cutoutXOffsetDp: Float = 0f,
     val cutoutYOffsetDp: Float = 6f,
     val cutoutWidthDp: Float = 26f,
-    val cutoutHeightDp: Float = 26f,
+    val cutoutHeightDp: Float = 33f,
+    val cutoutCornerRadiusDp: Float = 16f,
+    val calibrationConfirmed: Boolean = true,
     val compactPreference: CompactPreference = CompactPreference.AUTO,
     val companionPosition: CompanionPosition = CompanionPosition.RIGHT,
+    val whenIdleMode: WhenIdleMode = WhenIdleMode.CAMERA_ONLY,
     val idleWidget: IdleWidgetType = IdleWidgetType.NONE,
+    val idleLeftWidget: IdleWidgetType = IdleWidgetType.TIME,
+    val idleRightWidget: IdleWidgetType = IdleWidgetType.BATTERY,
     val lockScreenPreset: LockScreenPreset = LockScreenPreset.MINIMAL,
+    val alertsDwellMs: Long = 6000L,
 
     // 4. Features (Hard cap: max 8 enabled on island)
     val enabledTabs: List<IslandTab> = listOf(
@@ -162,11 +221,13 @@ data class IslandSettings(
     val includedQuickToggles: List<QuickToggleType> = listOf(
         QuickToggleType.FLASHLIGHT,
         QuickToggleType.DND,
+        QuickToggleType.KEEP_AWAKE,
         QuickToggleType.BRIGHTNESS,
         QuickToggleType.WIFI,
         QuickToggleType.BLUETOOTH,
         QuickToggleType.SELECT_OCR
     ),
+    val allowedMusicPackages: Set<String> = setOf("com.unshoo.pixelmusic"),
     val pinnedAppPackages: List<String> = emptyList(),
     val floatingAppPackages: List<String> = emptyList(),
     val tapGesture: IslandGesture = IslandGesture.OPEN_APP,
@@ -178,8 +239,9 @@ data class IslandSettings(
     val vaultAutoCapture3Finger: Boolean = true,
     val clipboardHistoryEnabled: Boolean = true,
 
-    // Setup & Survival
+    // Setup, Tips & Survival
     val wizardCompleted: Boolean = false,
+    val firstRunTipsShown: Boolean = false,
     val accessibilityWasEnabled: Boolean = false,
     val verifiedFloatingPath: String = "UNTESTED",
     val vaultScreenshotsTreeUri: String? = null,
@@ -194,6 +256,9 @@ data class IslandSettings(
 
     fun eventConfig(kind: EventKind): EventBehaviorConfig =
         perEventConfig[kind.name] ?: EventBehaviorConfig(enabled = true, autoExpand = false)
+
+    fun isGroupEnabled(group: EventGroup): Boolean =
+        EventKind.entries.filter { it.group == group }.any { eventConfig(it).enabled }
 
     fun isTabMasterEnabled(tab: IslandTab): Boolean = when (tab) {
         IslandTab.SEARCH -> searchEnabled
@@ -219,8 +284,11 @@ class SettingsRepository(private val context: Context) {
     private object Keys {
         val PILL_STYLE = stringPreferencesKey("pill_style")
         val GLASS_DENSITY = floatPreferencesKey("glass_density")
+        val REDUCE_GLASS = booleanPreferencesKey("reduce_glass")
         val SOLID_FALLBACK = booleanPreferencesKey("solid_fallback")
         val ACCENT_THEME = stringPreferencesKey("accent_theme")
+        val ROTATE_ALBUM_ART = booleanPreferencesKey("rotate_album_art")
+        val PURPLE_SIDEBAR_THEME = booleanPreferencesKey("purple_sidebar_theme")
 
         val ANIMATION_SPEED = floatPreferencesKey("animation_speed")
         val ANIMATION_STYLE = stringPreferencesKey("animation_style")
@@ -237,15 +305,24 @@ class SettingsRepository(private val context: Context) {
         val PILL_SWIPE_RIGHT = stringPreferencesKey("pill_swipe_right")
         val EXPANDED_SWIPE_LEFT = stringPreferencesKey("expanded_swipe_left")
         val EXPANDED_SWIPE_RIGHT = stringPreferencesKey("expanded_swipe_right")
+        val EXPANDED_LONG_PRESS = stringPreferencesKey("expanded_long_press")
+        val MINI_CAPSULE_SIZE = stringPreferencesKey("mini_capsule_size")
+        val MINI_CAPSULE_DURATION = longPreferencesKey("mini_capsule_duration_ms")
 
         val CUTOUT_X = floatPreferencesKey("cutout_x_dp")
         val CUTOUT_Y = floatPreferencesKey("cutout_y_dp")
         val CUTOUT_W = floatPreferencesKey("cutout_w_dp")
         val CUTOUT_H = floatPreferencesKey("cutout_h_dp")
+        val CUTOUT_RADIUS = floatPreferencesKey("cutout_corner_radius_dp")
+        val CALIBRATION_CONFIRMED = booleanPreferencesKey("calibration_confirmed")
         val COMPACT_PREF = stringPreferencesKey("compact_pref")
         val COMPANION_POSITION = stringPreferencesKey("companion_position")
+        val WHEN_IDLE_MODE = stringPreferencesKey("when_idle_mode")
         val IDLE_WIDGET = stringPreferencesKey("idle_widget")
+        val IDLE_LEFT_WIDGET = stringPreferencesKey("idle_left_widget")
+        val IDLE_RIGHT_WIDGET = stringPreferencesKey("idle_right_widget")
         val LOCK_SCREEN_PRESET = stringPreferencesKey("lock_screen_preset")
+        val ALERTS_DWELL_MS = longPreferencesKey("alerts_dwell_ms")
         val PER_EVENT_CONFIG = stringPreferencesKey("per_event_config_json")
 
         val ENABLED_TABS = stringPreferencesKey("enabled_tabs_json")
@@ -264,6 +341,7 @@ class SettingsRepository(private val context: Context) {
         val FLOATING_ENABLED = booleanPreferencesKey("floating_enabled")
         val ALERTS_ENABLED = booleanPreferencesKey("alerts_enabled")
         val QUICK_TOGGLES = stringPreferencesKey("quick_toggles_json")
+        val ALLOWED_MUSIC_PACKAGES = stringPreferencesKey("allowed_music_packages_json")
         val PINNED_APPS = stringPreferencesKey("pinned_apps_json")
         val FLOATING_APPS = stringPreferencesKey("floating_apps_json")
         val TAP_GESTURE = stringPreferencesKey("tap_gesture")
@@ -275,6 +353,7 @@ class SettingsRepository(private val context: Context) {
         val CLIPBOARD_HISTORY_ENABLED = booleanPreferencesKey("clipboard_history_enabled")
 
         val WIZARD_COMPLETED = booleanPreferencesKey("wizard_completed")
+        val FIRST_RUN_TIPS_SHOWN = booleanPreferencesKey("first_run_tips_shown")
         val ACCESSIBILITY_WAS_ENABLED = booleanPreferencesKey("accessibility_was_enabled")
         val VERIFIED_FLOATING_PATH = stringPreferencesKey("verified_floating_path")
         val VAULT_SCREENSHOTS_TREE_URI = stringPreferencesKey("vault_screenshots_tree_uri")
@@ -282,11 +361,19 @@ class SettingsRepository(private val context: Context) {
 
     val settingsFlow: Flow<IslandSettings> = context.settingsDataStore.data.map { prefs ->
         val default = IslandSettings()
+        val parsedPillStyle = when (val raw = prefs[Keys.PILL_STYLE]) {
+            "GLASS" -> PillStyle.APPLE_GLASS
+            null -> default.pillStyle
+            else -> runCatching { PillStyle.valueOf(raw) }.getOrNull() ?: default.pillStyle
+        }
         IslandSettings(
-            pillStyle = prefs[Keys.PILL_STYLE]?.let { runCatching { PillStyle.valueOf(it) }.getOrNull() } ?: default.pillStyle,
-            glassDensity = prefs[Keys.GLASS_DENSITY] ?: default.glassDensity,
+            pillStyle = parsedPillStyle,
+            glassDensity = (prefs[Keys.GLASS_DENSITY] ?: default.glassDensity).coerceIn(0f, 1f),
+            reduceGlass = prefs[Keys.REDUCE_GLASS] ?: default.reduceGlass,
             solidFallback = prefs[Keys.SOLID_FALLBACK] ?: default.solidFallback,
             accentTheme = prefs[Keys.ACCENT_THEME]?.let { runCatching { AccentTheme.valueOf(it) }.getOrNull() } ?: default.accentTheme,
+            rotateAlbumArt = prefs[Keys.ROTATE_ALBUM_ART] ?: default.rotateAlbumArt,
+            purpleSidebarTheme = prefs[Keys.PURPLE_SIDEBAR_THEME] ?: default.purpleSidebarTheme,
 
             animationSpeed = prefs[Keys.ANIMATION_SPEED] ?: default.animationSpeed,
             animationStyle = prefs[Keys.ANIMATION_STYLE]?.let { runCatching { AnimationStyle.valueOf(it) }.getOrNull() } ?: default.animationStyle,
@@ -303,15 +390,24 @@ class SettingsRepository(private val context: Context) {
             pillSwipeRightGesture = prefs[Keys.PILL_SWIPE_RIGHT]?.let { runCatching { PillSwipeAction.valueOf(it) }.getOrNull() } ?: default.pillSwipeRightGesture,
             expandedSwipeLeftGesture = prefs[Keys.EXPANDED_SWIPE_LEFT]?.let { runCatching { ExpandedSwipeAction.valueOf(it) }.getOrNull() } ?: default.expandedSwipeLeftGesture,
             expandedSwipeRightGesture = prefs[Keys.EXPANDED_SWIPE_RIGHT]?.let { runCatching { ExpandedSwipeAction.valueOf(it) }.getOrNull() } ?: default.expandedSwipeRightGesture,
+            expandedLongPressGesture = prefs[Keys.EXPANDED_LONG_PRESS]?.let { runCatching { ExpandedSwipeAction.valueOf(it) }.getOrNull() } ?: default.expandedLongPressGesture,
+            miniCapsuleSize = prefs[Keys.MINI_CAPSULE_SIZE]?.let { runCatching { MiniCapsuleSize.valueOf(it) }.getOrNull() } ?: default.miniCapsuleSize,
+            miniCapsuleDurationMs = (prefs[Keys.MINI_CAPSULE_DURATION] ?: default.miniCapsuleDurationMs).coerceIn(2000L, 4000L),
 
             cutoutXOffsetDp = prefs[Keys.CUTOUT_X] ?: default.cutoutXOffsetDp,
             cutoutYOffsetDp = prefs[Keys.CUTOUT_Y] ?: default.cutoutYOffsetDp,
             cutoutWidthDp = prefs[Keys.CUTOUT_W] ?: default.cutoutWidthDp,
             cutoutHeightDp = prefs[Keys.CUTOUT_H] ?: default.cutoutHeightDp,
+            cutoutCornerRadiusDp = prefs[Keys.CUTOUT_RADIUS] ?: default.cutoutCornerRadiusDp,
+            calibrationConfirmed = prefs[Keys.CALIBRATION_CONFIRMED] ?: default.calibrationConfirmed,
             compactPreference = prefs[Keys.COMPACT_PREF]?.let { runCatching { CompactPreference.valueOf(it) }.getOrNull() } ?: default.compactPreference,
             companionPosition = prefs[Keys.COMPANION_POSITION]?.let { runCatching { CompanionPosition.valueOf(it) }.getOrNull() } ?: default.companionPosition,
+            whenIdleMode = prefs[Keys.WHEN_IDLE_MODE]?.let { runCatching { WhenIdleMode.valueOf(it) }.getOrNull() } ?: default.whenIdleMode,
             idleWidget = prefs[Keys.IDLE_WIDGET]?.let { runCatching { IdleWidgetType.valueOf(it) }.getOrNull() } ?: default.idleWidget,
+            idleLeftWidget = prefs[Keys.IDLE_LEFT_WIDGET]?.let { runCatching { IdleWidgetType.valueOf(it) }.getOrNull() } ?: default.idleLeftWidget,
+            idleRightWidget = prefs[Keys.IDLE_RIGHT_WIDGET]?.let { runCatching { IdleWidgetType.valueOf(it) }.getOrNull() } ?: default.idleRightWidget,
             lockScreenPreset = prefs[Keys.LOCK_SCREEN_PRESET]?.let { runCatching { LockScreenPreset.valueOf(it) }.getOrNull() } ?: default.lockScreenPreset,
+            alertsDwellMs = (prefs[Keys.ALERTS_DWELL_MS] ?: default.alertsDwellMs).coerceIn(4000L, 10000L),
 
             enabledTabs = prefs[Keys.ENABLED_TABS]?.let {
                 runCatching { json.decodeFromString<List<IslandTab>>(it) }.getOrNull()
@@ -333,6 +429,9 @@ class SettingsRepository(private val context: Context) {
             includedQuickToggles = prefs[Keys.QUICK_TOGGLES]?.let {
                 runCatching { json.decodeFromString<List<QuickToggleType>>(it) }.getOrNull()
             } ?: default.includedQuickToggles,
+            allowedMusicPackages = prefs[Keys.ALLOWED_MUSIC_PACKAGES]?.let {
+                runCatching { json.decodeFromString<Set<String>>(it) }.getOrNull()
+            } ?: default.allowedMusicPackages,
             pinnedAppPackages = prefs[Keys.PINNED_APPS]?.let {
                 runCatching { json.decodeFromString<List<String>>(it) }.getOrNull()
             } ?: default.pinnedAppPackages,
@@ -349,6 +448,7 @@ class SettingsRepository(private val context: Context) {
             clipboardHistoryEnabled = prefs[Keys.CLIPBOARD_HISTORY_ENABLED] ?: default.clipboardHistoryEnabled,
 
             wizardCompleted = prefs[Keys.WIZARD_COMPLETED] ?: false,
+            firstRunTipsShown = prefs[Keys.FIRST_RUN_TIPS_SHOWN] ?: false,
             accessibilityWasEnabled = prefs[Keys.ACCESSIBILITY_WAS_ENABLED] ?: false,
             verifiedFloatingPath = prefs[Keys.VERIFIED_FLOATING_PATH] ?: default.verifiedFloatingPath,
             vaultScreenshotsTreeUri = prefs[Keys.VAULT_SCREENSHOTS_TREE_URI],
@@ -368,8 +468,11 @@ class SettingsRepository(private val context: Context) {
         context.settingsDataStore.edit { prefs ->
             prefs[Keys.PILL_STYLE] = s.pillStyle.name
             prefs[Keys.GLASS_DENSITY] = s.glassDensity.coerceIn(0f, 1f)
+            prefs[Keys.REDUCE_GLASS] = s.reduceGlass
             prefs[Keys.SOLID_FALLBACK] = s.solidFallback
             prefs[Keys.ACCENT_THEME] = s.accentTheme.name
+            prefs[Keys.ROTATE_ALBUM_ART] = s.rotateAlbumArt
+            prefs[Keys.PURPLE_SIDEBAR_THEME] = s.purpleSidebarTheme
 
             prefs[Keys.ANIMATION_SPEED] = s.animationSpeed.coerceIn(0.5f, 1.8f)
             prefs[Keys.ANIMATION_STYLE] = s.animationStyle.name
@@ -386,15 +489,24 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.PILL_SWIPE_RIGHT] = s.pillSwipeRightGesture.name
             prefs[Keys.EXPANDED_SWIPE_LEFT] = s.expandedSwipeLeftGesture.name
             prefs[Keys.EXPANDED_SWIPE_RIGHT] = s.expandedSwipeRightGesture.name
+            prefs[Keys.EXPANDED_LONG_PRESS] = s.expandedLongPressGesture.name
+            prefs[Keys.MINI_CAPSULE_SIZE] = s.miniCapsuleSize.name
+            prefs[Keys.MINI_CAPSULE_DURATION] = s.miniCapsuleDurationMs.coerceIn(2000L, 4000L)
 
             prefs[Keys.CUTOUT_X] = s.cutoutXOffsetDp
             prefs[Keys.CUTOUT_Y] = s.cutoutYOffsetDp
             prefs[Keys.CUTOUT_W] = s.cutoutWidthDp.coerceIn(14f, 80f)
             prefs[Keys.CUTOUT_H] = s.cutoutHeightDp.coerceIn(14f, 60f)
+            prefs[Keys.CUTOUT_RADIUS] = s.cutoutCornerRadiusDp.coerceIn(6f, 28f)
+            prefs[Keys.CALIBRATION_CONFIRMED] = s.calibrationConfirmed
             prefs[Keys.COMPACT_PREF] = s.compactPreference.name
             prefs[Keys.COMPANION_POSITION] = s.companionPosition.name
+            prefs[Keys.WHEN_IDLE_MODE] = s.whenIdleMode.name
             prefs[Keys.IDLE_WIDGET] = s.idleWidget.name
+            prefs[Keys.IDLE_LEFT_WIDGET] = s.idleLeftWidget.name
+            prefs[Keys.IDLE_RIGHT_WIDGET] = s.idleRightWidget.name
             prefs[Keys.LOCK_SCREEN_PRESET] = s.lockScreenPreset.name
+            prefs[Keys.ALERTS_DWELL_MS] = s.alertsDwellMs.coerceIn(4000L, 10000L)
             prefs[Keys.PER_EVENT_CONFIG] = json.encodeToString(s.perEventConfig)
 
             prefs[Keys.ENABLED_TABS] = json.encodeToString(s.enabledTabs.take(IslandSettings.MAX_ISLAND_FEATURES))
@@ -413,6 +525,7 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.FLOATING_ENABLED] = s.floatingEnabled
             prefs[Keys.ALERTS_ENABLED] = s.alertsEnabled
             prefs[Keys.QUICK_TOGGLES] = json.encodeToString(s.includedQuickToggles)
+            prefs[Keys.ALLOWED_MUSIC_PACKAGES] = json.encodeToString(s.allowedMusicPackages)
             prefs[Keys.PINNED_APPS] = json.encodeToString(s.pinnedAppPackages)
             prefs[Keys.FLOATING_APPS] = json.encodeToString(s.floatingAppPackages)
             prefs[Keys.TAP_GESTURE] = s.tapGesture.name
@@ -424,6 +537,7 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.CLIPBOARD_HISTORY_ENABLED] = s.clipboardHistoryEnabled
 
             prefs[Keys.WIZARD_COMPLETED] = s.wizardCompleted
+            prefs[Keys.FIRST_RUN_TIPS_SHOWN] = s.firstRunTipsShown
             prefs[Keys.ACCESSIBILITY_WAS_ENABLED] = s.accessibilityWasEnabled
             prefs[Keys.VERIFIED_FLOATING_PATH] = s.verifiedFloatingPath
             if (s.vaultScreenshotsTreeUri != null) {
@@ -469,6 +583,17 @@ class SettingsRepository(private val context: Context) {
     suspend fun reorderTabs(newOrder: List<IslandTab>) {
         update { s ->
             s.copy(enabledTabs = newOrder.distinct().take(IslandSettings.MAX_ISLAND_FEATURES))
+        }
+    }
+
+    suspend fun setEventGroupEnabled(group: EventGroup, enabled: Boolean) {
+        update { s ->
+            val next = s.perEventConfig.toMutableMap()
+            EventKind.entries.filter { it.group == group }.forEach { kind ->
+                val cur = next[kind.name] ?: EventBehaviorConfig()
+                next[kind.name] = cur.copy(enabled = enabled)
+            }
+            s.copy(perEventConfig = next)
         }
     }
 

@@ -2,12 +2,14 @@ package com.example.vault
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ContentValues
 import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.Build
+import android.os.Environment
 import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import androidx.core.content.FileProvider
 import androidx.work.ExistingWorkPolicy
@@ -26,6 +28,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -51,8 +54,8 @@ class VaultManager(
     suspend fun saveFromUri(uri: Uri, sourceType: String): VaultItemEntity? = withContext(Dispatchers.IO) {
         ingestMutex.withLock {
             runCatching {
-                val displayName = resolveDisplayName(uri) ?: uri.lastPathSegment ?: "vault_${System.currentTimeMillis()}"
-                val dedupeKey = "${uri.toString()}|$displayName"
+                val displayName = resolveDisplayName(uri) ?: uri.lastPathSegment ?: "shelf_${System.currentTimeMillis()}"
+                val dedupeKey = "${uri}|$displayName"
                 if (sourceType.startsWith("SCREENSHOT") && wasRecentlyIngested(dedupeKey, displayName)) {
                     return@withContext null
                 }
@@ -101,10 +104,6 @@ class VaultManager(
             }
         }
 
-    /**
-     * Reads newly created screenshot documents from a user-selected SAF Screenshots folder
-     * (zero broad storage permissions required — strictly scoped to chosen tree URI).
-     */
     suspend fun ingestRecentScreenshotFromTree(treeUri: Uri): VaultItemEntity? = withContext(Dispatchers.IO) {
         runCatching {
             val now = System.currentTimeMillis()
@@ -173,6 +172,15 @@ class VaultManager(
         displayName: String,
         sourceType: String
     ): VaultItemEntity {
+        // Enforce 12-item Shelf cap: expire oldest first before inserting
+        val existingActive = vaultDao.getActiveOldestFirst()
+        if (existingActive.size >= VaultConstants.MAX_ACTIVE_ITEMS) {
+            val overflow = existingActive.size - VaultConstants.MAX_ACTIVE_ITEMS + 1
+            existingActive.take(overflow).forEach { old ->
+                purgeItemNow(old.id)
+            }
+        }
+
         val now = System.currentTimeMillis()
         val expiresAt = now + VaultConstants.EXPIRY_MILLIS
         val entity = VaultItemEntity(
@@ -193,10 +201,10 @@ class VaultManager(
         if (vaultCfg?.enabled != false) {
             islandController.upsertActivity(
                 IslandActivity.Alert(
-                    id = "vault_saved_$id",
+                    id = "shelf_saved_$id",
                     kind = AlertKind.VAULT_EXPIRING,
-                    title = "Saved to Photo Vault",
-                    subtitle = "$displayName · expires in 10 min"
+                    title = "Saved to Shelf",
+                    subtitle = "$displayName · expires in 10:00"
                 ),
                 autoShowCompact = true,
                 autoDismissMs = 3400L,
@@ -229,6 +237,16 @@ class VaultManager(
         WorkManager.getInstance(context).cancelUniqueWork("vault_purge_$id")
     }
 
+    suspend fun clearAllActiveItemsImmediate() = withContext(Dispatchers.IO) {
+        val existing = vaultDao.getActiveOldestFirst()
+        existing.forEach { item ->
+            runCatching { File(item.filePath).delete() }
+            vaultDao.deleteById(item.id)
+            WorkManager.getInstance(context).cancelUniqueWork("vault_expire_${item.id}")
+            WorkManager.getInstance(context).cancelUniqueWork("vault_purge_${item.id}")
+        }
+    }
+
     suspend fun processExpirations() = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         val expired = vaultDao.findExpiredActive(now)
@@ -240,10 +258,10 @@ class VaultManager(
         if (expired.isNotEmpty()) {
             islandController.upsertActivity(
                 IslandActivity.Alert(
-                    id = "vault_expired_${System.currentTimeMillis()}",
+                    id = "shelf_expired_${System.currentTimeMillis()}",
                     kind = AlertKind.VAULT_EXPIRING,
-                    title = "${expired.size} Vault item(s) moved to Trash",
-                    subtitle = "Open Vault to restore (24h window)"
+                    title = "${expired.size} Shelf item(s) expired",
+                    subtitle = "Open Shelf Trash to restore (24h window)"
                 ),
                 autoShowCompact = true,
                 autoDismissMs = 5000L
@@ -269,52 +287,44 @@ class VaultManager(
     }
 
     /**
-     * Two-way attach:
-     * 1) Puts a content-URI ClipData on the system clipboard so rich chat keyboards show a 1-tap paste image chip.
-     * 2) If a foreground chat app supports ACTION_SEND image, sends directly into that app; otherwise opens Share Chooser.
+     * Attach -> system clipboard (Build #5 rule: kept as-is; Share is DELETED everywhere).
      */
-    fun attachOrShareItem(item: VaultItemEntity, targetChatPackage: String? = null) {
-        val uri = getFileProviderUri(item) ?: return
-
-        // Copy image URI to clipboard so user can paste into any open chat box too
-        runCatching {
+    fun attachOrShareItem(item: VaultItemEntity, @Suppress("UNUSED_PARAMETER") targetChatPackage: String? = null): Boolean {
+        val uri = getFileProviderUri(item) ?: return false
+        return runCatching {
             val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
             cm?.setPrimaryClip(ClipData.newUri(context.contentResolver, item.displayName, uri))
-        }
+            islandController.showTransientBanner("Attached to clipboard — paste in chat")
+            true
+        }.getOrDefault(false)
+    }
 
-        val sendIntent = Intent(Intent.ACTION_SEND).apply {
-            type = item.mimeType.ifBlank { "image/*" }
-            putExtra(Intent.EXTRA_STREAM, uri)
-            clipData = ClipData.newRawUri(item.displayName, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-
-        if (!targetChatPackage.isNullOrBlank() && targetChatPackage != context.packageName) {
-            val directIntent = Intent(sendIntent).setPackage(targetChatPackage)
-            val handlers = context.packageManager.queryIntentActivities(directIntent, PackageManager.MATCH_DEFAULT_ONLY)
-            if (handlers.isNotEmpty()) {
-                runCatching {
-                    context.grantUriPermission(targetChatPackage, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    directIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(directIntent)
-                    islandController.showTransientBanner("Attached image to chat")
+    suspend fun saveItemToGallery(item: VaultItemEntity): Boolean = withContext(Dispatchers.IO) {
+        val src = File(item.filePath)
+        if (!src.exists()) return@withContext false
+        runCatching {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, item.displayName)
+                put(MediaStore.Images.Media.MIME_TYPE, item.mimeType.ifBlank { "image/jpeg" })
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/DynamicIsland")
+                    put(MediaStore.Images.Media.IS_PENDING, 1)
                 }
-                return
             }
-        }
-
-        val resolved = context.packageManager.queryIntentActivities(sendIntent, PackageManager.MATCH_DEFAULT_ONLY)
-        resolved.forEach { info ->
-            runCatching {
-                context.grantUriPermission(info.activityInfo.packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            val resolver = context.contentResolver
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return@withContext false
+            resolver.openOutputStream(uri)?.use { out ->
+                FileInputStream(src).use { input ->
+                    input.copyTo(out)
+                }
             }
-        }
-
-        val chooser = Intent.createChooser(sendIntent, "Attach ${item.displayName}").apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        runCatching { context.startActivity(chooser) }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.clear()
+                values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            }
+            true
+        }.getOrDefault(false)
     }
 
     fun scheduleExpiryWork(itemId: Long, delayMs: Long) {

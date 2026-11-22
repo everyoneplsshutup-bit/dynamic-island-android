@@ -160,7 +160,7 @@ class BatteryMonitor(
                 shownLow15 = false
                 shownLow10 = false
             } else {
-                val cfg = latestSettings.eventConfig(EventKind.CHARGING)
+                val cfg = latestSettings.eventConfig(EventKind.LOW_BATTERY)
                 if (latestSettings.batteryEnabled && cfg.enabled) {
                     when {
                         pct <= 10 && !shownLow10 -> {
@@ -195,7 +195,7 @@ class BatteryMonitor(
                         subtitle = "Unplug charger to preserve battery health"
                     ),
                     autoShowCompact = true,
-                    autoDismissMs = 4500L,
+                    autoDismissMs = latestSettings.miniCapsuleDurationMs.coerceIn(2000L, 4000L),
                     autoExpandToFull = cfg.autoExpand
                 )
             }
@@ -213,7 +213,7 @@ class BatteryMonitor(
                 subtitle = if (pct <= 15) "Connect charger soon" else "20% battery remaining"
             ),
             autoShowCompact = true,
-            autoDismissMs = 3400L,
+            autoDismissMs = latestSettings.miniCapsuleDurationMs.coerceIn(2000L, 4000L),
             autoExpandToFull = autoExpand
         )
     }
@@ -227,6 +227,7 @@ class BatteryMonitor(
     ) {
         val cfg = latestSettings.eventConfig(EventKind.CHARGING)
         if (!latestSettings.batteryEnabled || !cfg.enabled) return
+        val capsuleDuration = latestSettings.miniCapsuleDurationMs.coerceIn(2000L, 4000L)
         islandController.upsertActivity(
             IslandActivity.Charging(
                 levelPercent = pct,
@@ -236,7 +237,7 @@ class BatteryMonitor(
                 pluggedLabel = pluggedLabel
             ),
             autoShowCompact = isFreshConnect,
-            autoDismissMs = if (isFreshConnect) 3200L else null,
+            autoDismissMs = if (isFreshConnect) capsuleDuration else null,
             autoExpandToFull = isFreshConnect && cfg.autoExpand
         )
     }

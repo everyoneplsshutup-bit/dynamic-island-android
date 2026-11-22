@@ -24,6 +24,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 data class TimerUiState(
+    val label: String = "Timer",
     val selectedHours: Int = 0,
     val selectedMinutes: Int = 5,
     val selectedSeconds: Int = 0,
@@ -84,6 +85,7 @@ class TimerEngine(
         timerEndWallMs = System.currentTimeMillis() + durationMs
         _state.update {
             it.copy(
+                label = "Sleep",
                 totalMs = durationMs,
                 remainingMs = durationMs,
                 isRunning = true,
@@ -103,6 +105,7 @@ class TimerEngine(
         timerEndWallMs = System.currentTimeMillis() + durationMs
         _state.update {
             it.copy(
+                label = "Timer",
                 totalMs = durationMs,
                 remainingMs = durationMs,
                 isRunning = true,
@@ -111,7 +114,7 @@ class TimerEngine(
             )
         }
         scheduleExactAlarm(timerEndWallMs)
-        startTicker()
+        startTicker("Timer")
     }
 
     fun pauseTimer() {
@@ -120,7 +123,7 @@ class TimerEngine(
         cancelExactAlarm()
         val left = (timerEndWallMs - System.currentTimeMillis()).coerceAtLeast(0L)
         _state.update { it.copy(remainingMs = left, isRunning = false) }
-        pushTimerToIsland()
+        pushTimerToIsland(_state.value.label)
     }
 
     fun resumeTimer() {
@@ -129,7 +132,7 @@ class TimerEngine(
         timerEndWallMs = System.currentTimeMillis() + left
         _state.update { it.copy(isRunning = true, isDone = false) }
         scheduleExactAlarm(timerEndWallMs)
-        startTicker()
+        startTicker(_state.value.label)
     }
 
     fun cancelTimer() {

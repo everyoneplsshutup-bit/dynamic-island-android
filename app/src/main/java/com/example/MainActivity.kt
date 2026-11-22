@@ -4,9 +4,13 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -26,6 +30,9 @@ import com.example.system.AccentTheme
 import com.example.system.IslandSettings
 import com.example.ui.theme.DynamicIslandTheme
 import com.example.ui.theme.IslandColors
+import com.example.ui.theme.LocalAppBackdrop
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import kotlinx.serialization.Serializable
 
 @Serializable object RouteHome
@@ -55,7 +62,7 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            LaunchedEffect(Unit) {
+            LaunchedEffect(settings.clipboardHistoryEnabled) {
                 app.clipboardMonitor.setForegroundActive(settings.clipboardHistoryEnabled)
             }
 
@@ -71,6 +78,7 @@ class MainActivity : ComponentActivity() {
                 dynamicColor = settings.accentTheme == AccentTheme.DYNAMIC,
                 accentOverride = accentOverride
             ) {
+                val appBackdrop = rememberLayerBackdrop()
                 val navController = rememberNavController()
 
                 LaunchedEffect(initialOpenRoute) {
@@ -79,72 +87,80 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                NavHost(
-                    navController = navController,
-                    startDestination = RouteHome
-                ) {
-                    composable<RouteHome> {
-                        HomeHubScreen(
-                            app = app,
-                            onOpenSettings = { navController.navigate(RouteSettingsHome) },
-                            onOpenWizard = { navController.navigate(RouteWizard) },
-                            onOpenCalibration = { navController.navigate(RouteCalibration) },
-                            onOpenFeaturePicker = { navController.navigate(RouteFeaturePicker) },
-                            onOpenNotifications = { navController.navigate(RouteNotificationHistory) }
-                        )
-                    }
-
-                    composable<RouteWizard> {
-                        SetupWizardScreen(
-                            app = app,
-                            onDone = { navController.popBackStack() }
-                        )
-                    }
-
-                    composable<RouteCalibration> {
-                        CalibrationScreen(
-                            app = app,
-                            onBack = { navController.popBackStack() }
-                        )
-                    }
-
-                    composable<RouteFeaturePicker> {
-                        FeaturePickerScreen(
-                            app = app,
-                            onBack = { navController.popBackStack() }
-                        )
-                    }
-
-                    composable<RouteNotificationHistory> {
-                        NotificationHistoryScreen(
-                            app = app,
-                            onBack = { navController.popBackStack() }
-                        )
-                    }
-
-                    composable<RouteSettingsHome> {
-                        SettingsHomeScreen(
-                            app = app,
-                            onBack = { navController.popBackStack() },
-                            onOpenGroup = { group ->
-                                navController.navigate(RouteSettingsGroup(group.name))
+                CompositionLocalProvider(LocalAppBackdrop provides appBackdrop) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .layerBackdrop(appBackdrop)
+                    ) {
+                        NavHost(
+                            navController = navController,
+                            startDestination = RouteHome
+                        ) {
+                            composable<RouteHome> {
+                                HomeHubScreen(
+                                    app = app,
+                                    onOpenSettings = { navController.navigate(RouteSettingsHome) },
+                                    onOpenWizard = { navController.navigate(RouteWizard) },
+                                    onOpenCalibration = { navController.navigate(RouteCalibration) },
+                                    onOpenFeaturePicker = { navController.navigate(RouteFeaturePicker) },
+                                    onOpenNotifications = { navController.navigate(RouteNotificationHistory) }
+                                )
                             }
-                        )
-                    }
 
-                    composable<RouteSettingsGroup> { backStackEntry ->
-                        val route = backStackEntry.toRoute<RouteSettingsGroup>()
-                        val group = runCatching { SettingsGroup.valueOf(route.groupName) }
-                            .getOrDefault(SettingsGroup.LOOK)
-                        SettingsGroupDetailScreen(
-                            app = app,
-                            group = group,
-                            onBack = { navController.popBackStack() },
-                            onOpenCalibration = { navController.navigate(RouteCalibration) },
-                            onOpenFeaturePicker = { navController.navigate(RouteFeaturePicker) },
-                            onOpenNotificationHistory = { navController.navigate(RouteNotificationHistory) },
-                            onOpenWizard = { navController.navigate(RouteWizard) }
-                        )
+                            composable<RouteWizard> {
+                                SetupWizardScreen(
+                                    app = app,
+                                    onDone = { navController.popBackStack() }
+                                )
+                            }
+
+                            composable<RouteCalibration> {
+                                CalibrationScreen(
+                                    app = app,
+                                    onBack = { navController.popBackStack() }
+                                )
+                            }
+
+                            composable<RouteFeaturePicker> {
+                                FeaturePickerScreen(
+                                    app = app,
+                                    onBack = { navController.popBackStack() }
+                                )
+                            }
+
+                            composable<RouteNotificationHistory> {
+                                NotificationHistoryScreen(
+                                    app = app,
+                                    onBack = { navController.popBackStack() }
+                                )
+                            }
+
+                            composable<RouteSettingsHome> {
+                                SettingsHomeScreen(
+                                    app = app,
+                                    onBack = { navController.popBackStack() },
+                                    onOpenGroup = { group ->
+                                        navController.navigate(RouteSettingsGroup(group.name))
+                                    }
+                                )
+                            }
+
+                            composable<RouteSettingsGroup> { backStackEntry ->
+                                val route = backStackEntry.toRoute<RouteSettingsGroup>()
+                                val group = runCatching { SettingsGroup.valueOf(route.groupName) }
+                                    .getOrDefault(SettingsGroup.LOOK)
+                                SettingsGroupDetailScreen(
+                                    app = app,
+                                    group = group,
+                                    onBack = { navController.popBackStack() },
+                                    onOpenCalibration = { navController.navigate(RouteCalibration) },
+                                    onOpenFeaturePicker = { navController.navigate(RouteFeaturePicker) },
+                                    onOpenNotificationHistory = { navController.navigate(RouteNotificationHistory) },
+                                    onOpenWizard = { navController.navigate(RouteWizard) }
+                                )
+                            }
+                        }
                     }
                 }
             }

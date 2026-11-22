@@ -122,10 +122,11 @@ class IslandNotificationListener : NotificationListenerService() {
             val notifCfg = settings.eventConfig(com.example.system.EventKind.NOTIFICATIONS)
             if (!settings.notificationsEnabled || !notifCfg.enabled) return@launch
 
-            val appName = runCatching {
+            val rawAppName = runCatching {
                 val ai = packageManager.getApplicationInfo(pkg, 0)
-                packageManager.getApplicationLabel(ai).toString()
-            }.getOrDefault(pkg)
+                packageManager.getApplicationLabel(ai).toString().trim()
+            }.getOrDefault("")
+            val appName = rawAppName.ifBlank { "Notification" }
 
             val existingRule = app.database.appRuleDao().getByPackage(pkg)
             if (existingRule == null) {
@@ -157,7 +158,7 @@ class IslandNotificationListener : NotificationListenerService() {
                     timestamp = sbn.postTime
                 ),
                 autoShowCompact = true,
-                autoDismissMs = 3800L,
+                autoDismissMs = settings.alertsDwellMs.coerceIn(4000L, 10000L),
                 autoExpandToFull = notifCfg.autoExpand
             )
         }
@@ -196,7 +197,6 @@ class IslandNotificationListener : NotificationListenerService() {
         notification.actions?.forEach { action ->
             val pi = action.actionIntent ?: return@forEach
             val intentUri = runCatching {
-                // PendingIntent#getIntent is hidden on some builds; inspect notification.extras instead if blocked
                 val m = android.app.PendingIntent::class.java.getMethod("getIntent")
                 val target = m.invoke(pi) as? Intent
                 target?.data ?: target?.clipData?.takeIf { it.itemCount > 0 }?.getItemAt(0)?.uri

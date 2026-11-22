@@ -27,7 +27,7 @@ sealed interface TierAResult {
  * Tier A OCR: Privacy-first Accessibility single-node reader.
  * Strictly reads ONLY the exact leaf element containing the user's pressed point (x, y).
  * Never invoked unless OcrPrivacyGate.isScreenReadingAllowed() is true.
- * Produces tokenized word boxes for interactive handle selection + magnifier loupe.
+ * Skips bare contentDescription on ImageView/Image nodes so Tier B ML Kit extracts photo text.
  */
 object TierAAccessibilityReader {
 
@@ -98,7 +98,19 @@ object TierAAccessibilityReader {
             }
 
             val text = node.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
-            val desc = node.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+            val className = node.className?.toString().orEmpty()
+            val isImageWidget = className.endsWith("ImageView") ||
+                className.endsWith("ImageButton") ||
+                className == "android.widget.Image" ||
+                className.contains("PhotoView", ignoreCase = true)
+
+            // Do not let alt/accessibility labels on pure images shadow burned-in photo text (handled by Tier B)
+            val desc = if (isImageWidget && text == null) {
+                null
+            } else {
+                node.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }
+            }
+
             if (text != null || desc != null) {
                 candidates.add(CandidateNode(node, text, desc, Rect(rect), area, depth))
             }
@@ -187,8 +199,19 @@ object TierAAccessibilityReader {
                 )
             )
         } else {
-            val totalLen = text.length.coerceAtLeast(1)
+            val rawLines = text.split('\n')
+            val lineCount = rawLines.size.coerceAtLeast(1)
+            val lineHeight = (safeBounds.height().toFloat() / lineCount).coerceAtLeast(28f)
             val width = safeBounds.width().coerceAtLeast(40)
+
+            // Map char index -> (lineIndex, offsetInLine, lineLength)
+            val lineStarts = IntArray(lineCount)
+            var running = 0
+            for (li in 0 until lineCount) {
+                lineStarts[li] = running
+                running += rawLines[li].length + 1
+            }
+
             matches.map { match ->
                 val sIdx = match.range.first
                 val eIdx = match.range.last + 1
@@ -222,16 +245,27 @@ object TierAAccessibilityReader {
                         bottomPx = exactRect.bottom
                     )
                 } else {
-                    val lFrac = sIdx.toFloat() / totalLen.toFloat()
-                    val rFrac = eIdx.toFloat() / totalLen.toFloat()
+                    var li = 0
+                    while (li + 1 < lineCount && lineStarts[li + 1] <= sIdx) {
+                        li++
+                    }
+                    val lineStrLen = rawLines[li].length.coerceAtLeast(1)
+                    val relStart = (sIdx - lineStarts[li]).coerceIn(0, lineStrLen)
+                    val relEnd = (eIdx - lineStarts[li]).coerceIn(relStart + 1, lineStrLen)
+                    val lFrac = relStart.toFloat() / lineStrLen.toFloat()
+                    val rFrac = relEnd.toFloat() / lineStrLen.toFloat()
+                    val tokTop = (safeBounds.top + (li * lineHeight)).toInt()
+                    val tokBot = (tokTop + lineHeight).toInt().coerceAtMost(safeBounds.bottom.coerceAtLeast(tokTop + 24))
+                    val tokLeft = safeBounds.left + (width * lFrac).toInt()
+                    val tokRight = (safeBounds.left + (width * rFrac).toInt()).coerceAtLeast(tokLeft + 18)
                     OcrTextToken(
                         text = match.value,
                         startChar = sIdx,
                         endChar = eIdx,
-                        leftPx = safeBounds.left + (width * lFrac).toInt(),
-                        topPx = safeBounds.top,
-                        rightPx = safeBounds.left + (width * rFrac).toInt().coerceAtLeast(safeBounds.left + (width * lFrac).toInt() + 18),
-                        bottomPx = safeBounds.bottom
+                        leftPx = tokLeft,
+                        topPx = tokTop,
+                        rightPx = tokRight,
+                        bottomPx = tokBot
                     )
                 }
             }

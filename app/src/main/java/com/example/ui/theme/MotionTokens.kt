@@ -15,18 +15,24 @@ import kotlin.math.PI
 /**
  * Blended Apple WWDC23 Live Activities + M3 Expressive Spring Motion Tokens.
  * Drives GPU RenderThread graphicsLayer transforms (scale, translation, alpha, blur) at 120Hz.
- * Dynamic Ledge rule: open springs gently overshoot once; collapse never bounces (bounce = 0).
+ * Dynamic Ledge rule: open springs gently overshoot once; collapse NEVER bounces (damping = 1.0).
  */
 object MotionTokens {
 
     const val CONTENT_CROSSFADE_MS = 200
+    const val TIMER_TICK_CROSSFADE_MS = 150
     const val STAGGER_STEP_MS = 45
     val ContentCrossfadeEasing = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1.0f)
 
     const val BUTTON_PRESS_SCALE = 0.97f
 
+    fun pressRadiusDp(pressed: Boolean, baseDp: Float, squishedDp: Float = baseDp + 6f): Float =
+        if (pressed) squishedDp else baseDp
+
     /**
      * Converts Apple-style (response seconds, bounce 0..1) into Compose SpringSpec(dampingRatio, stiffness).
+     * Springy (FRUIT) produces a visible playful bounce; Standard (SPRING) produces balanced M3E settle;
+     * Calm (SMOOTH) is critically damped (no overshoot).
      */
     fun <T> responseSpring(
         responseSec: Float,
@@ -43,16 +49,16 @@ object MotionTokens {
 
         val rawDamping = when (style) {
             AnimationStyle.FRUIT -> {
-                // "Springy": playful bounce overshoot modulated by elasticity slider (single crisp settle)
-                val springyBounce = (bounce + 0.14f * (0.5f + elasticity)).coerceIn(0.12f, 0.36f)
+                // "Springy": distinct playful overshoot modulated by elasticity slider
+                val springyBounce = (bounce + 0.18f + 0.14f * elasticity).coerceIn(0.24f, 0.44f)
                 1f - springyBounce
             }
             AnimationStyle.SPRING -> {
-                // "Standard": balanced spring
-                val stdBounce = (bounce * (0.55f + 0.55f * elasticity)).coerceIn(0f, 0.22f)
+                // "Standard": balanced M3E spring (gentle single settle)
+                val stdBounce = (bounce * (0.55f + 0.45f * elasticity)).coerceIn(0.06f, 0.22f)
                 1f - stdBounce
             }
-            AnimationStyle.SMOOTH -> 1.0f // "Calm": minimal bounce, fastest settle
+            AnimationStyle.SMOOTH -> 1.0f // "Calm": critically damped, zero bounce
             AnimationStyle.NONE -> 1.0f
         }.coerceIn(0.48f, 1.0f)
 
@@ -98,7 +104,7 @@ object MotionTokens {
             OpeningEffect.LIQUID -> mediumToFullSpec(style, elasticity, durationScale)
             OpeningEffect.SPRING -> spatialDefault(style, elasticity, durationScale)
             OpeningEffect.SMOOTH -> responseSpring(0.34f, 0f, AnimationStyle.SMOOTH, 0f, durationScale)
-            OpeningEffect.POP -> responseSpring(0.30f, 0.26f, style, elasticity.coerceAtLeast(0.6f), durationScale)
+            OpeningEffect.POP -> responseSpring(0.28f, 0.26f, style, elasticity.coerceAtLeast(0.65f), durationScale)
         }
     }
 
@@ -108,7 +114,7 @@ object MotionTokens {
     ): FiniteAnimationSpec<T> = if (style == AnimationStyle.NONE) {
         snap()
     } else {
-        // Dynamic Ledge rule: collapse NEVER bounces (bounce = 0)
+        // Dynamic Ledge rule: collapse NEVER bounces (damping = 1.0)
         responseSpring(
             responseSec = 0.32f,
             bounce = 0f,
@@ -124,8 +130,8 @@ object MotionTokens {
         durationScale: Float
     ): SpringSpec<T> {
         val damping = when (style) {
-            AnimationStyle.FRUIT -> (0.74f - elasticity * 0.16f).coerceIn(0.52f, 0.85f)
-            AnimationStyle.SPRING -> (0.84f - elasticity * 0.10f).coerceIn(0.68f, 0.92f)
+            AnimationStyle.FRUIT -> (0.68f - elasticity * 0.16f).coerceIn(0.48f, 0.78f)
+            AnimationStyle.SPRING -> (0.82f - elasticity * 0.10f).coerceIn(0.68f, 0.90f)
             AnimationStyle.SMOOTH, AnimationStyle.NONE -> Spring.DampingRatioNoBouncy
         }
         val stiffness = if (style == AnimationStyle.NONE) 5000f else (380f * durationScale.coerceIn(0.5f, 1.8f))
@@ -138,8 +144,8 @@ object MotionTokens {
         durationScale: Float
     ): SpringSpec<T> {
         val damping = when (style) {
-            AnimationStyle.FRUIT -> (0.60f - elasticity * 0.12f).coerceIn(0.46f, 0.74f)
-            AnimationStyle.SPRING -> 0.68f
+            AnimationStyle.FRUIT -> (0.56f - elasticity * 0.12f).coerceIn(0.44f, 0.70f)
+            AnimationStyle.SPRING -> 0.66f
             AnimationStyle.SMOOTH, AnimationStyle.NONE -> Spring.DampingRatioNoBouncy
         }
         val stiffness = if (style == AnimationStyle.NONE) 5000f else (800f * durationScale.coerceIn(0.5f, 1.8f))

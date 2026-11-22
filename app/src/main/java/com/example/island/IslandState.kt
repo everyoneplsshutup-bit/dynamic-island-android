@@ -20,6 +20,12 @@ enum class AlertKind {
     OCR_COPIED
 }
 
+enum class DwellPauseReason {
+    TOUCH,
+    EXPANDED,
+    SCREEN_OFF
+}
+
 data class OcrTextToken(
     val text: String,
     val startChar: Int,
@@ -123,6 +129,8 @@ data class IslandState(
     val activeTab: IslandTab = IslandTab.MUSIC,
     val activityQueue: List<IslandActivity> = emptyList(),
     val alertsHistory: List<IslandActivity.Alert> = emptyList(),
+    val notificationsHistory: List<IslandActivity.NotificationPreview> = emptyList(),
+    val undoableClearedInbox: Pair<List<IslandActivity.NotificationPreview>, List<IslandActivity.Alert>>? = null,
     val isMoreRowOpen: Boolean = false,
     val isSelectModeActive: Boolean = false,
     val ocrSelection: OcrSelectionState? = null,
@@ -138,7 +146,11 @@ data class IslandState(
     val statusBanner: String? = null,
     val batteryLevelPercent: Int = 100,
     val isBatteryCharging: Boolean = false,
-    val isLowBatteryWarning: Boolean = false
+    val isLowBatteryWarning: Boolean = false,
+    val dwellTargetActivityId: String? = null,
+    val dwellTotalMs: Long = 0L,
+    val dwellRemainingMs: Long = 0L,
+    val isDwellPaused: Boolean = false
 ) {
     val primaryActivity: IslandActivity?
         get() {

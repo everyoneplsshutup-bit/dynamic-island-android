@@ -69,6 +69,7 @@ class MediaHub(
         const val CMD_TOGGLE_SHUFFLE = "TOGGLE_SHUFFLE"
         const val CMD_CYCLE_REPEAT = "CYCLE_REPEAT"
         const val CMD_LIKE = "LIKE"
+        private const val ARTWORK_MAX_DIM_PX = 96
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -89,7 +90,13 @@ class MediaHub(
     init {
         settingsRepository?.let { repo ->
             scope.launch {
-                repo.settingsFlow.collectLatest { latestSettings = it }
+                repo.settingsFlow.collectLatest { settings ->
+                    val prevAllowed = latestSettings.allowedMusicPackages
+                    latestSettings = settings
+                    if (prevAllowed != settings.allowedMusicPackages) {
+                        refreshSessions()
+                    }
+                }
             }
         }
     }
@@ -108,7 +115,6 @@ class MediaHub(
         }
 
         override fun onSessionDestroyed() {
-            // Survive PixelMusic being force-stopped: clear current controller and re-poll sessions
             detachController()
             refreshSessions()
         }
@@ -166,12 +172,19 @@ class MediaHub(
     }
 
     private fun bindBestController(controllers: List<MediaController>) {
-        // PixelMusic first! Always control PixelMusic session when it exists.
-        val chosen = controllers.firstOrNull { it.packageName == PIXEL_MUSIC_PKG }
-            ?: controllers.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
-            ?: controllers.firstOrNull()
+        // Enforce user-chosen Music Source Picker (PixelMusic by default; browsers never sneak in).
+        val allowedPkgs = latestSettings.allowedMusicPackages
+        val eligible = if (allowedPkgs.isEmpty()) {
+            emptyList()
+        } else {
+            controllers.filter { it.packageName in allowedPkgs }
+        }
 
-        if (chosen?.sessionToken == activeController?.sessionToken) {
+        val chosen = eligible.firstOrNull { it.packageName == PIXEL_MUSIC_PKG }
+            ?: eligible.firstOrNull { it.playbackState?.state == PlaybackState.STATE_PLAYING }
+            ?: eligible.firstOrNull()
+
+        if (chosen != null && chosen.sessionToken == activeController?.sessionToken) {
             syncFromController()
             return
         }
@@ -202,10 +215,17 @@ class MediaHub(
             return
         }
 
+        val pkg = controller.packageName
+        if (latestSettings.allowedMusicPackages.isNotEmpty() && pkg !in latestSettings.allowedMusicPackages) {
+            detachController()
+            _state.value = MediaUiState(hasNotificationAccess = isNotificationListenerEnabled())
+            islandController.removeActivity("music_session")
+            return
+        }
+
         val hasAccess = isNotificationListenerEnabled()
         val metadata = controller.metadata
         val playback = controller.playbackState
-        val pkg = controller.packageName
         val isPixelMusic = pkg == PIXEL_MUSIC_PKG
 
         val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
@@ -214,8 +234,9 @@ class MediaHub(
         val artist = metadata?.getString(MediaMetadata.METADATA_KEY_ARTIST)
             ?: metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM_ARTIST)
             ?: ""
-        val art = metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
+        val rawArt = metadata?.getBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART)
             ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)
+        val art = rawArt?.let { downsampleArtwork(it) }
         val duration = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.coerceAtLeast(0L) ?: 0L
         val pos = playback?.position?.coerceAtLeast(0L) ?: 0L
         val isPlaying = playback?.state == PlaybackState.STATE_PLAYING
@@ -235,6 +256,7 @@ class MediaHub(
                 extras?.getBoolean("supports_like", false) == true
             )
 
+        // Strictly on-device lyrics only (embedded tags or local sidecar .lrc; never network).
         val mediaUriStr = metadata?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI)
         val lyricsRaw = extras?.getString("lyrics")
             ?: extras?.getString("lrc")
@@ -294,13 +316,36 @@ class MediaHub(
         if (isPlaying) startProgressTicker() else progressJob?.cancel()
     }
 
+    private fun downsampleArtwork(src: Bitmap): Bitmap? = runCatching {
+        val w = src.width.coerceAtLeast(1)
+        val h = src.height.coerceAtLeast(1)
+        if (w <= ARTWORK_MAX_DIM_PX && h <= ARTWORK_MAX_DIM_PX) {
+            return@runCatching if (!src.hasAlpha() && src.config != Bitmap.Config.RGB_565) {
+                src.copy(Bitmap.Config.RGB_565, false)
+            } else {
+                src
+            }
+        }
+        val scale = ARTWORK_MAX_DIM_PX.toFloat() / maxOf(w, h).toFloat()
+        val targetW = (w * scale).toInt().coerceIn(24, ARTWORK_MAX_DIM_PX)
+        val targetH = (h * scale).toInt().coerceIn(24, ARTWORK_MAX_DIM_PX)
+        val scaled = Bitmap.createScaledBitmap(src, targetW, targetH, true)
+        if (!src.hasAlpha()) {
+            scaled.copy(Bitmap.Config.RGB_565, false).also {
+                if (scaled !== it) scaled.recycle()
+            }
+        } else {
+            scaled
+        }
+    }.getOrNull()
+
     private fun extractArtworkAccentAsync(bitmap: Bitmap) {
         accentJob?.cancel()
         accentJob = scope.launch {
             val argb = withContext(Dispatchers.Default) {
                 runCatching {
-                    val stepX = (bitmap.width / 10).coerceAtLeast(1)
-                    val stepY = (bitmap.height / 10).coerceAtLeast(1)
+                    val stepX = (bitmap.width / 8).coerceAtLeast(1)
+                    val stepY = (bitmap.height / 8).coerceAtLeast(1)
                     var bestScore = -1f
                     var bestColor = 0xFFBF5AF2.toInt()
                     val hsl = FloatArray(3)
@@ -392,7 +437,9 @@ class MediaHub(
     }
 
     fun openPlayerApp() {
-        val pkg = _state.value.packageName.ifEmpty { PIXEL_MUSIC_PKG }
+        val pkg = _state.value.packageName.ifEmpty {
+            latestSettings.allowedMusicPackages.firstOrNull() ?: PIXEL_MUSIC_PKG
+        }
         val launch = context.packageManager.getLaunchIntentForPackage(pkg)
             ?: context.packageManager.getLaunchIntentForPackage(PIXEL_MUSIC_PKG)
         launch?.let {
@@ -401,10 +448,6 @@ class MediaHub(
         }
     }
 
-    /**
-     * Strictly on-device local .lrc sidecar reader (if player exposes file:// METADATA_KEY_MEDIA_URI).
-     * NEVER performs any network call (app has zero INTERNET permission).
-     */
     private fun readSidecarLrcIfLocal(mediaUriStr: String?): String? {
         if (mediaUriStr.isNullOrBlank()) return null
         return runCatching {

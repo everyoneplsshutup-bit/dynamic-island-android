@@ -269,8 +269,8 @@ fun SetupWizardScreen(
             )
 
             WizardPermissionRow(
-                title = "Screenshots Folder (Auto-Vault)",
-                subtitle = "Lets 10-minute Photo Vault automatically capture new screenshots via SAF (no broad storage permission).",
+                title = "Screenshots Folder (Auto-Shelf)",
+                subtitle = "Lets 10-minute Photo Shelf automatically capture new screenshots via SAF (no broad storage permission).",
                 granted = !settings.vaultScreenshotsTreeUri.isNullOrBlank(),
                 buttonLabel = "Select Folder",
                 testTag = "wizard_screenshots_btn",
@@ -293,8 +293,8 @@ fun SetupWizardScreen(
                 Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("Zero-Startup / In-Context Permissions", fontWeight = FontWeight.SemiBold)
                     Text(
-                        "• MediaProjection is requested fresh ONLY when you tap Screenshot→Vault or OCR Tier B.\n" +
-                            "• Photo Vault uses app-private storage + Android Photo Picker (no broad storage permission).",
+                        "• MediaProjection is requested fresh ONLY when you tap Screenshot→Shelf or OCR Tier B.\n" +
+                            "• Photo Shelf uses app-private storage + Android Photo Picker (no broad storage permission).",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -349,7 +349,9 @@ fun SetupWizardScreen(
             Button(
                 onClick = {
                     scope.launch {
-                        app.settingsRepository.update { it.copy(wizardCompleted = true) }
+                        app.settingsRepository.update {
+                            it.copy(wizardCompleted = true, calibrationConfirmed = true)
+                        }
                         onDone()
                     }
                 },

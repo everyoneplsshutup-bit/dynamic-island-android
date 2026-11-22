@@ -113,7 +113,7 @@ class DynamicIslandRobolectricTest {
 
     @Test
     fun `two-stage open, companion swap, MotionTokens, and Build4Checklist work cleanly`() = runTest {
-        assertEquals(11, Build4Checklist.entries.size)
+        assertEquals(12, Build4Checklist.entries.size)
 
         val controller = IslandController()
         controller.upsertActivity(

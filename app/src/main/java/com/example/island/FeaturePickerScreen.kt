@@ -207,15 +207,21 @@ fun FeaturePickerScreen(
                     var menuExpanded by remember { mutableStateOf(false) }
                     var dragDeltaY by remember { mutableFloatStateOf(0f) }
 
+                    val liftScale by androidx.compose.animation.core.animateFloatAsState(
+                        targetValue = if (isDraggingThis) 1.03f else 1f,
+                        animationSpec = androidx.compose.animation.core.spring(dampingRatio = 0.72f, stiffness = 560f),
+                        label = "feature_drag_lift"
+                    )
+
                     Surface(
                         shape = RoundedCornerShape(18.dp),
                         tonalElevation = if (isDraggingThis) 8.dp else 2.dp,
                         modifier = Modifier
                             .fillMaxWidth()
                             .graphicsLayer {
-                                translationY = if (isDraggingThis) dragDeltaY.coerceIn(-40f, 40f) else 0f
-                                scaleX = if (isDraggingThis) 1.02f else 1f
-                                scaleY = if (isDraggingThis) 1.02f else 1f
+                                translationY = if (isDraggingThis) dragDeltaY.coerceIn(-44f, 44f) else 0f
+                                scaleX = liftScale
+                                scaleY = liftScale
                             }
                             .then(
                                 if (isDraggingThis) Modifier.border(1.5.dp, IslandColors.AccentOrange, RoundedCornerShape(18.dp))
@@ -227,12 +233,12 @@ fun FeaturePickerScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp)
                         ) {
-                            // Six-dot drag handle: IMMEDIATE drag without long-press delay
+                            // Six-dot drag handle: IMMEDIATE drag without long-press delay (48px threshold)
                             Box(
                                 contentAlignment = Alignment.Center,
                                 modifier = Modifier
                                     .minimumInteractiveComponentSize()
-                                    .size(44.dp)
+                                    .size(48.dp)
                                     .pointerInput(tab, enabledIdx) {
                                         detectDragGestures(
                                             onDragStart = {
@@ -242,11 +248,11 @@ fun FeaturePickerScreen(
                                             onDrag = { change, dragAmount ->
                                                 change.consume()
                                                 dragDeltaY += dragAmount.y
-                                                if (dragDeltaY > 64f) {
+                                                if (dragDeltaY > 48f) {
                                                     dragDeltaY = 0f
                                                     app.soundManager.playTap()
                                                     scope.launch { app.settingsRepository.moveTab(tab, +1) }
-                                                } else if (dragDeltaY < -64f) {
+                                                } else if (dragDeltaY < -48f) {
                                                     dragDeltaY = 0f
                                                     app.soundManager.playTap()
                                                     scope.launch { app.settingsRepository.moveTab(tab, -1) }

@@ -1,8 +1,15 @@
 package com.example.island
 
+import android.app.AlarmManager
+import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.net.TrafficStats
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
@@ -13,10 +20,11 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.togetherWith
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -35,6 +43,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -45,6 +54,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Calculate
@@ -52,6 +62,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.DragIndicator
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -67,6 +78,7 @@ import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
@@ -76,6 +88,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -83,13 +96,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
@@ -98,8 +115,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.graphics.drawable.toBitmap
+import com.example.BuildConfig
 import com.example.DynamicIslandApp
 import com.example.floating.FloatingSidebarOverlay
+import com.example.media.MediaUiState
 import com.example.media.MusicCompactWaveform
 import com.example.media.MusicExpandedView
 import com.example.ocr.OcrSelectionOverlay
@@ -110,6 +130,7 @@ import com.example.system.CalculatorIslandView
 import com.example.system.CompanionPosition
 import com.example.system.ContentEffect
 import com.example.system.ExpandedSwipeAction
+import com.example.system.IdleWidgetType
 import com.example.system.IslandSettings
 import com.example.system.IslandTab
 import com.example.system.LockScreenPreset
@@ -117,16 +138,62 @@ import com.example.system.OpeningEffect
 import com.example.system.PillStyle
 import com.example.system.TimerEngine
 import com.example.system.TimerStopwatchPanel
+import com.example.system.TimerUiState
+import com.example.system.WhenIdleMode
 import com.example.ui.theme.IslandColors
+import com.example.ui.theme.LocalAppBackdrop
 import com.example.ui.theme.MotionTokens
+import com.example.ui.theme.islandGlassChrome
 import com.example.vault.VaultItemEntity
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.roundToInt
+
+/**
+ * Runtime debug guard ensuring no rendered text/glyph enters the camera cutout exclusion zone.
+ */
+internal fun Modifier.debugCameraDeadZoneGuard(
+    exclusionZone: ExclusionZone,
+    label: String
+): Modifier {
+    if (!BuildConfig.DEBUG) return this
+    var violated by mutableStateOf(false)
+    return this
+        .onGloballyPositioned { coords ->
+            val bounds = coords.boundsInWindow()
+            val hit = DeadZoneGeometry.rectsIntersect(
+                aLeft = bounds.left,
+                aTop = bounds.top,
+                aRight = bounds.right,
+                aBottom = bounds.bottom,
+                bLeft = exclusionZone.exclusionRectPx.left.toFloat(),
+                bTop = exclusionZone.exclusionRectPx.top.toFloat(),
+                bRight = exclusionZone.exclusionRectPx.right.toFloat(),
+                bBottom = exclusionZone.exclusionRectPx.bottom.toFloat()
+            )
+            violated = hit
+            if (hit) {
+                Log.e("DeadZoneGuard", "Overlap detected for $label: bounds=$bounds vs cutout=${exclusionZone.exclusionRectPx}")
+            }
+        }
+        .drawBehind {
+            if (violated) {
+                drawRect(color = Color.Red, style = Stroke(width = 1.5.dp.toPx()))
+            }
+        }
+}
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun IslandOverlayRoot(
     app: DynamicIslandApp,
+    exclusionZone: ExclusionZone = DeadZoneGeometry.measureLive(LocalContext.current, IslandSettings()),
+    crossWindowBlurSupported: Boolean = false,
+    pullDownProgressProvider: () -> Float = { 0f },
     onRequestHaptic: () -> Unit,
     onOpenAppSettings: () -> Unit
 ) {
@@ -166,7 +233,7 @@ fun IslandOverlayRoot(
         return
     }
 
-    // Apple Two-Stage + Liquid Reveal GPU Motion Choreography
+    // Apple Two-Stage + Liquid Reveal GPU Motion Choreography (120Hz RenderThread)
     var showMediumStage by remember { mutableStateOf(state.mode == IslandMode.MEDIUM) }
     var showExpandedCard by remember { mutableStateOf(state.mode == IslandMode.EXPANDED) }
     val pillPreStretchX = remember { Animatable(1f) }
@@ -174,6 +241,9 @@ fun IslandOverlayRoot(
     val cardScaleY = remember { Animatable(if (state.mode == IslandMode.EXPANDED || state.mode == IslandMode.MEDIUM) 1f else 0.24f) }
     val cardAlpha = remember { Animatable(if (state.mode == IslandMode.EXPANDED || state.mode == IslandMode.MEDIUM) 1f else 0f) }
     val revealBlurDp = remember { Animatable(0f) }
+    // Opening choreography: content fades & rises after initial 30% container expand
+    val innerContentAlpha = remember { Animatable(if (state.mode == IslandMode.EXPANDED || state.mode == IslandMode.MEDIUM) 1f else 0f) }
+    val innerContentOffsetDp = remember { Animatable(0f) }
 
     LaunchedEffect(state.mode, effectiveStyle, settings.openingEffect, elasticity, durationScale) {
         val useLiquidBlur = settings.openingEffect == OpeningEffect.LIQUID
@@ -187,16 +257,25 @@ fun IslandOverlayRoot(
                     cardScaleY.snapTo(1f)
                     cardAlpha.snapTo(1f)
                     revealBlurDp.snapTo(0f)
+                    innerContentAlpha.snapTo(1f)
+                    innerContentOffsetDp.snapTo(0f)
                 } else {
                     revealBlurDp.snapTo(if (useLiquidBlur) 10f else 0f)
                     cardScaleX.snapTo(if (settings.openingEffect == OpeningEffect.POP) 0.78f else 0.66f)
                     cardScaleY.snapTo(if (settings.openingEffect == OpeningEffect.POP) 0.70f else 0.55f)
                     cardAlpha.snapTo(0.35f)
+                    innerContentAlpha.snapTo(0f)
+                    innerContentOffsetDp.snapTo(6f)
                     val spec = MotionTokens.idleToMediumSpec<Float>(effectiveStyle, elasticity, durationScale)
                     launch { cardScaleX.animateTo(1f, spec) }
                     launch { cardScaleY.animateTo(1f, spec) }
                     if (useLiquidBlur) {
                         launch { revealBlurDp.animateTo(0f, MotionTokens.effectsDefault(durationScale)) }
+                    }
+                    launch {
+                        delay(85L)
+                        launch { innerContentOffsetDp.animateTo(0f, tween(MotionTokens.CONTENT_CROSSFADE_MS, easing = MotionTokens.ContentCrossfadeEasing)) }
+                        innerContentAlpha.animateTo(1f, tween(MotionTokens.CONTENT_CROSSFADE_MS, easing = MotionTokens.ContentCrossfadeEasing))
                     }
                     cardAlpha.animateTo(1f, MotionTokens.contentCrossfadeTween(effectiveStyle, durationScale))
                 }
@@ -212,6 +291,8 @@ fun IslandOverlayRoot(
                     cardScaleY.snapTo(1f)
                     cardAlpha.snapTo(1f)
                     revealBlurDp.snapTo(0f)
+                    innerContentAlpha.snapTo(1f)
+                    innerContentOffsetDp.snapTo(0f)
                 } else {
                     if (!cameFromMedium) {
                         pillPreStretchX.animateTo(
@@ -231,6 +312,8 @@ fun IslandOverlayRoot(
                         cardScaleY.snapTo(0.52f)
                         cardAlpha.snapTo(0.65f)
                     }
+                    innerContentAlpha.snapTo(0f)
+                    innerContentOffsetDp.snapTo(8f)
                     revealBlurDp.snapTo(if (useLiquidBlur) 14f else 0f)
                     showExpandedCard = true
                     val expandSpec = MotionTokens.openingEffectSpec<Float>(
@@ -245,6 +328,12 @@ fun IslandOverlayRoot(
                     if (useLiquidBlur) {
                         launch { revealBlurDp.animateTo(0f, MotionTokens.effectsDefault(durationScale)) }
                     }
+                    launch {
+                        // Hold content opacity at 0% for initial ~30% of expand, then 200ms fade + 8dp rise
+                        delay(if (cameFromMedium) 60L else 130L)
+                        launch { innerContentOffsetDp.animateTo(0f, tween(MotionTokens.CONTENT_CROSSFADE_MS, easing = MotionTokens.ContentCrossfadeEasing)) }
+                        innerContentAlpha.animateTo(1f, tween(MotionTokens.CONTENT_CROSSFADE_MS, easing = MotionTokens.ContentCrossfadeEasing))
+                    }
                     cardAlpha.animateTo(1f, MotionTokens.contentCrossfadeTween(effectiveStyle, durationScale))
                 }
             }
@@ -258,8 +347,11 @@ fun IslandOverlayRoot(
                     cardScaleY.snapTo(0.25f)
                     revealBlurDp.snapTo(0f)
                     pillPreStretchX.snapTo(1f)
+                    innerContentAlpha.snapTo(0f)
+                    innerContentOffsetDp.snapTo(0f)
                 } else if (showExpandedCard || showMediumStage) {
                     val collapseSpec = MotionTokens.collapseSpec<Float>(effectiveStyle, durationScale)
+                    launch { innerContentAlpha.animateTo(0f, tween(80)) }
                     launch { cardScaleX.animateTo(0.46f, collapseSpec) }
                     launch { cardScaleY.animateTo(0.26f, collapseSpec) }
                     cardAlpha.animateTo(0f, tween(durationMillis = 120))
@@ -279,18 +371,8 @@ fun IslandOverlayRoot(
         label = "compact_scale"
     )
 
-    val useGlass = settings.pillStyle == PillStyle.GLASS && !settings.solidFallback
-    val cardBackground = if (useGlass) {
-        IslandColors.blendGlassBase(accentColor, settings.glassDensity)
-    } else {
-        Brush.verticalGradient(colors = listOf(IslandColors.PillBlack, IslandColors.PillBlack))
-    }
-
-    val pillBorderBrush = IslandColors.liquidBorderBrush(
-        useGlass = useGlass,
-        isHighlighted = state.isDragOverIsland || state.isCalibrationPreview,
-        accentColor = if (state.isCalibrationPreview) IslandColors.AccentRed else accentColor
-    )
+    val effectivePillStyle = if (settings.solidFallback) PillStyle.BLACK else settings.pillStyle
+    val useGlass = effectivePillStyle != PillStyle.BLACK
     val pillBorderColor = when {
         state.isCalibrationPreview -> IslandColors.AccentRed
         state.isDragOverIsland -> accentColor
@@ -298,16 +380,15 @@ fun IslandOverlayRoot(
         else -> Color.White.copy(alpha = 0.16f)
     }
 
-    val pullOffsetYPx = state.pullDownProgress * 22f
-    val pullScaleBoost = 1f + state.pullDownProgress * 0.14f
+    val isCalibratedOrPreview = settings.calibrationConfirmed || state.isCalibrationPreview
+    val backdrop = LocalAppBackdrop.current
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Select mode active indicator banner
         if (state.isSelectModeActive) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = (settings.cutoutYOffsetDp + settings.cutoutHeightDp + 16f).dp),
+                    .padding(top = (exclusionZone.holeBottomPlusMarginDp + 8f).dp),
                 contentAlignment = Alignment.TopCenter
             ) {
                 Row(
@@ -327,7 +408,6 @@ fun IslandOverlayRoot(
             }
         }
 
-        // Scrim tap outside Medium/Expanded collapses cleanly
         if (state.mode == IslandMode.EXPANDED || state.mode == IslandMode.MEDIUM) {
             Box(
                 modifier = Modifier
@@ -342,31 +422,50 @@ fun IslandOverlayRoot(
             )
         }
 
-        // Main Island Container anchored at camera cutout
         val blurMod = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && revealBlurDp.value > 0.4f) {
             Modifier.blur(revealBlurDp.value.dp)
         } else {
             Modifier
         }
 
+        // Anchor island relative to live DisplayCutout in Portrait or Landscape
+        val anchorAlign = when {
+            exclusionZone.isLandscape && exclusionZone.isRightEdgeInLandscape -> Alignment.CenterEnd
+            exclusionZone.isLandscape -> Alignment.CenterStart
+            else -> Alignment.TopCenter
+        }
+        val anchorOffsetX = if (!exclusionZone.isLandscape) settings.cutoutXOffsetDp.dp else 4.dp
+        val anchorOffsetY = if (!exclusionZone.isLandscape) (settings.cutoutYOffsetDp - 2f).coerceAtLeast(0f).dp else 0.dp
+
         Box(
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .offset(
-                    x = settings.cutoutXOffsetDp.dp,
-                    y = (settings.cutoutYOffsetDp - 2f).coerceAtLeast(0f).dp
-                ),
-            contentAlignment = Alignment.TopCenter
+                .align(anchorAlign)
+                .offset(x = anchorOffsetX, y = anchorOffsetY),
+            contentAlignment = anchorAlign
         ) {
             when {
+                !isCalibratedOrPreview && state.mode != IslandMode.EXPANDED && state.mode != IslandMode.MEDIUM -> {
+                    IdlePillView(
+                        settings = settings,
+                        state = state,
+                        exclusionZone = exclusionZone,
+                        accentColor = accentColor,
+                        isCalibrationPreview = false,
+                        isDragOverIsland = state.isDragOverIsland,
+                        isLowBatteryWarning = state.isLowBatteryWarning
+                    )
+                }
+
                 showExpandedCard -> {
                     Box(
                         modifier = Modifier
                             .graphicsLayer {
+                                val pull = pullDownProgressProvider()
                                 transformOrigin = TransformOrigin(0.5f, 0f)
                                 scaleX = cardScaleX.value
                                 scaleY = cardScaleY.value
                                 alpha = cardAlpha.value
+                                translationY = pull * 16f
                             }
                             .then(blurMod)
                     ) {
@@ -374,14 +473,16 @@ fun IslandOverlayRoot(
                             app = app,
                             state = state,
                             settings = settings,
+                            exclusionZone = exclusionZone,
                             accentColor = accentColor,
                             musicAccent = musicAccent,
-                            cardBackground = cardBackground,
-                            borderBrush = pillBorderBrush,
-                            useGlass = useGlass,
+                            effectivePillStyle = effectivePillStyle,
+                            crossWindowBlurSupported = crossWindowBlurSupported,
                             effectiveStyle = effectiveStyle,
                             elasticity = elasticity,
                             durationScale = durationScale,
+                            contentAlphaProvider = { innerContentAlpha.value },
+                            contentOffsetYDProvider = { innerContentOffsetDp.value },
                             onRequestHaptic = onRequestHaptic,
                             onOpenAppSettings = onOpenAppSettings,
                             onPreviewVaultItem = { previewVaultItem = it }
@@ -393,10 +494,12 @@ fun IslandOverlayRoot(
                     Box(
                         modifier = Modifier
                             .graphicsLayer {
+                                val pull = pullDownProgressProvider()
                                 transformOrigin = TransformOrigin(0.5f, 0f)
                                 scaleX = cardScaleX.value
                                 scaleY = cardScaleY.value
                                 alpha = cardAlpha.value
+                                translationY = pull * 16f
                             }
                             .then(blurMod)
                     ) {
@@ -404,10 +507,11 @@ fun IslandOverlayRoot(
                             app = app,
                             state = state,
                             settings = settings,
+                            exclusionZone = exclusionZone,
                             accentColor = accentColor,
                             musicAccent = musicAccent,
-                            cardBackground = cardBackground,
-                            borderBrush = pillBorderBrush,
+                            effectivePillStyle = effectivePillStyle,
+                            crossWindowBlurSupported = crossWindowBlurSupported,
                             mediaState = mediaState,
                             timerState = timerState,
                             onRequestHaptic = onRequestHaptic
@@ -418,13 +522,17 @@ fun IslandOverlayRoot(
                 state.mode == IslandMode.IDLE -> {
                     Box(
                         modifier = Modifier.graphicsLayer {
-                            scaleX = pillPreStretchX.value * pullScaleBoost
-                            scaleY = pullScaleBoost
-                            translationY = pullOffsetYPx
+                            val pull = pullDownProgressProvider()
+                            val boost = 1f + pull * 0.14f
+                            scaleX = pillPreStretchX.value * boost
+                            scaleY = boost
+                            translationY = pull * 22f
                         }
                     ) {
                         IdlePillView(
                             settings = settings,
+                            state = state,
+                            exclusionZone = exclusionZone,
                             accentColor = accentColor,
                             isCalibrationPreview = state.isCalibrationPreview,
                             isDragOverIsland = state.isDragOverIsland,
@@ -434,7 +542,6 @@ fun IslandOverlayRoot(
                 }
 
                 else -> {
-                    // COMPACT or SPLIT with Companion Bubble (+N) on user-chosen side
                     val companionView: @Composable () -> Unit = {
                         if (state.mode == IslandMode.SPLIT && state.secondaryActivity != null) {
                             SplitSecondaryBubble(
@@ -442,6 +549,11 @@ fun IslandOverlayRoot(
                                 companionCount = state.companionCount,
                                 accentColor = activityAccent(state.secondaryActivity!!, accentColor, musicAccent),
                                 borderColor = pillBorderColor,
+                                effectivePillStyle = effectivePillStyle,
+                                glassDensity = settings.glassDensity,
+                                reduceGlass = settings.reduceGlass,
+                                solidFallback = settings.solidFallback,
+                                crossWindowBlurActive = crossWindowBlurSupported,
                                 onClick = {
                                     onRequestHaptic()
                                     app.islandController.swapPrimaryAndSecondary()
@@ -454,9 +566,11 @@ fun IslandOverlayRoot(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier.graphicsLayer {
-                            scaleX = compactScale * pillPreStretchX.value * pullScaleBoost
-                            scaleY = compactScale * pullScaleBoost
-                            translationY = pullOffsetYPx
+                            val pull = pullDownProgressProvider()
+                            val boost = 1f + pull * 0.14f
+                            scaleX = compactScale * pillPreStretchX.value * boost
+                            scaleY = compactScale * boost
+                            translationY = pull * 22f
                         }
                     ) {
                         if (settings.companionPosition == CompanionPosition.LEFT) {
@@ -465,11 +579,13 @@ fun IslandOverlayRoot(
                         CompactPillView(
                             state = state,
                             settings = settings,
+                            exclusionZone = exclusionZone,
                             accentColor = accentColor,
                             musicAccent = musicAccent,
                             isPlaying = mediaState.isPlaying,
                             albumArt = mediaState.albumArt,
-                            pillBorderColor = pillBorderColor
+                            effectivePillStyle = effectivePillStyle,
+                            crossWindowBlurSupported = crossWindowBlurSupported
                         )
                         if (settings.companionPosition == CompanionPosition.RIGHT) {
                             companionView()
@@ -479,7 +595,6 @@ fun IslandOverlayRoot(
             }
         }
 
-        // Draggable Floating Mini-Window inside the overlay (Calc / Notes / Timer / Search)
         val miniTab = state.activeFloatingMiniTab
         if (miniTab != null) {
             DraggableFloatingMiniWindow(
@@ -498,7 +613,6 @@ fun IslandOverlayRoot(
             )
         }
 
-        // MIUI-style Floating Apps Sidebar overlay when opened
         AnimatedVisibility(
             visible = state.isFloatingSidebarOpen,
             enter = fadeIn(tween(150)) + scaleIn(initialScale = 0.92f),
@@ -515,7 +629,6 @@ fun IslandOverlayRoot(
             )
         }
 
-        // Flashlight Volumetric Beam Overlay Card
         if (state.isFlashlightCardOpen) {
             FlashlightBeamOverlayCard(
                 app = app,
@@ -524,7 +637,6 @@ fun IslandOverlayRoot(
             )
         }
 
-        // Vault Full-Screen Preview Overlay
         val activePreview = previewVaultItem
         if (activePreview != null) {
             VaultFullScreenPreviewOverlay(
@@ -539,7 +651,6 @@ fun IslandOverlayRoot(
             )
         }
 
-        // Custom iOS-style Interactive OCR Text Selection Overlay (blue handles + loupe + Callout Copy)
         val ocrSel = state.ocrSelection
         if (ocrSel != null) {
             OcrSelectionOverlay(
@@ -584,14 +695,13 @@ fun IslandOverlayRoot(
             )
         }
 
-        // Transient status banner
         AnimatedVisibility(
             visible = state.statusBanner != null,
             enter = fadeIn(tween(140)),
             exit = fadeOut(tween(120)),
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = (settings.cutoutYOffsetDp + settings.cutoutHeightDp + 24f).dp)
+                .padding(top = (exclusionZone.holeBottomPlusMarginDp + 16f).dp)
         ) {
             Box(
                 modifier = Modifier
@@ -620,30 +730,96 @@ private fun activityAccent(
     is IslandActivity.Charging -> IslandColors.AccentGreen
     is IslandActivity.Music -> musicAccent
     is IslandActivity.VoiceRecording -> IslandColors.AccentRed
+    is IslandActivity.Alert -> if (activity.kind == AlertKind.LOW_BATTERY) IslandColors.AccentRed else defaultAccent
     else -> defaultAccent
 }
 
 /**
- * Idle Pill: minimal ring around the camera cutout. Zero text under camera.
- * Shows vivid red Calibration Halo (#FF3B30) when Calibrate Preview is active.
+ * WhenIdleMode: CAMERA_ONLY / INFO_PILL (dual symmetric 88dp slots supporting all 12 widgets) / HIDDEN.
  */
 @Composable
-private fun IdlePillView(
+fun IdlePillView(
     settings: IslandSettings,
+    state: IslandState = IslandState(),
+    exclusionZone: ExclusionZone = DeadZoneGeometry.fromSyntheticHole(settings.cutoutWidthDp, settings.cutoutHeightDp),
     accentColor: Color,
     isCalibrationPreview: Boolean,
     isDragOverIsland: Boolean,
     isLowBatteryWarning: Boolean
 ) {
-    val holeW = settings.cutoutWidthDp.dp
-    val holeH = settings.cutoutHeightDp.dp
+    if (settings.whenIdleMode == WhenIdleMode.HIDDEN && !isCalibrationPreview && !isDragOverIsland) {
+        return
+    }
+
+    val holeW = exclusionZone.holeWidthDp.coerceAtLeast(settings.cutoutWidthDp)
+    val holeH = exclusionZone.holeHeightDp.coerceAtLeast(settings.cutoutHeightDp)
     val ringBorderColor = when {
         isCalibrationPreview -> IslandColors.AccentRed
         isDragOverIsland -> accentColor
-        isLowBatteryWarning -> IslandColors.AccentRed.copy(alpha = 0.72f)
+        isLowBatteryWarning -> IslandColors.AccentRed.copy(alpha = 0.78f)
         else -> Color.White.copy(alpha = 0.24f)
     }
     val strokeWidth = if (isDragOverIsland || isCalibrationPreview || isLowBatteryWarning) 2.dp else 1.dp
+
+    if (settings.whenIdleMode == WhenIdleMode.INFO_PILL && !isCalibrationPreview) {
+        val metrics = DeadZoneGeometry.compactSlotMetrics(holeW, holeH, exclusionZone.isLandscape)
+        var minuteTick by remember { mutableLongStateOf(System.currentTimeMillis()) }
+        LaunchedEffect(Unit) {
+            while (isActive) {
+                minuteTick = System.currentTimeMillis()
+                delay(20_000L)
+            }
+        }
+        val effectivePillStyle = if (settings.solidFallback) PillStyle.BLACK else settings.pillStyle
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .height(metrics.pillHeightDp.dp)
+                .islandGlassChrome(
+                    shape = CircleShape,
+                    pillStyle = effectivePillStyle,
+                    glassDensity = settings.glassDensity,
+                    reduceGlass = settings.reduceGlass,
+                    solidFallback = settings.solidFallback,
+                    accentColor = accentColor,
+                    isHighlighted = isDragOverIsland || isLowBatteryWarning,
+                    backdrop = LocalAppBackdrop.current
+                )
+                .padding(horizontal = metrics.outerPadDp.dp)
+                .testTag("idle_info_pill")
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(metrics.leftSlotDp.dp)
+                    .debugCameraDeadZoneGuard(exclusionZone, "idle_left"),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                IdleWidgetSlot(
+                    type = settings.idleLeftWidget,
+                    state = state,
+                    nowMs = minuteTick,
+                    accentColor = accentColor,
+                    isLowBattery = isLowBatteryWarning
+                )
+            }
+            Spacer(Modifier.width(metrics.centerSpacerDp.dp))
+            Box(
+                modifier = Modifier
+                    .width(metrics.rightSlotDp.dp)
+                    .debugCameraDeadZoneGuard(exclusionZone, "idle_right"),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                IdleWidgetSlot(
+                    type = settings.idleRightWidget,
+                    state = state,
+                    nowMs = minuteTick,
+                    accentColor = accentColor,
+                    isLowBattery = isLowBatteryWarning
+                )
+            }
+        }
+        return
+    }
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -663,172 +839,435 @@ private fun IdlePillView(
                 modifier = Modifier.size(14.dp)
             )
             Spacer(Modifier.width(8.dp))
-            Spacer(modifier = Modifier.size(width = holeW, height = holeH))
+            Spacer(modifier = Modifier.size(width = holeW.dp, height = holeH.dp))
             Spacer(Modifier.width(8.dp))
         } else {
-            Spacer(modifier = Modifier.size(width = holeW, height = holeH))
+            Spacer(modifier = Modifier.size(width = holeW.dp, height = holeH.dp))
         }
     }
 }
 
 @Composable
-private fun CompactPillView(
+private fun IdleWidgetSlot(
+    type: IdleWidgetType,
+    state: IslandState,
+    nowMs: Long,
+    accentColor: Color,
+    isLowBattery: Boolean
+) {
+    val context = LocalContext.current
+    val timeText = remember(nowMs) { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(nowMs)) }
+    val dateText = remember(nowMs) { SimpleDateFormat("EEE d", Locale.getDefault()).format(Date(nowMs)) }
+
+    when (type) {
+        IdleWidgetType.NONE -> Spacer(Modifier.width(8.dp))
+        IdleWidgetType.TIME, IdleWidgetType.CLOCK -> Text(
+            text = timeText,
+            style = TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum"),
+            maxLines = 1
+        )
+        IdleWidgetType.DATE -> Text(
+            text = dateText,
+            color = IslandColors.TextSecondary,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1
+        )
+        IdleWidgetType.BATTERY -> Text(
+            text = "${state.batteryLevelPercent}%",
+            color = if (isLowBattery) IslandColors.AccentRed else IslandColors.AccentGreen,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            maxLines = 1
+        )
+        IdleWidgetType.BATTERY_RING -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            val frac = (state.batteryLevelPercent / 100f).coerceIn(0.05f, 1f)
+            val color = if (isLowBattery) IslandColors.AccentRed else IslandColors.AccentGreen
+            Canvas(modifier = Modifier.size(12.dp)) {
+                drawArc(color = Color.White.copy(alpha = 0.2f), startAngle = -90f, sweepAngle = 360f, useCenter = false, style = Stroke(2.dp.toPx()))
+                drawArc(color = color, startAngle = -90f, sweepAngle = 360f * frac, useCenter = false, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
+            }
+            Text("${state.batteryLevelPercent}%", color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        }
+        IdleWidgetType.NEXT_ALARM -> {
+            val nextAlarm = remember(nowMs) {
+                val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+                val trigger = runCatching { am?.nextAlarmClock?.triggerTime }.getOrNull()
+                if (trigger != null && trigger > 0L) SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(trigger)) else "--:--"
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                Icon(Icons.Filled.Alarm, contentDescription = "Next alarm", tint = accentColor, modifier = Modifier.size(12.dp))
+                Text(nextAlarm, color = Color.White, fontSize = 10.sp, maxLines = 1)
+            }
+        }
+        IdleWidgetType.UNREAD_COUNT -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            Icon(Icons.Filled.Notifications, contentDescription = "Unread", tint = accentColor, modifier = Modifier.size(12.dp))
+            Text("${state.notificationsHistory.size}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
+        }
+        IdleWidgetType.NETWORK -> {
+            val netLabel = remember(nowMs) {
+                runCatching {
+                    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+                    val caps = cm?.getNetworkCapabilities(cm.activeNetwork)
+                    when {
+                        caps == null -> "Offline"
+                        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
+                        caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "5G/4G"
+                        else -> "Online"
+                    }
+                }.getOrDefault("Online")
+            }
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                Icon(Icons.Filled.Wifi, contentDescription = "Network", tint = accentColor, modifier = Modifier.size(12.dp))
+                Text(netLabel, color = Color.White, fontSize = 10.sp, maxLines = 1)
+            }
+        }
+        IdleWidgetType.NET_SPEED -> {
+            var prevBytes by remember { mutableLongStateOf(TrafficStats.getTotalRxBytes().coerceAtLeast(0L)) }
+            val speedLabel = remember(nowMs) {
+                val cur = TrafficStats.getTotalRxBytes().coerceAtLeast(0L)
+                val kbps = ((cur - prevBytes).coerceAtLeast(0L) / 20_480L).toInt()
+                prevBytes = cur
+                "${kbps}K/s"
+            }
+            Text(speedLabel, color = accentColor, fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+        }
+        IdleWidgetType.SEARCH_SHORTCUT -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            Icon(Icons.Filled.Search, contentDescription = "Search", tint = accentColor, modifier = Modifier.size(12.dp))
+            Text("Search", color = IslandColors.TextSecondary, fontSize = 10.sp, maxLines = 1)
+        }
+        IdleWidgetType.QUICK_NOTE -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            Icon(Icons.Filled.Edit, contentDescription = "Quick note", tint = IslandColors.AccentLime, modifier = Modifier.size(12.dp))
+            Text("Note", color = IslandColors.TextSecondary, fontSize = 10.sp, maxLines = 1)
+        }
+    }
+}
+
+@Composable
+fun CompactPillView(
     state: IslandState,
     settings: IslandSettings,
+    exclusionZone: ExclusionZone = DeadZoneGeometry.fromSyntheticHole(settings.cutoutWidthDp, settings.cutoutHeightDp),
     accentColor: Color,
-    musicAccent: Color,
-    isPlaying: Boolean,
-    albumArt: android.graphics.Bitmap?,
-    pillBorderColor: Color
+    musicAccent: Color = accentColor,
+    isPlaying: Boolean = false,
+    albumArt: Bitmap? = null,
+    effectivePillStyle: PillStyle = if (settings.solidFallback) PillStyle.BLACK else settings.pillStyle,
+    crossWindowBlurSupported: Boolean = false
 ) {
     val activity = state.primaryActivity
     val hideTextOnLock = state.isDeviceLocked && settings.lockScreenPreset == LockScreenPreset.PRIVACY_HIDE_TEXT
+    val holeW = exclusionZone.holeWidthDp.coerceAtLeast(settings.cutoutWidthDp)
+    val holeH = exclusionZone.holeHeightDp.coerceAtLeast(settings.cutoutHeightDp)
+    val metrics = DeadZoneGeometry.compactSlotMetrics(holeW, holeH, exclusionZone.isLandscape)
+    val context = LocalContext.current
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier
-            .height((settings.cutoutHeightDp + 10f).coerceAtLeast(36f).dp)
-            .clip(CircleShape)
-            .background(IslandColors.PillBlack)
-            .border(if (state.isDragOverIsland) 1.5.dp else 1.dp, pillBorderColor, CircleShape)
-            .padding(horizontal = 10.dp)
-    ) {
-        // LEFT SLOT (strictly left of camera cutout >= 8dp)
-        when (activity) {
-            is IslandActivity.Music -> {
-                if (albumArt != null) {
-                    Image(
-                        bitmap = albumArt.asImageBitmap(),
-                        contentDescription = "Album art",
-                        modifier = Modifier.size(22.dp).clip(CircleShape)
+    val notifAppIcon: Bitmap? = remember(activity) {
+        val pkg = (activity as? IslandActivity.NotificationPreview)?.packageName ?: return@remember null
+        runCatching {
+            context.packageManager.getApplicationIcon(pkg).toBitmap(width = 48, height = 48)
+        }.getOrNull()
+    }
+
+    val isLowBattery = (activity is IslandActivity.Alert && activity.kind == AlertKind.LOW_BATTERY) ||
+        (state.isLowBatteryWarning && activity is IslandActivity.Charging)
+
+    val pillModifier = Modifier.islandGlassChrome(
+        shape = CircleShape,
+        pillStyle = effectivePillStyle,
+        glassDensity = settings.glassDensity,
+        reduceGlass = settings.reduceGlass,
+        solidFallback = settings.solidFallback,
+        accentColor = if (isLowBattery) IslandColors.AccentRed else accentColor,
+        isHighlighted = state.isDragOverIsland || state.isCalibrationPreview || isLowBattery,
+        backdrop = LocalAppBackdrop.current,
+        crossWindowBlurActive = crossWindowBlurSupported
+    )
+
+    if (metrics.isVerticalLandscape) {
+        // Landscape camera-around vertical pill: top slot (44dp) -> cutout spacer -> bottom slot (44dp)
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = pillModifier
+                .width(metrics.pillHeightDp.dp)
+                .padding(vertical = metrics.outerPadDp.dp)
+                .testTag("compact_pill_landscape")
+        ) {
+            Box(
+                modifier = Modifier
+                    .height(metrics.leftSlotDp.dp)
+                    .debugCameraDeadZoneGuard(exclusionZone, "compact_top"),
+                contentAlignment = Alignment.Center
+            ) {
+                CompactLeftGlyph(
+                    activity = activity,
+                    albumArt = albumArt,
+                    notifAppIcon = notifAppIcon,
+                    accentColor = accentColor,
+                    musicAccent = musicAccent,
+                    isLowBattery = isLowBattery
+                )
+            }
+            Spacer(Modifier.height(metrics.centerSpacerDp.dp))
+            Box(
+                modifier = Modifier
+                    .height(metrics.rightSlotDp.dp)
+                    .debugCameraDeadZoneGuard(exclusionZone, "compact_bottom"),
+                contentAlignment = Alignment.Center
+            ) {
+                when (activity) {
+                    is IslandActivity.Timer -> Text(
+                        text = TimerEngine.formatDuration(activity.remainingMs),
+                        color = IslandColors.AccentOrange,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1
                     )
-                } else {
-                    Icon(Icons.Filled.MusicNote, contentDescription = null, tint = musicAccent, modifier = Modifier.size(18.dp))
+                    is IslandActivity.Charging -> Text(
+                        text = "${activity.levelPercent}%",
+                        color = if (isLowBattery) IslandColors.AccentRed else IslandColors.AccentGreen,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1
+                    )
+                    is IslandActivity.Music -> MusicCompactWaveform(isPlaying = isPlaying, accentColor = musicAccent)
+                    else -> Spacer(Modifier.size(12.dp))
                 }
             }
-            is IslandActivity.Timer -> {
-                Icon(Icons.Filled.Timer, contentDescription = null, tint = IslandColors.AccentOrange, modifier = Modifier.size(18.dp))
-            }
-            is IslandActivity.Charging -> {
-                Icon(Icons.Filled.BatteryChargingFull, contentDescription = null, tint = IslandColors.AccentGreen, modifier = Modifier.size(18.dp))
-            }
-            is IslandActivity.NotificationPreview -> {
-                Icon(Icons.Filled.Notifications, contentDescription = null, tint = accentColor, modifier = Modifier.size(17.dp))
-            }
-            is IslandActivity.VoiceRecording -> {
-                Icon(Icons.Filled.Mic, contentDescription = null, tint = IslandColors.AccentRed, modifier = Modifier.size(17.dp))
-            }
-            is IslandActivity.Alert -> {
-                Icon(Icons.Filled.Notifications, contentDescription = null, tint = accentColor, modifier = Modifier.size(17.dp))
-            }
-            null -> {
-                Spacer(Modifier.width(12.dp))
-            }
         }
+        return
+    }
 
-        // CAMERA CUTOUT CLEARANCE (>= 8dp on both sides -> +16dp total)
-        Spacer(Modifier.width((settings.cutoutWidthDp + 16f).dp))
+    // Portrait: symmetrical leftSlotDp (88dp) + centerSpacerDp (holeW+16dp) + rightSlotDp (88dp)
+    Box(
+        modifier = pillModifier
+            .width(metrics.totalWidthDp.dp)
+            .height(metrics.pillHeightDp.dp)
+            .testTag("compact_pill_portrait")
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = metrics.outerPadDp.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(metrics.leftSlotDp.dp)
+                    .padding(end = metrics.innerSafetyInsetDp.dp)
+                    .debugCameraDeadZoneGuard(exclusionZone, "compact_left"),
+                contentAlignment = Alignment.CenterStart
+            ) {
+                CompactLeftGlyph(
+                    activity = activity,
+                    albumArt = albumArt,
+                    notifAppIcon = notifAppIcon,
+                    accentColor = accentColor,
+                    musicAccent = musicAccent,
+                    isLowBattery = isLowBattery
+                )
+            }
 
-        // RIGHT SLOT (strictly right of camera cutout)
-        when (activity) {
-            is IslandActivity.Music -> {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    if (activity.title.isNotBlank() && !hideTextOnLock) {
+            Spacer(Modifier.width(metrics.centerSpacerDp.dp))
+
+            Box(
+                modifier = Modifier
+                    .width(metrics.rightSlotDp.dp)
+                    .padding(start = metrics.innerSafetyInsetDp.dp)
+                    .debugCameraDeadZoneGuard(exclusionZone, "compact_right"),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                when (activity) {
+                    is IslandActivity.Music -> {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (activity.title.isNotBlank() && !hideTextOnLock) {
+                                Text(
+                                    text = activity.title,
+                                    color = IslandColors.TextPrimary,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier
+                                        .widthIn(max = metrics.musicTitleMaxDp.dp)
+                                        .debugCameraDeadZoneGuard(exclusionZone, "music_title")
+                                )
+                            }
+                            MusicCompactWaveform(isPlaying = isPlaying, accentColor = musicAccent)
+                        }
+                    }
+                    is IslandActivity.Timer -> {
                         Text(
-                            text = activity.title,
+                            text = TimerEngine.formatDuration(activity.remainingMs),
+                            style = TextStyle(
+                                color = IslandColors.AccentOrange,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                fontFeatureSettings = "tnum"
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .widthIn(max = (metrics.rightSlotDp - metrics.innerSafetyInsetDp).dp)
+                                .debugCameraDeadZoneGuard(exclusionZone, "timer_text")
+                        )
+                    }
+                    is IslandActivity.Charging -> {
+                        val wattsText = activity.wattageWatts?.takeIf { it > 0.5f && activity.levelPercent < 100 }
+                            ?.let { " ${it.roundToInt()}W" }.orEmpty()
+                        val frac = (activity.levelPercent / 100f).coerceIn(0.05f, 1f)
+                        val barColor = if (isLowBattery) IslandColors.AccentRed else IslandColors.AccentGreen
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(20.dp)
+                                    .height(9.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.16f))
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(frac)
+                                        .height(9.dp)
+                                        .clip(CircleShape)
+                                        .background(barColor)
+                                )
+                            }
+                            Text(
+                                text = "${activity.levelPercent}%$wattsText",
+                                style = TextStyle(
+                                    color = barColor,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFeatureSettings = "tnum"
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .widthIn(max = (metrics.rightSlotDp - 26f).dp)
+                                    .debugCameraDeadZoneGuard(exclusionZone, "charging_text")
+                            )
+                        }
+                    }
+                    is IslandActivity.NotificationPreview -> {
+                        // Notification compact pill: app name ONLY (never title/body!), ellipsis at 80dp
+                        Text(
+                            text = activity.appName.ifBlank { "Notification" },
                             color = IslandColors.TextPrimary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.widthIn(max = 72.dp)
-                        )
-                    }
-                    MusicCompactWaveform(isPlaying = isPlaying, accentColor = musicAccent)
-                }
-            }
-            is IslandActivity.Timer -> {
-                Text(
-                    text = TimerEngine.formatDuration(activity.remainingMs),
-                    style = TextStyle(
-                        color = IslandColors.AccentOrange,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        fontFeatureSettings = "tnum"
-                    )
-                )
-            }
-            is IslandActivity.Charging -> {
-                val wattsText = activity.wattageWatts?.takeIf { it > 0.5f }
-                    ?.let { " · ${it.roundToInt()}W" }.orEmpty()
-                val frac = (activity.levelPercent / 100f).coerceIn(0.05f, 1f)
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .width(26.dp)
-                            .height(10.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.16f))
-                    ) {
-                        Box(
                             modifier = Modifier
-                                .fillMaxWidth(frac)
-                                .height(10.dp)
-                                .clip(CircleShape)
-                                .background(IslandColors.AccentGreen)
+                                .widthIn(max = metrics.notificationAppNameMaxDp.dp)
+                                .debugCameraDeadZoneGuard(exclusionZone, "notif_app_name")
                         )
                     }
-                    Text(
-                        text = "${activity.levelPercent}%$wattsText",
-                        style = TextStyle(
-                            color = IslandColors.AccentGreen,
+                    is IslandActivity.VoiceRecording -> {
+                        Text(
+                            text = TimerEngine.formatDuration(activity.elapsedMs),
+                            color = IslandColors.AccentRed,
                             fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            fontFeatureSettings = "tnum"
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1
                         )
-                    )
+                    }
+                    is IslandActivity.Alert -> {
+                        val alertColor = if (activity.kind == AlertKind.LOW_BATTERY) IslandColors.AccentRed else accentColor
+                        Text(
+                            text = if (hideTextOnLock) "Alert" else activity.title,
+                            color = alertColor,
+                            fontSize = 11.sp,
+                            fontWeight = if (activity.kind == AlertKind.LOW_BATTERY) FontWeight.Bold else FontWeight.Medium,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .widthIn(max = metrics.notificationAppNameMaxDp.dp)
+                                .debugCameraDeadZoneGuard(exclusionZone, "alert_title")
+                        )
+                    }
+                    null -> Spacer(Modifier.width(12.dp))
                 }
-            }
-            is IslandActivity.NotificationPreview -> {
-                Text(
-                    text = if (hideTextOnLock) activity.appName else activity.title,
-                    color = IslandColors.TextPrimary,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 84.dp)
-                )
-            }
-            is IslandActivity.VoiceRecording -> {
-                Text(
-                    text = TimerEngine.formatDuration(activity.elapsedMs),
-                    color = IslandColors.AccentRed,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
-            is IslandActivity.Alert -> {
-                val alertColor = if (activity.kind == AlertKind.LOW_BATTERY) IslandColors.AccentRed else accentColor
-                Text(
-                    text = if (hideTextOnLock) "Alert" else activity.title,
-                    color = alertColor,
-                    fontSize = 11.sp,
-                    fontWeight = if (activity.kind == AlertKind.LOW_BATTERY) FontWeight.Bold else FontWeight.Normal,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 86.dp)
-                )
-            }
-            null -> {
-                Spacer(Modifier.width(12.dp))
             }
         }
+
+        // Bottom 2 dp draining dwell underline for active transient notification/alert
+        if (activity != null && state.dwellTargetActivityId == activity.id && state.dwellTotalMs > 0L) {
+            val dwellFrac = (state.dwellRemainingMs.toFloat() / state.dwellTotalMs.toFloat()).coerceIn(0f, 1f)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth(0.76f * dwellFrac)
+                    .height(2.dp)
+                    .clip(CircleShape)
+                    .background(activityAccent(activity, accentColor, musicAccent).copy(alpha = if (state.isDwellPaused) 0.45f else 0.9f))
+            )
+        }
+    }
+}
+
+@Composable
+private fun CompactLeftGlyph(
+    activity: IslandActivity?,
+    albumArt: Bitmap?,
+    notifAppIcon: Bitmap?,
+    accentColor: Color,
+    musicAccent: Color,
+    isLowBattery: Boolean
+) {
+    when (activity) {
+        is IslandActivity.Music -> {
+            if (albumArt != null) {
+                Image(
+                    bitmap = albumArt.asImageBitmap(),
+                    contentDescription = "Album art",
+                    modifier = Modifier.size(22.dp).clip(CircleShape)
+                )
+            } else {
+                Icon(Icons.Filled.MusicNote, contentDescription = "Music", tint = musicAccent, modifier = Modifier.size(18.dp))
+            }
+        }
+        is IslandActivity.Timer -> {
+            Icon(Icons.Filled.Timer, contentDescription = "Timer", tint = IslandColors.AccentOrange, modifier = Modifier.size(18.dp))
+        }
+        is IslandActivity.Charging -> {
+            Icon(
+                imageVector = if (isLowBattery) Icons.Filled.BatteryAlert else Icons.Filled.BatteryChargingFull,
+                contentDescription = "Battery",
+                tint = if (isLowBattery) IslandColors.AccentRed else IslandColors.AccentGreen,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        is IslandActivity.NotificationPreview -> {
+            if (notifAppIcon != null) {
+                Image(
+                    bitmap = notifAppIcon.asImageBitmap(),
+                    contentDescription = activity.appName,
+                    modifier = Modifier.size(20.dp).clip(CircleShape)
+                )
+            } else {
+                Icon(Icons.Filled.Notifications, contentDescription = activity.appName, tint = accentColor, modifier = Modifier.size(18.dp))
+            }
+        }
+        is IslandActivity.VoiceRecording -> {
+            Icon(Icons.Filled.Mic, contentDescription = "Voice Recording", tint = IslandColors.AccentRed, modifier = Modifier.size(17.dp))
+        }
+        is IslandActivity.Alert -> {
+            val isLow = activity.kind == AlertKind.LOW_BATTERY
+            Icon(
+                imageVector = if (isLow) Icons.Filled.BatteryAlert else Icons.Filled.Notifications,
+                contentDescription = activity.title,
+                tint = if (isLow) IslandColors.AccentRed else accentColor,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        null -> Spacer(Modifier.width(12.dp))
     }
 }
 
@@ -838,15 +1277,27 @@ private fun SplitSecondaryBubble(
     companionCount: Int,
     accentColor: Color,
     borderColor: Color,
+    effectivePillStyle: PillStyle,
+    glassDensity: Float,
+    reduceGlass: Boolean,
+    solidFallback: Boolean,
+    crossWindowBlurActive: Boolean,
     onClick: () -> Unit
 ) {
     Box(modifier = Modifier.clickable(onClick = onClick).testTag("split_companion_bubble")) {
         Box(
             modifier = Modifier
                 .size(36.dp)
-                .clip(CircleShape)
-                .background(IslandColors.PillBlack)
-                .border(1.dp, borderColor, CircleShape),
+                .islandGlassChrome(
+                    shape = CircleShape,
+                    pillStyle = effectivePillStyle,
+                    glassDensity = glassDensity,
+                    reduceGlass = reduceGlass,
+                    solidFallback = solidFallback,
+                    accentColor = accentColor,
+                    backdrop = LocalAppBackdrop.current,
+                    crossWindowBlurActive = crossWindowBlurActive
+                ),
             contentAlignment = Alignment.Center
         ) {
             when (activity) {
@@ -882,36 +1333,50 @@ private fun SplitSecondaryBubble(
 }
 
 /**
- * Stage 1 Medium Pill Preview (first tap on two-stage open):
- * Camera cutout clearance at top + compact quick controls + tap chevron to open Stage 2 Expanded.
+ * Stage 1 Medium Pill Preview: capped widthIn(max = 320.dp), heightIn(96..120.dp), 28dp radius,
+ * body strictly below camera clearance (>= 12dp spacer).
  */
 @Composable
-private fun MediumPillView(
+fun MediumPillView(
     app: DynamicIslandApp,
     state: IslandState,
     settings: IslandSettings,
+    exclusionZone: ExclusionZone = DeadZoneGeometry.fromSyntheticHole(settings.cutoutWidthDp, settings.cutoutHeightDp),
     accentColor: Color,
-    musicAccent: Color,
-    cardBackground: Brush,
-    borderBrush: Brush,
-    mediaState: com.example.media.MediaUiState,
-    timerState: com.example.system.TimerUiState,
-    onRequestHaptic: () -> Unit
+    musicAccent: Color = accentColor,
+    effectivePillStyle: PillStyle = if (settings.solidFallback) PillStyle.BLACK else settings.pillStyle,
+    crossWindowBlurSupported: Boolean = false,
+    mediaState: MediaUiState = MediaUiState(),
+    timerState: TimerUiState = TimerUiState(),
+    onRequestHaptic: () -> Unit = {}
 ) {
     val primary = state.primaryActivity
+    val holeW = exclusionZone.holeWidthDp.coerceAtLeast(settings.cutoutWidthDp)
+    val holeH = exclusionZone.holeHeightDp.coerceAtLeast(settings.cutoutHeightDp)
+    val shape = RoundedCornerShape(IslandColors.MediumOuterRadius)
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 24.dp)
-            .widthIn(max = 328.dp)
-            .clip(RoundedCornerShape(32.dp))
-            .background(cardBackground)
-            .border(1.dp, borderBrush, RoundedCornerShape(32.dp))
+            .widthIn(max = 320.dp)
+            .heightIn(min = 96.dp, max = 120.dp)
+            .islandGlassChrome(
+                shape = shape,
+                pillStyle = effectivePillStyle,
+                glassDensity = settings.glassDensity,
+                reduceGlass = settings.reduceGlass,
+                solidFallback = settings.solidFallback,
+                accentColor = accentColor,
+                isHighlighted = state.isDragOverIsland,
+                backdrop = LocalAppBackdrop.current,
+                crossWindowBlurActive = crossWindowBlurSupported
+            )
             .clickable {
                 onRequestHaptic()
                 app.islandController.expand()
             }
-            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .padding(horizontal = 14.dp, vertical = 8.dp)
             .testTag("medium_stage1_pill"),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -919,7 +1384,7 @@ private fun MediumPillView(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height((settings.cutoutHeightDp + 10f).coerceAtLeast(34f).dp),
+                .height((holeH + 8f).coerceAtLeast(36f).dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -928,13 +1393,19 @@ private fun MediumPillView(
                     is IslandActivity.Music -> mediaState.appLabel.ifBlank { "Now Playing" }
                     is IslandActivity.Timer -> "Timer"
                     is IslandActivity.Charging -> "Power"
+                    is IslandActivity.NotificationPreview -> primary.appName.ifBlank { "Notification" }
                     else -> state.activeTab.title
                 },
                 color = accentColor,
                 fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .widthIn(max = 96.dp)
+                    .debugCameraDeadZoneGuard(exclusionZone, "medium_header_left")
             )
-            Spacer(Modifier.width((settings.cutoutWidthDp + 16f).dp))
+            Spacer(Modifier.width((holeW + 16f).dp))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -945,6 +1416,7 @@ private fun MediumPillView(
                         app.islandController.expand()
                     }
                     .padding(horizontal = 8.dp, vertical = 3.dp)
+                    .debugCameraDeadZoneGuard(exclusionZone, "medium_header_right")
                     .testTag("medium_expand_btn")
             ) {
                 Text("Full", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Medium)
@@ -952,7 +1424,7 @@ private fun MediumPillView(
             }
         }
 
-        // Body strip below camera
+        // Body sits strictly >= 4 dp + header clearance below camera
         when (primary) {
             is IslandActivity.Music -> {
                 Row(
@@ -963,11 +1435,11 @@ private fun MediumPillView(
                         Image(
                             bitmap = mediaState.albumArt.asImageBitmap(),
                             contentDescription = "Album art",
-                            modifier = Modifier.size(38.dp).clip(RoundedCornerShape(10.dp))
+                            modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp))
                         )
                     } else {
                         Box(
-                            modifier = Modifier.size(38.dp).clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.1f)),
+                            modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.1f)),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(Icons.Filled.MusicNote, contentDescription = null, tint = musicAccent)
@@ -978,7 +1450,7 @@ private fun MediumPillView(
                         Text(mediaState.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         Text(mediaState.artist, color = IslandColors.TextSecondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
-                    IconButton(onClick = { onRequestHaptic(); app.mediaHub.skipPrevious() }, modifier = Modifier.size(34.dp)) {
+                    IconButton(onClick = { onRequestHaptic(); app.mediaHub.skipPrevious() }, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous", tint = Color.White)
                     }
                     IconButton(
@@ -987,7 +1459,7 @@ private fun MediumPillView(
                             if (mediaState.isPlaying) app.soundManager.playMusicPause() else app.soundManager.playMusicPlay()
                             app.mediaHub.togglePlayPause()
                         },
-                        modifier = Modifier.size(36.dp)
+                        modifier = Modifier.size(34.dp)
                     ) {
                         Icon(
                             imageVector = if (mediaState.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
@@ -995,7 +1467,7 @@ private fun MediumPillView(
                             tint = musicAccent
                         )
                     }
-                    IconButton(onClick = { onRequestHaptic(); app.mediaHub.skipNext() }, modifier = Modifier.size(34.dp)) {
+                    IconButton(onClick = { onRequestHaptic(); app.mediaHub.skipNext() }, modifier = Modifier.size(32.dp)) {
                         Icon(Icons.Filled.SkipNext, contentDescription = "Next", tint = Color.White)
                     }
                 }
@@ -1009,7 +1481,7 @@ private fun MediumPillView(
                 ) {
                     Text(
                         text = TimerEngine.formatDuration(timerState.remainingMs),
-                        style = TextStyle(color = IslandColors.AccentOrange, fontSize = 24.sp, fontWeight = FontWeight.Light, fontFeatureSettings = "tnum")
+                        style = TextStyle(color = IslandColors.AccentOrange, fontSize = 22.sp, fontWeight = FontWeight.Light, fontFeatureSettings = "tnum")
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         IconButton(
@@ -1017,7 +1489,7 @@ private fun MediumPillView(
                                 onRequestHaptic()
                                 if (timerState.isRunning) app.timerEngine.pauseTimer() else app.timerEngine.resumeTimer()
                             },
-                            modifier = Modifier.size(36.dp).clip(CircleShape).background(IslandColors.AccentOrange)
+                            modifier = Modifier.size(34.dp).clip(CircleShape).background(IslandColors.AccentOrange)
                         ) {
                             Icon(
                                 imageVector = if (timerState.isRunning) Icons.Filled.Pause else Icons.Filled.PlayArrow,
@@ -1027,7 +1499,7 @@ private fun MediumPillView(
                         }
                         IconButton(
                             onClick = { onRequestHaptic(); app.timerEngine.cancelTimer() },
-                            modifier = Modifier.size(36.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.14f))
+                            modifier = Modifier.size(34.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.14f))
                         ) {
                             Icon(Icons.Filled.Close, contentDescription = "Cancel timer", tint = Color.White)
                         }
@@ -1065,7 +1537,7 @@ private fun MediumPillView(
                     settings.enabledTabs.filter { settings.isTabMasterEnabled(it) }.take(5).forEach { tab ->
                         Box(
                             modifier = Modifier
-                                .size(38.dp)
+                                .size(36.dp)
                                 .clip(CircleShape)
                                 .background(if (tab == state.activeTab) accentColor.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.08f))
                                 .clickable {
@@ -1083,23 +1555,38 @@ private fun MediumPillView(
     }
 }
 
+private fun maxPanelHeightForTab(tab: IslandTab) = when (tab) {
+    IslandTab.MUSIC -> 132.dp
+    IslandTab.TIMER -> 124.dp
+    IslandTab.ALERTS -> 144.dp
+    IslandTab.VAULT -> 152.dp
+    IslandTab.NOTES -> 148.dp
+    IslandTab.CLIPS -> 148.dp
+    IslandTab.MEMO -> 148.dp
+    IslandTab.TOOLS -> 160.dp
+    IslandTab.CALC -> 160.dp
+    IslandTab.SEARCH -> 160.dp
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ExpandedIslandCard(
+fun ExpandedIslandCard(
     app: DynamicIslandApp,
     state: IslandState,
     settings: IslandSettings,
+    exclusionZone: ExclusionZone = DeadZoneGeometry.fromSyntheticHole(settings.cutoutWidthDp, settings.cutoutHeightDp),
     accentColor: Color,
-    musicAccent: Color,
-    cardBackground: Brush,
-    borderBrush: Brush,
-    useGlass: Boolean,
-    effectiveStyle: AnimationStyle,
-    elasticity: Float,
-    durationScale: Float,
-    onRequestHaptic: () -> Unit,
-    onOpenAppSettings: () -> Unit,
-    onPreviewVaultItem: (VaultItemEntity) -> Unit
+    musicAccent: Color = accentColor,
+    effectivePillStyle: PillStyle = if (settings.solidFallback) PillStyle.BLACK else settings.pillStyle,
+    crossWindowBlurSupported: Boolean = false,
+    effectiveStyle: AnimationStyle = AnimationStyle.FRUIT,
+    elasticity: Float = settings.animationElasticity,
+    durationScale: Float = settings.animationSpeed,
+    contentAlphaProvider: () -> Float = { 1f },
+    contentOffsetYDProvider: () -> Float = { 0f },
+    onRequestHaptic: () -> Unit = {},
+    onOpenAppSettings: () -> Unit = {},
+    onPreviewVaultItem: (VaultItemEntity) -> Unit = {}
 ) {
     val mediaState by app.mediaHub.state.collectAsState()
     val timerState by app.timerEngine.state.collectAsState()
@@ -1116,42 +1603,64 @@ private fun ExpandedIslandCard(
         }
     }
 
+    val holeW = exclusionZone.holeWidthDp.coerceAtLeast(settings.cutoutWidthDp)
+    val holeH = exclusionZone.holeHeightDp.coerceAtLeast(settings.cutoutHeightDp)
     val outerShape = RoundedCornerShape(IslandColors.ExpandedOuterRadius)
+    val useGlass = effectivePillStyle != PillStyle.BLACK
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = IslandColors.ScreenHorizontalMargin)
-            .widthIn(max = 408.dp)
-            .clip(outerShape)
-            .background(cardBackground)
-            .border(if (state.isDragOverIsland) 1.5.dp else 1.dp, borderBrush, outerShape)
+            .widthIn(max = 360.dp)
+            .islandGlassChrome(
+                shape = outerShape,
+                pillStyle = effectivePillStyle,
+                glassDensity = settings.glassDensity,
+                reduceGlass = settings.reduceGlass,
+                solidFallback = settings.solidFallback,
+                accentColor = accentColor,
+                isHighlighted = state.isDragOverIsland,
+                backdrop = LocalAppBackdrop.current,
+                crossWindowBlurActive = crossWindowBlurSupported
+            )
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = {},
                 onLongClick = {
                     onRequestHaptic()
-                    onOpenAppSettings()
+                    when (settings.expandedLongPressGesture) {
+                        ExpandedSwipeAction.COLLAPSE -> app.islandController.collapse()
+                        ExpandedSwipeAction.DISMISS -> app.islandController.dismissActiveNotification()
+                        ExpandedSwipeAction.NEXT_NOTIFICATION -> app.islandController.nextNotification()
+                        ExpandedSwipeAction.NONE -> onOpenAppSettings()
+                    }
                 }
             )
-            .padding(bottom = 10.dp)
+            .padding(bottom = 8.dp)
     ) {
-        // Camera-aware Top Header Row: Left control + Camera Clearance (>= 8dp both sides) + Right controls
+        // Camera-aware Top Header Row: Left control (<= 120dp) + Camera Clearance (holeW + 16dp) + Right controls (<= 120dp)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height((settings.cutoutHeightDp + 16f).coerceAtLeast(42f).dp)
-                .padding(horizontal = 14.dp),
+                .height((holeH + 14f).coerceAtLeast(42f).dp)
+                .padding(horizontal = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .widthIn(max = 120.dp)
+                    .debugCameraDeadZoneGuard(exclusionZone, "expanded_header_left")
+            ) {
                 IconButton(
                     onClick = {
                         onRequestHaptic()
                         app.islandController.collapse()
                     },
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(34.dp)
                 ) {
                     Icon(Icons.Filled.Close, contentDescription = "Collapse island", tint = IslandColors.TextSecondary, modifier = Modifier.size(18.dp))
                 }
@@ -1159,14 +1668,21 @@ private fun ExpandedIslandCard(
                     text = state.activeTab.title,
                     color = IslandColors.TextSecondary,
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.Medium
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
             }
 
-            // Camera cutout safety spacer in the middle
-            Spacer(Modifier.width((settings.cutoutWidthDp + 16f).dp))
+            Spacer(Modifier.width((holeW + 16f).dp))
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.End,
+                modifier = Modifier
+                    .widthIn(max = 120.dp)
+                    .debugCameraDeadZoneGuard(exclusionZone, "expanded_header_right")
+            ) {
                 IconButton(
                     onClick = {
                         onRequestHaptic()
@@ -1174,14 +1690,14 @@ private fun ExpandedIslandCard(
                         app.islandController.collapse()
                         onOpenAppSettings()
                     },
-                    modifier = Modifier.size(36.dp)
+                    modifier = Modifier.size(34.dp)
                 ) {
                     Icon(Icons.Filled.Settings, contentDescription = "Open Settings", tint = IslandColors.TextSecondary, modifier = Modifier.size(18.dp))
                 }
             }
         }
 
-        // EXPANDED HOME LAYOUT (Dynamic Ledge): Live Activity FIRST + up to 3 User Shortcuts beside it
+        // Expanded Home Layout: Live Activity FIRST + up to 3 User Shortcuts beside it
         val primaryLive = state.primaryActivity
         if (primaryLive != null || pinnedApps.isNotEmpty()) {
             Row(
@@ -1189,21 +1705,21 @@ private fun ExpandedIslandCard(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 3.dp)
+                    .padding(horizontal = 12.dp, vertical = 2.dp)
             ) {
                 if (primaryLive != null) {
                     val liveTab = when (primaryLive) {
                         is IslandActivity.Music -> IslandTab.MUSIC
                         is IslandActivity.Timer -> IslandTab.TIMER
                         is IslandActivity.VoiceRecording -> IslandTab.MEMO
-                        is IslandActivity.Alert -> IslandTab.ALERTS
+                        is IslandActivity.Alert, is IslandActivity.NotificationPreview -> IslandTab.ALERTS
                         else -> state.activeTab
                     }
                     val liveText = when (primaryLive) {
                         is IslandActivity.Music -> primaryLive.title.ifBlank { "Music" }
                         is IslandActivity.Timer -> TimerEngine.formatDuration(primaryLive.remainingMs)
                         is IslandActivity.Charging -> "${primaryLive.levelPercent}% Charging"
-                        is IslandActivity.NotificationPreview -> primaryLive.title.ifBlank { primaryLive.appName }
+                        is IslandActivity.NotificationPreview -> primaryLive.appName.ifBlank { primaryLive.title }
                         is IslandActivity.Alert -> primaryLive.title
                         is IslandActivity.VoiceRecording -> "Rec ${TimerEngine.formatDuration(primaryLive.elapsedMs)}"
                     }
@@ -1218,7 +1734,7 @@ private fun ExpandedIslandCard(
                                 onRequestHaptic()
                                 app.islandController.selectTab(liveTab)
                             }
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
                         Box(Modifier.size(6.dp).clip(CircleShape).background(liveColor))
                         Spacer(Modifier.width(6.dp))
@@ -1265,7 +1781,6 @@ private fun ExpandedIslandCard(
             }
         }
 
-        // Expanded Notification Swipe Handler (Right = Next Notif, Left = Dismiss — dynamicSpot v3.01)
         val expandedSwipeModifier = if (state.activeTab == IslandTab.ALERTS || state.primaryActivity is IslandActivity.NotificationPreview) {
             Modifier.pointerInput(state.activeTab, state.primaryActivity?.id, settings.expandedSwipeLeftGesture, settings.expandedSwipeRightGesture) {
                 var dragDx = 0f
@@ -1315,11 +1830,15 @@ private fun ExpandedIslandCard(
             Modifier
         }
 
-        // Unified 220.dp capped content box with ContentEffect + MotionTokens M3 Expressive transitions
+        // Per-tab content-sized height cap (no forced empty 220dp block!)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(220.dp)
+                .heightIn(max = maxPanelHeightForTab(state.activeTab))
+                .graphicsLayer {
+                    alpha = contentAlphaProvider()
+                    translationY = contentOffsetYDProvider() * density
+                }
                 .then(expandedSwipeModifier)
                 .then(contentBlurMod)
         ) {
@@ -1359,6 +1878,7 @@ private fun ExpandedIslandCard(
                     IslandTab.MUSIC -> MusicExpandedView(
                         state = mediaState,
                         accentColor = musicAccent,
+                        rotateAlbumArt = settings.rotateAlbumArt,
                         onTogglePlayPause = {
                             onRequestHaptic()
                             if (mediaState.isPlaying) app.soundManager.playMusicPause() else app.soundManager.playMusicPlay()
@@ -1475,9 +1995,9 @@ private fun ExpandedIslandCard(
             }
         }
 
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(4.dp))
 
-        // Locked Bottom Chooser strictly honoring user-ordered settings.enabledTabs
+        // Locked Bottom Chooser strictly honoring user-ordered settings.enabledTabs (Never glass-on-glass)
         BottomChooserBar(
             settings = settings,
             activeTab = state.activeTab,
@@ -1597,7 +2117,6 @@ fun BottomChooserBar(
     onSelectTab: (IslandTab) -> Unit,
     onToggleMore: () -> Unit
 ) {
-    // Strictly preserve user-defined order from settings.enabledTabs (5 main tabs + More row)
     val orderedActive = settings.enabledTabs.filter { settings.isTabMasterEnabled(it) }
     val mainTabs = orderedActive.take(5)
     val moreTabs = orderedActive.drop(5)

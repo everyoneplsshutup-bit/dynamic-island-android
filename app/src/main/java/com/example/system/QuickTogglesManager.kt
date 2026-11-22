@@ -19,6 +19,7 @@ data class QuickTogglesState(
     val maxTorchStrength: Int = 1,
     val isDndOn: Boolean = false,
     val hasDndPermission: Boolean = false,
+    val isKeepAwakeOn: Boolean = false,
     val brightness: Int = 128,
     val hasWriteSettingsPermission: Boolean = false
 )
@@ -82,19 +83,36 @@ class QuickTogglesManager(private val context: Context) {
         }
     }
 
+    fun toggleKeepAwake(): Boolean {
+        val next = !_state.value.isKeepAwakeOn
+        _state.update { it.copy(isKeepAwakeOn = next) }
+        return next
+    }
+
+    fun setKeepAwake(enabled: Boolean) {
+        _state.update { it.copy(isKeepAwakeOn = enabled) }
+    }
+
     fun toggleFlashlight(): Boolean {
         val cm = cameraManager ?: return false
         val id = torchCameraId ?: return false
         val targetOn = !_state.value.isTorchOn
-        return runCatching {
+        val ok = runCatching {
             if (targetOn && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && _state.value.maxTorchStrength > 1) {
-                cm.turnOnTorchWithStrengthLevel(id, _state.value.torchStrength.coerceIn(1, _state.value.maxTorchStrength))
+                runCatching {
+                    cm.turnOnTorchWithStrengthLevel(id, _state.value.torchStrength.coerceIn(1, _state.value.maxTorchStrength))
+                }.onFailure {
+                    cm.setTorchMode(id, true)
+                }
             } else {
                 cm.setTorchMode(id, targetOn)
             }
-            _state.update { it.copy(isTorchOn = targetOn) }
             true
         }.getOrDefault(false)
+        if (ok) {
+            _state.update { it.copy(isTorchOn = targetOn) }
+        }
+        return ok
     }
 
     fun setTorchStrength(level: Int) {
@@ -164,9 +182,6 @@ class QuickTogglesManager(private val context: Context) {
         runCatching { context.startActivity(intent) }
     }
 
-    /**
-     * Android 13 forbids silent Wi-Fi toggling. Open the system Wi-Fi Settings Panel honestly.
-     */
     fun openWifiPanel() {
         val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             Intent(Settings.Panel.ACTION_WIFI)
@@ -178,9 +193,6 @@ class QuickTogglesManager(private val context: Context) {
         runCatching { context.startActivity(intent) }
     }
 
-    /**
-     * Android 13 forbids silent Bluetooth toggling. Open Bluetooth Settings honestly.
-     */
     fun openBluetoothPanel() {
         val intent = Intent(Settings.ACTION_BLUETOOTH_SETTINGS).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

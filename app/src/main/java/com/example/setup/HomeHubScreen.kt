@@ -129,11 +129,12 @@ fun HomeHubScreen(
         AccentTheme.DYNAMIC -> IslandColors.extractMaterialYouAccent(context)
     }
     val musicAccent = mediaState.artworkAccentArgb?.let { Color(it) } ?: accentColor
-    val useGlass = settings.pillStyle == PillStyle.GLASS && !settings.solidFallback
+    val effectivePillStyle = if (settings.solidFallback) PillStyle.BLACK else settings.pillStyle
+    val useGlass = effectivePillStyle != PillStyle.BLACK
     val effectiveStyle = if (settings.reducedMotion) AnimationStyle.SMOOTH else settings.animationStyle
     val outerShape = RoundedCornerShape(IslandColors.ExpandedOuterRadius)
 
-    // Zero-permission Photo Picker for adding directly to 10-min Vault
+    // Zero-permission Photo Picker for adding directly to 10-min Shelf
     val photoPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
@@ -210,10 +211,16 @@ fun HomeHubScreen(
             val sandboxBorder = IslandColors.liquidBorderBrush(
                 useGlass = useGlass,
                 isHighlighted = false,
-                accentColor = accentColor
+                accentColor = accentColor,
+                isLiquidStyle = effectivePillStyle == PillStyle.LIQUID_GLASS
             )
             val sandboxBg = if (useGlass) {
-                IslandColors.blendGlassBase(accentColor, settings.glassDensity)
+                IslandColors.blendGlassBase(
+                    materialYouColor = accentColor,
+                    density = settings.glassDensity,
+                    pillStyle = effectivePillStyle,
+                    reduceGlass = settings.reduceGlass
+                )
             } else {
                 Brush.verticalGradient(listOf(Color(0xFF12131A), IslandColors.PillBlack))
             }
@@ -454,7 +461,7 @@ fun HomeHubScreen(
                 ) {
                     Icon(Icons.Filled.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(18.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text("Add to Vault")
+                    Text("Add to Shelf")
                 }
 
                 Button(

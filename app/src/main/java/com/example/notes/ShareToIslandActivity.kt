@@ -19,7 +19,7 @@ import java.util.UUID
 
 /**
  * Transparent entry point for:
- * (a) ACTION_SEND (text, image, link, file, vCard, video, audio) + direct-share targets ("Save to Vault", "Save link")
+ * (a) ACTION_SEND (text, image, link, file, vCard, video, audio) + direct-share targets ("Save to Shelf", "Save link")
  * (b) ACTION_PROCESS_TEXT ("Add to island" in text-selection toolbar via EXTRA_PROCESS_TEXT)
  * Works reliably even if the Accessibility overlay service is currently killed.
  */
@@ -64,7 +64,7 @@ class ShareToIslandActivity : ComponentActivity() {
                     when {
                         mime.startsWith("image/") && streamUri != null -> {
                             app.vaultManager.saveFromUri(streamUri, sourceType = "SHARED")
-                            toastAndFinish("Saved to 10-min Photo Vault")
+                            toastAndFinish("Saved to 10-min Photo Shelf")
                         }
 
                         streamUri != null -> {

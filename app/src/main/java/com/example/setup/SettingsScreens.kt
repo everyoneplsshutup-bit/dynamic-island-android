@@ -96,6 +96,7 @@ import com.example.system.CompactPreference
 import com.example.system.CompanionPosition
 import com.example.system.ContentEffect
 import com.example.system.EventBehaviorConfig
+import com.example.system.EventGroup
 import com.example.system.EventKind
 import com.example.system.ExpandedSwipeAction
 import com.example.system.HapticsStrength
@@ -103,20 +104,24 @@ import com.example.system.IdleWidgetType
 import com.example.system.IslandGesture
 import com.example.system.IslandSettings
 import com.example.system.LockScreenPreset
+import com.example.system.MiniCapsuleSize
 import com.example.system.OpeningEffect
 import com.example.system.PillStyle
 import com.example.system.PillSwipeAction
 import com.example.system.SpringFeel
+import com.example.system.WhenIdleMode
 import com.example.ui.theme.IslandColors
+import com.example.ui.theme.LocalAppBackdrop
 import com.example.ui.theme.MotionTokens
+import com.example.ui.theme.islandGlassChrome
 import kotlinx.coroutines.launch
 
 enum class SettingsGroup(val title: String, val subtitle: String, val icon: ImageVector) {
     LOOK("Look", "Pill style, glass density, solid fallback & theme", Icons.Filled.Palette),
     MOTION("Motion", "Animation speed, spring feel, haptics & sound", Icons.Filled.Animation),
-    PILL("Pill", "Camera calibration, compact view, idle widget & lock screen", Icons.Filled.RadioButtonChecked),
-    FEATURES("Features", "Master toggles, Customise Island, quick toggles & apps", Icons.Filled.Tune),
-    PRIVACY("Privacy", "Screen reading / OCR (off by default), Vault & clipboard", Icons.Filled.Security),
+    PILL("Pill", "Camera calibration, idle mode, dwell time & lock screen", Icons.Filled.RadioButtonChecked),
+    FEATURES("Features", "Master toggles, Customise Island, event groups & apps", Icons.Filled.Tune),
+    PRIVACY("Privacy", "Screen reading / OCR (off by default), Shelf & clipboard", Icons.Filled.Security),
     ABOUT("About / Danger Zone", "Version, permissions status, backup, reset & delete", Icons.Filled.Info)
 }
 
@@ -128,11 +133,13 @@ private data class SettingsSearchEntry(
 )
 
 private val settingsIndex = listOf(
-    SettingsSearchEntry("Pill Style", "Solid Black or Apple-type Glass", "Look › Style", SettingsGroup.LOOK),
+    SettingsSearchEntry("Pill Style", "Dark, Apple Glass, or Liquid Glass", "Look › Style", SettingsGroup.LOOK),
     SettingsSearchEntry("Glass Density", "Clear to Tinted density slider", "Look › Glass", SettingsGroup.LOOK),
+    SettingsSearchEntry("Reduce Glass", "Soften translucent blur & specular glow", "Look › Glass", SettingsGroup.LOOK),
     SettingsSearchEntry("Solid Fallback", "Force solid black over glass", "Look › Fallback", SettingsGroup.LOOK),
     SettingsSearchEntry("Accent Theme", "Orange, Cyan, Green, or Dynamic", "Look › Theme", SettingsGroup.LOOK),
-    SettingsSearchEntry("Animation Style", "Like a Fruit jelly, Spring, Smooth, or Off", "Motion › Style", SettingsGroup.MOTION),
+    SettingsSearchEntry("Rotate Album Art", "Spin vinyl album art when music plays", "Look › Music", SettingsGroup.LOOK),
+    SettingsSearchEntry("Animation Style", "Springy, Standard, Calm, or Off", "Motion › Style", SettingsGroup.MOTION),
     SettingsSearchEntry("Animation Speed", "Adjust spring transition speed", "Motion › Speed", SettingsGroup.MOTION),
     SettingsSearchEntry("Elasticity", "Adjust overshoot bounce intensity", "Motion › Elasticity", SettingsGroup.MOTION),
     SettingsSearchEntry("Two-Stage Open", "Compact pill -> Stage 1 preview -> Full card", "Motion › Stages", SettingsGroup.MOTION),
@@ -143,21 +150,23 @@ private val settingsIndex = listOf(
     SettingsSearchEntry("Sound Volume", "Adjust UI sound effects volume", "Motion › Sound", SettingsGroup.MOTION),
     SettingsSearchEntry("Camera Calibration", "Nudge X, Y, width, and height around punch-hole", "Pill › Calibration", SettingsGroup.PILL),
     SettingsSearchEntry("Companion Circle Side", "Place +1 split bubble on Left or Right", "Pill › Split", SettingsGroup.PILL),
+    SettingsSearchEntry("When Idle Mode", "Camera Only, Dual-Slot Info Pill, or Hidden", "Pill › Idle", SettingsGroup.PILL),
+    SettingsSearchEntry("Alerts Dwell Timer", "Adjust compact notification dwell 4s to 10s", "Pill › Alerts", SettingsGroup.PILL),
     SettingsSearchEntry("Compact Pill Content", "Auto, Music, Timer, Battery, or Notifications", "Pill › Compact", SettingsGroup.PILL),
-    SettingsSearchEntry("Idle Widget", "None, Clock, Battery %, Search, or Quick Note", "Pill › Idle", SettingsGroup.PILL),
+    SettingsSearchEntry("Idle Widget", "12 left & right micro-widgets alongside camera", "Pill › Idle", SettingsGroup.PILL),
     SettingsSearchEntry("Lock-Screen Preset", "Minimal, Hide Message Text, or Hidden", "Pill › Lock Screen", SettingsGroup.PILL),
-    SettingsSearchEntry("Per-Event Switches", "Enable & auto-expand behavior per event kind", "Features › Events", SettingsGroup.FEATURES),
+    SettingsSearchEntry("Per-Event Switches", "Group & per-event auto-expand behavior", "Features › Events", SettingsGroup.FEATURES),
     SettingsSearchEntry("Customise Island", "Pick & reorder up to 8 island features", "Features › Chooser", SettingsGroup.FEATURES),
-    SettingsSearchEntry("Master Feature Toggles", "Enable/disable Music, Timer, Calc, Vault, OCR & more", "Features › Toggles", SettingsGroup.FEATURES),
+    SettingsSearchEntry("Master Feature Toggles", "Enable/disable Music, Timer, Calc, Shelf, OCR & more", "Features › Toggles", SettingsGroup.FEATURES),
     SettingsSearchEntry("Floating-Window Apps", "Pick apps for MIUI sidebar & freeform launch", "Features › Floating", SettingsGroup.FEATURES),
     SettingsSearchEntry("Pinned Quick Launch Apps", "Choose shortcuts shown in expanded island", "Features › Shortcuts", SettingsGroup.FEATURES),
     SettingsSearchEntry("Screen Reading / OCR", "Strictly opt-in, OFF by default", "Privacy › Screen Reading", SettingsGroup.PRIVACY),
     SettingsSearchEntry("OCR Tier B (ML Kit)", "Opt-in cropped fallback when Tier A finds no text", "Privacy › OCR Tier B", SettingsGroup.PRIVACY),
-    SettingsSearchEntry("Vault 10-Min Rules", "3-finger screenshot auto-capture & 24h trash", "Privacy › Vault", SettingsGroup.PRIVACY),
+    SettingsSearchEntry("Shelf 10-Min Rules", "3-finger screenshot auto-capture & 24h trash", "Privacy › Shelf", SettingsGroup.PRIVACY),
     SettingsSearchEntry("Clipboard History", "Foreground-only capture on Android 13", "Privacy › Clips", SettingsGroup.PRIVACY),
     SettingsSearchEntry("Permissions Status", "Live granted / not-granted hardware checks", "About › Permissions", SettingsGroup.ABOUT),
     SettingsSearchEntry("Backup / Restore Settings", "Export or import settings JSON", "About › Backup", SettingsGroup.ABOUT),
-    SettingsSearchEntry("Delete All App Data", "Erase Vault, Notes, Memos, Inbox & settings", "About › Danger Zone", SettingsGroup.ABOUT)
+    SettingsSearchEntry("Delete All App Data", "Erase Shelf, Notes, Memos, Inbox & settings", "About › Danger Zone", SettingsGroup.ABOUT)
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -310,7 +319,7 @@ fun SettingsGroupDetailScreen(
             }
             scope.launch {
                 app.settingsRepository.update { it.copy(vaultScreenshotsTreeUri = treeUri.toString()) }
-                Toast.makeText(context, "Screenshots folder linked for 10-min Auto-Vault", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, "Screenshots folder linked for 10-min Auto-Shelf", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -338,16 +347,77 @@ fun SettingsGroupDetailScreen(
         ) {
             when (group) {
                 SettingsGroup.LOOK -> {
+                    val lookAccent = when (settings.accentTheme) {
+                        AccentTheme.ORANGE -> IslandColors.AccentOrange
+                        AccentTheme.CYAN -> IslandColors.AccentCyan
+                        AccentTheme.GREEN -> IslandColors.AccentGreen
+                        AccentTheme.DYNAMIC -> IslandColors.extractMaterialYouAccent(context)
+                    }
                     item {
-                        SettingsSectionHeader("Pill Style")
+                        SettingsSectionHeader("Pill Style & Live Preview")
                         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                             PillStyle.entries.forEachIndexed { idx, style ->
                                 SegmentedButton(
                                     selected = settings.pillStyle == style,
-                                    onClick = { scope.launch { app.settingsRepository.update { it.copy(pillStyle = style) } } },
-                                    shape = SegmentedButtonDefaults.itemShape(idx, PillStyle.entries.size)
+                                    onClick = {
+                                        app.soundManager.playTap()
+                                        scope.launch { app.settingsRepository.update { it.copy(pillStyle = style) } }
+                                    },
+                                    shape = SegmentedButtonDefaults.itemShape(idx, PillStyle.entries.size),
+                                    modifier = Modifier.testTag("look_style_${style.name.lowercase()}")
                                 ) {
-                                    Text(if (style == PillStyle.BLACK) "Solid Black" else "Apple Glass")
+                                    Text(style.label, fontSize = 11.sp, maxLines = 1)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
+                        // Live mini-island preview of each style
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            PillStyle.entries.forEach { style ->
+                                val selected = settings.pillStyle == style
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(42.dp)
+                                        .islandGlassChrome(
+                                            shape = CircleShape,
+                                            pillStyle = style,
+                                            glassDensity = settings.glassDensity,
+                                            reduceGlass = settings.reduceGlass,
+                                            solidFallback = false,
+                                            accentColor = lookAccent,
+                                            isHighlighted = selected,
+                                            backdrop = LocalAppBackdrop.current
+                                        )
+                                        .clickable {
+                                            app.soundManager.playTap()
+                                            scope.launch { app.settingsRepository.update { it.copy(pillStyle = style) } }
+                                        }
+                                        .padding(horizontal = 8.dp)
+                                        .testTag("look_preview_${style.name.lowercase()}"),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(10.dp)
+                                                .clip(CircleShape)
+                                                .background(if (selected) lookAccent else Color.White.copy(alpha = 0.25f))
+                                        )
+                                        Text(
+                                            text = style.label,
+                                            color = Color.White,
+                                            fontSize = 10.sp,
+                                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                            maxLines = 1
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -364,9 +434,17 @@ fun SettingsGroupDetailScreen(
                             Slider(
                                 value = settings.glassDensity,
                                 onValueChange = { v -> scope.launch { app.settingsRepository.update { it.copy(glassDensity = v) } } },
-                                enabled = settings.pillStyle == PillStyle.GLASS && !settings.solidFallback
+                                enabled = settings.pillStyle != PillStyle.BLACK && !settings.solidFallback
                             )
                         }
+                    }
+                    item {
+                        SwitchRow(
+                            title = "Reduce Glass",
+                            helper = "Softer tint and lighter specular highlights for low power & clarity.",
+                            checked = settings.reduceGlass,
+                            onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(reduceGlass = c) } } }
+                        )
                     }
                     item {
                         SwitchRow(
@@ -389,6 +467,22 @@ fun SettingsGroupDetailScreen(
                                 }
                             }
                         }
+                    }
+                    item {
+                        SwitchRow(
+                            title = "Rotate Vinyl Album Art",
+                            helper = "Gently spin album art in Expanded Music while audio plays.",
+                            checked = settings.rotateAlbumArt,
+                            onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(rotateAlbumArt = c) } } }
+                        )
+                    }
+                    item {
+                        SwitchRow(
+                            title = "Purple Edge Sidebar Tint",
+                            helper = "Apply subtle purple accent to the curved floating-apps sidebar.",
+                            checked = settings.purpleSidebarTheme,
+                            onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(purpleSidebarTheme = c) } } }
+                        )
                     }
                 }
 
@@ -421,7 +515,7 @@ fun SettingsGroupDetailScreen(
                                         onClick = { scope.launch { app.settingsRepository.update { it.copy(pillStyle = style) } } },
                                         shape = SegmentedButtonDefaults.itemShape(idx, PillStyle.entries.size)
                                     ) {
-                                        Text(if (style == PillStyle.BLACK) "Solid Black" else "Apple Glass")
+                                        Text(style.label, fontSize = 11.sp, maxLines = 1)
                                     }
                                 }
                             }
@@ -435,7 +529,7 @@ fun SettingsGroupDetailScreen(
                                 Slider(
                                     value = settings.glassDensity,
                                     onValueChange = { v -> scope.launch { app.settingsRepository.update { it.copy(glassDensity = v) } } },
-                                    enabled = settings.pillStyle == PillStyle.GLASS && !settings.solidFallback
+                                    enabled = settings.pillStyle != PillStyle.BLACK && !settings.solidFallback
                                 )
                             }
                         }
@@ -694,6 +788,61 @@ fun SettingsGroupDetailScreen(
                         )
                     }
                     item {
+                        SettingsSectionHeader("When Idle Mode")
+                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                            WhenIdleMode.entries.forEachIndexed { idx, mode ->
+                                SegmentedButton(
+                                    selected = settings.whenIdleMode == mode,
+                                    onClick = {
+                                        app.soundManager.playTap()
+                                        scope.launch { app.settingsRepository.update { it.copy(whenIdleMode = mode) } }
+                                    },
+                                    shape = SegmentedButtonDefaults.itemShape(idx, WhenIdleMode.entries.size),
+                                    modifier = Modifier.testTag("pill_idle_mode_${mode.name.lowercase()}")
+                                ) {
+                                    Text(mode.label, fontSize = 11.sp, maxLines = 1)
+                                }
+                            }
+                        }
+                    }
+                    if (settings.whenIdleMode == WhenIdleMode.INFO_PILL) {
+                        item {
+                            EnumPickerRow(
+                                title = "Left Idle Slot Widget",
+                                helper = "Quiet readout left of the camera in Info Pill mode.",
+                                selectedLabel = settings.idleLeftWidget.label,
+                                options = IdleWidgetType.entries.map { it.label to it },
+                                onSelect = { w -> scope.launch { app.settingsRepository.update { it.copy(idleLeftWidget = w) } } }
+                            )
+                        }
+                        item {
+                            EnumPickerRow(
+                                title = "Right Idle Slot Widget",
+                                helper = "Quiet readout right of the camera in Info Pill mode.",
+                                selectedLabel = settings.idleRightWidget.label,
+                                options = IdleWidgetType.entries.map { it.label to it },
+                                onSelect = { w -> scope.launch { app.settingsRepository.update { it.copy(idleRightWidget = w) } } }
+                            )
+                        }
+                    }
+                    item {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Alerts Dwell Timer", fontWeight = FontWeight.Medium)
+                                Text("${String.format("%.1f", settings.alertsDwellMs / 1000f)} s", color = MaterialTheme.colorScheme.primary)
+                            }
+                            Slider(
+                                value = settings.alertsDwellMs.toFloat(),
+                                valueRange = 4000f..10000f,
+                                steps = 5,
+                                onValueChange = { v ->
+                                    scope.launch { app.settingsRepository.update { it.copy(alertsDwellMs = v.toLong()) } }
+                                },
+                                modifier = Modifier.testTag("pill_alerts_dwell_slider")
+                            )
+                        }
+                    }
+                    item {
                         SettingsSectionHeader("Split Companion Circle Side")
                         SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
                             CompanionPosition.entries.forEachIndexed { idx, side ->
@@ -712,21 +861,29 @@ fun SettingsGroupDetailScreen(
                         }
                     }
                     item {
+                        SettingsSectionHeader("Mini Capsule")
+                        SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                            MiniCapsuleSize.entries.forEachIndexed { idx, sz ->
+                                SegmentedButton(
+                                    selected = settings.miniCapsuleSize == sz,
+                                    onClick = {
+                                        app.soundManager.playTap()
+                                        scope.launch { app.settingsRepository.update { it.copy(miniCapsuleSize = sz) } }
+                                    },
+                                    shape = SegmentedButtonDefaults.itemShape(idx, MiniCapsuleSize.entries.size)
+                                ) {
+                                    Text(sz.label, fontSize = 11.sp, maxLines = 1)
+                                }
+                            }
+                        }
+                    }
+                    item {
                         EnumPickerRow(
                             title = "Compact Pill Priority",
                             helper = "Choose what the compact pill prefers when multiple activities run.",
                             selectedLabel = settings.compactPreference.name.lowercase().replaceFirstChar { it.uppercase() },
                             options = CompactPreference.entries.map { it.name.lowercase().replaceFirstChar { c -> c.uppercase() } to it },
                             onSelect = { pref -> scope.launch { app.settingsRepository.update { it.copy(compactPreference = pref) } } }
-                        )
-                    }
-                    item {
-                        EnumPickerRow(
-                            title = "Idle Widget Slot",
-                            helper = "Optional micro-widget alongside the idle camera ring.",
-                            selectedLabel = settings.idleWidget.name.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() },
-                            options = IdleWidgetType.entries.map { it.name.replace("_", " ").lowercase().replaceFirstChar { c -> c.uppercase() } to it },
-                            onSelect = { w -> scope.launch { app.settingsRepository.update { it.copy(idleWidget = w) } } }
                         )
                     }
                     item {
@@ -825,7 +982,7 @@ fun SettingsGroupDetailScreen(
                         }
                     }
                     item {
-                        SwitchRow("10-Minute Photo Vault", "Auto-expiring screenshots & shared images", settings.vaultEnabled) { c ->
+                        SwitchRow("10-Minute Photo Shelf", "Auto-expiring screenshots & shared images", settings.vaultEnabled) { c ->
                             scope.launch { app.settingsRepository.update { it.copy(vaultEnabled = c) } }
                         }
                     }
@@ -838,6 +995,17 @@ fun SettingsGroupDetailScreen(
                         SwitchRow("OCR Text Copy Feature", "Allows Select Mode (still gated by Privacy toggle)", settings.ocrFeatureEnabled) { c ->
                             scope.launch { app.settingsRepository.update { it.copy(ocrFeatureEnabled = c) } }
                         }
+                    }
+                    item { SettingsSectionHeader("Event Group Master Switches") }
+                    items(EventGroup.entries, key = { "grp_${it.name}" }) { grp ->
+                        SwitchRow(
+                            title = "${grp.label} Events",
+                            helper = "Master switch for all ${grp.label.lowercase()} events in this group.",
+                            checked = settings.isGroupEnabled(grp),
+                            onCheckedChange = { next ->
+                                scope.launch { app.settingsRepository.setEventGroupEnabled(grp, next) }
+                            }
+                        )
                     }
                     item { SettingsSectionHeader("Per-Event Behavior Switches") }
                     items(EventKind.entries, key = { it.name }) { kind ->
@@ -944,8 +1112,8 @@ fun SettingsGroupDetailScreen(
                     }
                     item {
                         SwitchRow(
-                            title = "3-Finger Screenshot Auto-Vault",
-                            helper = "Auto-store new screenshots in app-private Vault for 10 min (24h Trash).",
+                            title = "3-Finger Screenshot Auto-Shelf",
+                            helper = "Auto-store new screenshots in app-private Shelf for 10 min (24h Trash).",
                             checked = settings.vaultAutoCapture3Finger,
                             onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(vaultAutoCapture3Finger = c) } } }
                         )
@@ -954,9 +1122,9 @@ fun SettingsGroupDetailScreen(
                         ActionRow(
                             title = "Screenshots Folder (SAF Access)",
                             helper = if (settings.vaultScreenshotsTreeUri.isNullOrBlank()) {
-                                "Not linked yet · Tap to select DCIM/Screenshots for automatic 10m Vault capture"
+                                "Not linked yet · Tap to select DCIM/Screenshots for automatic 10m Shelf capture"
                             } else {
-                                "Linked · Automatic screenshot Vault capture active"
+                                "Linked · Automatic screenshot Shelf capture active"
                             },
                             onClick = {
                                 app.soundManager.playTap()
@@ -985,7 +1153,7 @@ fun SettingsGroupDetailScreen(
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(
-                                text = "On-Device Privacy Guarantee: Dynamic Island declares zero INTERNET permission. Notes, Vault photos, memos, clips, and OCR stay strictly on your phone.",
+                                text = "On-Device Privacy Guarantee: Dynamic Island declares zero INTERNET permission. Notes, Shelf photos, memos, clips, and OCR stay strictly on your phone.",
                                 style = MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier.padding(14.dp)
                             )
@@ -1098,7 +1266,7 @@ fun SettingsGroupDetailScreen(
         AlertDialog(
             onDismissRequest = { showDeleteAllConfirm = false },
             title = { Text("Delete All App Data?") },
-            text = { Text("Permanently erases all Vault photos, Notes, Voice Memos, Clipboard history, Notification inbox, and Settings.") },
+            text = { Text("Permanently erases all Shelf photos, Notes, Voice Memos, Clipboard history, Notification inbox, and Settings.") },
             confirmButton = {
                 Button(
                     onClick = {

@@ -1,5 +1,6 @@
 package com.example.island
 
+import android.os.SystemClock
 import com.example.system.IslandSoundEvent
 import com.example.system.IslandTab
 import kotlinx.coroutines.CoroutineScope
@@ -28,6 +29,13 @@ class IslandController(
 
     private var transientCollapseJob: Job? = null
     private var bannerClearJob: Job? = null
+    private var undoClearJob: Job? = null
+
+    private var activeDwellActivityId: String? = null
+    private var activeDwellTotalMs: Long = 0L
+    private var activeDwellRemainingMs: Long = 0L
+    private var activeDwellResumedAtElapsedMs: Long = 0L
+    private val dwellPauseReasons = mutableSetOf<DwellPauseReason>()
 
     fun upsertActivity(
         activity: IslandActivity,
@@ -48,19 +56,26 @@ class IslandController(
             }
             actuallyChanged = true
 
+            // Replace-not-stack transient NotificationPreview pill while keeping replaced items in Inbox
+            val baseQueue = if (activity is IslandActivity.NotificationPreview && existing == null) {
+                current.activityQueue.filterNot { it is IslandActivity.NotificationPreview && it.id != activity.id }
+            } else {
+                current.activityQueue
+            }
+
             // 2. Updating an existing ongoing activity keeps its relative place rather than stealing front;
             //    only a genuinely new activity is sorted to front by priority.
-            val updatedQueue = if (existingIdx >= 0) {
-                current.activityQueue.map { if (it.id == activity.id) activity else it }
+            val updatedQueue = if (existingIdx >= 0 && baseQueue.any { it.id == activity.id }) {
+                baseQueue.map { if (it.id == activity.id) activity else it }
             } else {
-                (current.activityQueue + activity).sortedByDescending { it.priority }
+                (baseQueue + activity).sortedByDescending { it.priority }
             }
 
             val targetTab = when (activity) {
                 is IslandActivity.Timer -> IslandTab.TIMER
                 is IslandActivity.Music -> IslandTab.MUSIC
                 is IslandActivity.VoiceRecording -> IslandTab.MEMO
-                is IslandActivity.Alert -> IslandTab.ALERTS
+                is IslandActivity.Alert, is IslandActivity.NotificationPreview -> IslandTab.ALERTS
                 else -> current.activeTab
             }
 
@@ -84,11 +99,24 @@ class IslandController(
                 current.alertsHistory
             }
 
+            val updatedNotifs = if (activity is IslandActivity.NotificationPreview) {
+                (listOf(activity) + current.notificationsHistory.filterNot { it.id == activity.id }).take(40)
+            } else {
+                current.notificationsHistory
+            }
+
+            if (newMode == IslandMode.MEDIUM || newMode == IslandMode.EXPANDED) {
+                dwellPauseReasons.add(DwellPauseReason.EXPANDED)
+            } else {
+                dwellPauseReasons.remove(DwellPauseReason.EXPANDED)
+            }
+
             current.copy(
                 mode = newMode,
                 activeTab = if (autoExpandToFull && !isExistingUpdate) targetTab else current.activeTab,
                 activityQueue = updatedQueue,
-                alertsHistory = updatedAlerts
+                alertsHistory = updatedAlerts,
+                notificationsHistory = updatedNotifs
             )
         }
 
@@ -97,16 +125,85 @@ class IslandController(
             onSoundEvent(IslandSoundEvent.EXPAND)
         }
 
-        if (autoDismissMs != null) {
-            transientCollapseJob?.cancel()
-            transientCollapseJob = scope.launch {
-                delay(autoDismissMs)
-                removeActivity(activity.id)
+        if (autoDismissMs != null && autoDismissMs > 0L) {
+            startDwellTimer(activity.id, autoDismissMs)
+        }
+    }
+
+    private fun startDwellTimer(activityId: String, durationMs: Long) {
+        transientCollapseJob?.cancel()
+        activeDwellActivityId = activityId
+        activeDwellTotalMs = durationMs
+        activeDwellRemainingMs = durationMs
+        activeDwellResumedAtElapsedMs = SystemClock.elapsedRealtime()
+
+        val paused = dwellPauseReasons.isNotEmpty()
+        _state.update {
+            it.copy(
+                dwellTargetActivityId = activityId,
+                dwellTotalMs = durationMs,
+                dwellRemainingMs = durationMs,
+                isDwellPaused = paused
+            )
+        }
+
+        if (!paused) {
+            scheduleDwellCountdown(activityId, durationMs)
+        }
+    }
+
+    private fun scheduleDwellCountdown(activityId: String, delayMs: Long) {
+        transientCollapseJob?.cancel()
+        transientCollapseJob = scope.launch {
+            delay(delayMs.coerceAtLeast(80L))
+            if (activeDwellActivityId == activityId && dwellPauseReasons.isEmpty()) {
+                activeDwellActivityId = null
+                activeDwellRemainingMs = 0L
+                removeActivity(activityId)
             }
         }
     }
 
+    fun setDwellPaused(reason: DwellPauseReason, paused: Boolean) {
+        val wasPaused = dwellPauseReasons.isNotEmpty()
+        if (paused) {
+            dwellPauseReasons.add(reason)
+        } else {
+            dwellPauseReasons.remove(reason)
+        }
+        val nowPaused = dwellPauseReasons.isNotEmpty()
+        if (wasPaused == nowPaused) return
+
+        val targetId = activeDwellActivityId ?: return
+        if (nowPaused) {
+            val elapsed = (SystemClock.elapsedRealtime() - activeDwellResumedAtElapsedMs).coerceAtLeast(0L)
+            activeDwellRemainingMs = (activeDwellRemainingMs - elapsed).coerceAtLeast(300L)
+            transientCollapseJob?.cancel()
+            _state.update {
+                it.copy(
+                    dwellRemainingMs = activeDwellRemainingMs,
+                    isDwellPaused = true
+                )
+            }
+        } else {
+            activeDwellResumedAtElapsedMs = SystemClock.elapsedRealtime()
+            _state.update {
+                it.copy(
+                    dwellRemainingMs = activeDwellRemainingMs,
+                    isDwellPaused = false
+                )
+            }
+            scheduleDwellCountdown(targetId, activeDwellRemainingMs)
+        }
+    }
+
     fun removeActivity(id: String) {
+        if (activeDwellActivityId == id) {
+            transientCollapseJob?.cancel()
+            activeDwellActivityId = null
+            activeDwellRemainingMs = 0L
+            activeDwellTotalMs = 0L
+        }
         _state.update { current ->
             val remaining = current.activityQueue.filterNot { it.id == id }
             val nextPromoted = if (current.promotedPrimaryId == id) null else current.promotedPrimaryId
@@ -120,19 +217,12 @@ class IslandController(
             current.copy(
                 mode = nextMode,
                 activityQueue = remaining,
-                promotedPrimaryId = nextPromoted
+                promotedPrimaryId = nextPromoted,
+                dwellTargetActivityId = if (current.dwellTargetActivityId == id) null else current.dwellTargetActivityId
             )
         }
     }
 
-    /**
-     * Two-stage open controller:
-     * - When twoStageOpen == true:
-     *   IDLE / COMPACT / SPLIT -> Stage 1 MEDIUM pill
-     *   MEDIUM -> Stage 2 EXPANDED full card
-     * - When twoStageOpen == false:
-     *   jumps directly to EXPANDED.
-     */
     fun openFromPill(twoStageOpen: Boolean, tab: IslandTab? = null) {
         val currentMode = _state.value.mode
         if (twoStageOpen && (currentMode == IslandMode.IDLE || currentMode == IslandMode.COMPACT || currentMode == IslandMode.SPLIT)) {
@@ -144,6 +234,7 @@ class IslandController(
 
     fun expandToMedium(tab: IslandTab? = null) {
         val wasMediumOrExpanded = _state.value.mode == IslandMode.MEDIUM || _state.value.mode == IslandMode.EXPANDED
+        setDwellPaused(DwellPauseReason.EXPANDED, true)
         _state.update { current ->
             val resolvedTab = tab ?: defaultTabForPrimary(current.primaryActivity, current.activeTab)
             current.copy(
@@ -159,6 +250,7 @@ class IslandController(
 
     fun expand(tab: IslandTab? = null) {
         val wasExpanded = _state.value.mode == IslandMode.EXPANDED
+        setDwellPaused(DwellPauseReason.EXPANDED, true)
         _state.update { current ->
             val resolvedTab = tab ?: defaultTabForPrimary(current.primaryActivity, current.activeTab)
             current.copy(
@@ -174,8 +266,22 @@ class IslandController(
         }
     }
 
+    /**
+     * Staged collapse for interactive swipe-down / Back (Full -> Medium -> Compact/Idle).
+     */
+    fun stepDownCollapse(twoStageOpen: Boolean) {
+        val current = _state.value
+        if (twoStageOpen && current.mode == IslandMode.EXPANDED) {
+            expandToMedium(current.activeTab)
+            onSoundEvent(IslandSoundEvent.COLLAPSE)
+        } else {
+            collapse()
+        }
+    }
+
     fun collapse() {
         val wasExpandedOrMedium = _state.value.mode == IslandMode.EXPANDED || _state.value.mode == IslandMode.MEDIUM
+        setDwellPaused(DwellPauseReason.EXPANDED, false)
         _state.update { current ->
             val nextMode = when {
                 current.activityQueue.size >= 2 -> IslandMode.SPLIT
@@ -196,6 +302,7 @@ class IslandController(
     }
 
     fun collapseToIdle() {
+        setDwellPaused(DwellPauseReason.EXPANDED, false)
         _state.update { current ->
             current.copy(
                 mode = IslandMode.IDLE,
@@ -217,12 +324,21 @@ class IslandController(
 
     fun nextNotification() {
         _state.update { current ->
-            val notifs = current.activityQueue.filterIsInstance<IslandActivity.NotificationPreview>()
-            if (notifs.size <= 1) return@update current
+            val notifs = current.notificationsHistory
+            if (notifs.size <= 1) {
+                val activeNotifs = current.activityQueue.filterIsInstance<IslandActivity.NotificationPreview>()
+                if (activeNotifs.size <= 1) return@update current
+                val curId = current.primaryActivity?.id
+                val curIdx = activeNotifs.indexOfFirst { it.id == curId }
+                val next = activeNotifs[(curIdx + 1) % activeNotifs.size]
+                return@update current.copy(promotedPrimaryId = next.id)
+            }
             val curId = current.primaryActivity?.id
             val curIdx = notifs.indexOfFirst { it.id == curId }
             val next = notifs[(curIdx + 1) % notifs.size]
-            current.copy(promotedPrimaryId = next.id)
+            val updatedQueue = (current.activityQueue.filterNot { it is IslandActivity.NotificationPreview } + next)
+                .sortedByDescending { it.priority }
+            current.copy(activityQueue = updatedQueue, promotedPrimaryId = next.id)
         }
         onSoundEvent(IslandSoundEvent.TAP)
     }
@@ -232,12 +348,79 @@ class IslandController(
         val target = (current.primaryActivity as? IslandActivity.NotificationPreview)
             ?: current.activityQueue.filterIsInstance<IslandActivity.NotificationPreview>().firstOrNull()
         if (target != null) {
-            removeActivity(target.id)
-            onSoundEvent(IslandSoundEvent.COLLAPSE)
+            dismissNotificationById(target.id)
         } else if (current.alertsHistory.isNotEmpty()) {
             _state.update { it.copy(alertsHistory = it.alertsHistory.drop(1)) }
             onSoundEvent(IslandSoundEvent.COLLAPSE)
         }
+    }
+
+    fun dismissNotificationById(id: String) {
+        _state.update { current ->
+            val remainingNotifs = current.notificationsHistory.filterNot { it.id == id }
+            val remainingQueue = current.activityQueue.filterNot { it.id == id }
+            val nextMode = when {
+                current.mode == IslandMode.EXPANDED -> IslandMode.EXPANDED
+                current.mode == IslandMode.MEDIUM && remainingQueue.isNotEmpty() -> IslandMode.MEDIUM
+                remainingQueue.size >= 2 -> IslandMode.SPLIT
+                remainingQueue.size == 1 -> IslandMode.COMPACT
+                else -> IslandMode.IDLE
+            }
+            current.copy(
+                mode = nextMode,
+                notificationsHistory = remainingNotifs,
+                activityQueue = remainingQueue
+            )
+        }
+        onSoundEvent(IslandSoundEvent.COLLAPSE)
+    }
+
+    fun dismissAppGroup(packageName: String) {
+        _state.update { current ->
+            val remainingNotifs = current.notificationsHistory.filterNot { it.packageName == packageName }
+            val remainingQueue = current.activityQueue.filterNot {
+                it is IslandActivity.NotificationPreview && it.packageName == packageName
+            }
+            current.copy(
+                notificationsHistory = remainingNotifs,
+                activityQueue = remainingQueue
+            )
+        }
+        onSoundEvent(IslandSoundEvent.COLLAPSE)
+    }
+
+    fun clearInboxWithUndo() {
+        _state.update { current ->
+            val snapshot = current.notificationsHistory to current.alertsHistory
+            val nonAlerts = current.activityQueue.filterNot {
+                it is IslandActivity.Alert || it is IslandActivity.NotificationPreview
+            }
+            current.copy(
+                notificationsHistory = emptyList(),
+                alertsHistory = emptyList(),
+                activityQueue = nonAlerts,
+                undoableClearedInbox = if (snapshot.first.isEmpty() && snapshot.second.isEmpty()) null else snapshot
+            )
+        }
+        undoClearJob?.cancel()
+        undoClearJob = scope.launch {
+            delay(5000L)
+            _state.update { it.copy(undoableClearedInbox = null) }
+        }
+        onSoundEvent(IslandSoundEvent.COLLAPSE)
+    }
+
+    fun undoInboxClear() {
+        undoClearJob?.cancel()
+        _state.update { current ->
+            val snap = current.undoableClearedInbox ?: return@update current
+            current.copy(
+                notificationsHistory = snap.first,
+                alertsHistory = snap.second,
+                undoableClearedInbox = null
+            )
+        }
+        onSoundEvent(IslandSoundEvent.TAP)
     }
 
     fun pruneStaleNotifications(activeNotificationIds: Set<String>) {
@@ -420,20 +603,14 @@ class IslandController(
     }
 
     fun clearAlerts() {
-        _state.update { current ->
-            val nonAlerts = current.activityQueue.filterNot { it is IslandActivity.Alert }
-            current.copy(
-                alertsHistory = emptyList(),
-                activityQueue = nonAlerts
-            )
-        }
+        clearInboxWithUndo()
     }
 
     private fun defaultTabForPrimary(primary: IslandActivity?, fallback: IslandTab): IslandTab = when (primary) {
         is IslandActivity.Timer -> IslandTab.TIMER
         is IslandActivity.Music -> IslandTab.MUSIC
         is IslandActivity.VoiceRecording -> IslandTab.MEMO
-        is IslandActivity.Alert -> IslandTab.ALERTS
+        is IslandActivity.Alert, is IslandActivity.NotificationPreview -> IslandTab.ALERTS
         else -> fallback
     }
 

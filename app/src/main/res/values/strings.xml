@@ -2,7 +2,11 @@
     <string name="app_name">Dynamic Island</string>
     <string name="accessibility_service_description">Hosts the Dynamic Island overlay around your front camera and provides opt-in single-node text selection when Select Mode is enabled by you.</string>
     <string name="notification_listener_label">Dynamic Island Previews</string>
-    <string name="action_save_to_vault">Save to Vault</string>
+    <string name="action_save_to_vault">Save to Shelf</string>
     <string name="action_save_link">Save link</string>
     <string name="action_add_to_island">Add to island</string>
+    <string name="shelf_title">Shelf</string>
+    <string name="shelf_auto_delete_hint">Images auto-delete after 10 min</string>
+    <string name="shelf_empty_title">No images yet</string>
+    <string name="shelf_empty_subtitle">Screenshots and images you drag in live here for 10 minutes</string>
 </resources>

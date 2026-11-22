@@ -3,10 +3,14 @@ package com.example.system
 import android.content.Context
 import android.media.AudioAttributes
 import android.media.SoundPool
+import android.os.Build
+import android.view.HapticFeedbackConstants
+import android.view.View
 import com.example.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
@@ -28,8 +32,10 @@ enum class IslandSoundEvent {
 }
 
 /**
- * Low-latency SoundPool manager giving every Dynamic Island interaction its own unique sound.
- * Uses small preloaded WAV assets in res/raw/ and respects Settings (soundEnabled, soundVolume).
+ * Low-latency SoundPool earcon engine for Build #5.
+ * - Preloads all 13 single-family assets at startup; maxStreams = 4; never requests AudioFocus.
+ * - Priority hierarchy: HERO (TIMER_DONE = 10, fixed 1.0x pitch) > Confirm (6) > Nav (4) > Micro-taps (1).
+ * - Stop-before-replay for TAP and CALC_KEY so rapid taps stay crisp without stacking into a wash.
  */
 class IslandSoundManager(
     context: Context,
@@ -40,6 +46,7 @@ class IslandSoundManager(
 
     private val loadedSampleIds = ConcurrentHashMap.newKeySet<Int>()
     private val soundIds = ConcurrentHashMap<IslandSoundEvent, Int>()
+    private val activeStreams = ConcurrentHashMap<IslandSoundEvent, Int>()
 
     @Volatile
     private var soundEnabled: Boolean = true
@@ -62,7 +69,7 @@ class IslandSoundManager(
                 .build()
 
             val pool = SoundPool.Builder()
-                .setMaxStreams(6)
+                .setMaxStreams(4)
                 .setAudioAttributes(attrs)
                 .build()
 
@@ -121,69 +128,130 @@ class IslandSoundManager(
             return false
         }
 
-        // Subtle ±3% pitch variation & ±1 dB (0.891..1.122x) gain randomization so repeated UI taps never feel robotic
-        val rate = 0.97f + (Math.random().toFloat() * 0.06f)
-        val gainJitter = 0.891f + (Math.random().toFloat() * 0.231f)
+        // Stop-before-replay for high-frequency taps so 10x calc taps stay crisp
+        if (event == IslandSoundEvent.TAP || event == IslandSoundEvent.CALC_KEY) {
+            activeStreams[event]?.let { prevStream ->
+                if (prevStream != 0) runCatching { pool.stop(prevStream) }
+            }
+        }
+
+        val priority = when (event) {
+            IslandSoundEvent.TIMER_DONE -> 10
+            IslandSoundEvent.MUSIC_PLAY, IslandSoundEvent.VAULT_ADD -> 6
+            IslandSoundEvent.EXPAND,
+            IslandSoundEvent.COLLAPSE,
+            IslandSoundEvent.MUSIC_NEXT,
+            IslandSoundEvent.SEARCH_OPEN,
+            IslandSoundEvent.TOGGLE_ON,
+            IslandSoundEvent.TOGGLE_OFF -> 4
+            IslandSoundEvent.TAP,
+            IslandSoundEvent.CALC_KEY,
+            IslandSoundEvent.TIMER_SET,
+            IslandSoundEvent.MUSIC_PAUSE -> 1
+        }
+
+        // Pitch rate per Point 5 recipes
+        val rate = when (event) {
+            IslandSoundEvent.TIMER_DONE -> 1.0f // Fixed 1.00x hero chime
+            IslandSoundEvent.CALC_KEY, IslandSoundEvent.MUSIC_NEXT -> 0.97f + (Math.random().toFloat() * 0.06f) // +-3%
+            IslandSoundEvent.TAP, IslandSoundEvent.TOGGLE_ON, IslandSoundEvent.TOGGLE_OFF -> 0.98f + (Math.random().toFloat() * 0.04f) // +-2%
+            else -> 0.99f + (Math.random().toFloat() * 0.02f) // +-1%
+        }
+
+        // Gain jitter: +-0.5 dB for hero/nav, +-1 dB for frequent micro-taps
+        val gainJitter = when (event) {
+            IslandSoundEvent.TAP, IslandSoundEvent.CALC_KEY, IslandSoundEvent.MUSIC_NEXT,
+            IslandSoundEvent.TOGGLE_ON, IslandSoundEvent.TOGGLE_OFF ->
+                0.891f + (Math.random().toFloat() * 0.231f)
+            else ->
+                0.944f + (Math.random().toFloat() * 0.118f)
+        }
         val vol = (baseVol * gainJitter).coerceIn(0.01f, 1f)
 
-        val streamId = runCatching {
-            pool.play(sampleId, vol, vol, 1, 0, rate)
+        var streamId = runCatching {
+            pool.play(sampleId, vol, vol, priority, 0, rate)
         }.getOrDefault(0)
+
+        // Handle streamID == 0 gracefully for high-priority alerts by freeing lowest stream once
+        if (streamId == 0 && priority >= 6) {
+            val lowest = activeStreams[IslandSoundEvent.CALC_KEY] ?: activeStreams[IslandSoundEvent.TAP]
+            if (lowest != null && lowest != 0) {
+                runCatching { pool.stop(lowest) }
+                streamId = runCatching { pool.play(sampleId, vol, vol, priority, 0, rate) }.getOrDefault(0)
+            }
+        }
+
+        if (streamId != 0) {
+            activeStreams[event] = streamId
+        }
         return streamId != 0
     }
 
-    fun playExpand() {
-        play(IslandSoundEvent.EXPAND)
+    /**
+     * Fires sound + paired haptic from the same call site (unified within <20ms).
+     * Timer Done adds a second confirm light tick at 300 ms.
+     */
+    fun playWithHaptic(
+        event: IslandSoundEvent,
+        view: View? = null,
+        fallbackHaptic: (() -> Unit)? = null
+    ): Boolean {
+        val played = play(event)
+        if (view != null) {
+            val constant = when (event) {
+                IslandSoundEvent.TAP, IslandSoundEvent.TOGGLE_ON, IslandSoundEvent.TOGGLE_OFF, IslandSoundEvent.MUSIC_PAUSE ->
+                    HapticFeedbackConstants.VIRTUAL_KEY
+                IslandSoundEvent.CALC_KEY, IslandSoundEvent.MUSIC_NEXT ->
+                    HapticFeedbackConstants.KEYBOARD_TAP
+                IslandSoundEvent.TIMER_SET ->
+                    HapticFeedbackConstants.CLOCK_TICK
+                IslandSoundEvent.EXPAND, IslandSoundEvent.COLLAPSE, IslandSoundEvent.SEARCH_OPEN ->
+                    HapticFeedbackConstants.CONTEXT_CLICK
+                IslandSoundEvent.VAULT_ADD ->
+                    HapticFeedbackConstants.LONG_PRESS
+                IslandSoundEvent.MUSIC_PLAY, IslandSoundEvent.TIMER_DONE ->
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) HapticFeedbackConstants.CONFIRM
+                    else HapticFeedbackConstants.LONG_PRESS
+            }
+            view.performHapticFeedback(constant)
+            if (event == IslandSoundEvent.TIMER_DONE) {
+                scope.launch {
+                    delay(300L)
+                    view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                }
+            }
+        } else {
+            fallbackHaptic?.invoke()
+            if (event == IslandSoundEvent.TIMER_DONE && fallbackHaptic != null) {
+                scope.launch {
+                    delay(300L)
+                    fallbackHaptic()
+                }
+            }
+        }
+        return played
     }
 
-    fun playCollapse() {
-        play(IslandSoundEvent.COLLAPSE)
-    }
-
-    fun playTap() {
-        play(IslandSoundEvent.TAP)
-    }
-
-    fun playTimerSet() {
-        play(IslandSoundEvent.TIMER_SET)
-    }
-
-    fun playTimerDone() {
-        play(IslandSoundEvent.TIMER_DONE)
-    }
-
+    fun playExpand() { play(IslandSoundEvent.EXPAND) }
+    fun playCollapse() { play(IslandSoundEvent.COLLAPSE) }
+    fun playTap() { play(IslandSoundEvent.TAP) }
+    fun playTimerSet() { play(IslandSoundEvent.TIMER_SET) }
+    fun playTimerDone() { play(IslandSoundEvent.TIMER_DONE) }
     fun playToggle(isOn: Boolean = true) {
         play(if (isOn) IslandSoundEvent.TOGGLE_ON else IslandSoundEvent.TOGGLE_OFF)
     }
-
-    fun playCalcKey() {
-        play(IslandSoundEvent.CALC_KEY)
-    }
-
-    fun playMusicPlay() {
-        play(IslandSoundEvent.MUSIC_PLAY)
-    }
-
-    fun playMusicPause() {
-        play(IslandSoundEvent.MUSIC_PAUSE)
-    }
-
-    fun playMusicNext() {
-        play(IslandSoundEvent.MUSIC_NEXT)
-    }
-
-    fun playVaultAdd() {
-        play(IslandSoundEvent.VAULT_ADD)
-    }
-
-    fun playSearchOpen() {
-        play(IslandSoundEvent.SEARCH_OPEN)
-    }
+    fun playCalcKey() { play(IslandSoundEvent.CALC_KEY) }
+    fun playMusicPlay() { play(IslandSoundEvent.MUSIC_PLAY) }
+    fun playMusicPause() { play(IslandSoundEvent.MUSIC_PAUSE) }
+    fun playMusicNext() { play(IslandSoundEvent.MUSIC_NEXT) }
+    fun playVaultAdd() { play(IslandSoundEvent.VAULT_ADD) }
+    fun playSearchOpen() { play(IslandSoundEvent.SEARCH_OPEN) }
 
     fun release() {
         runCatching { soundPool?.release() }
         soundPool = null
         loadedSampleIds.clear()
         soundIds.clear()
+        activeStreams.clear()
     }
 }

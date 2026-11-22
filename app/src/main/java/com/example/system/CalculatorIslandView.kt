@@ -1,5 +1,6 @@
 package com.example.system
 
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.foundation.background
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -42,11 +44,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.IslandColors
+import com.example.ui.theme.MotionTokens
 
 /**
- * Working iOS-style Calculator cleanly capped within the Dynamic Island panel height (216.dp in compactMode).
- * Features aligned 4 x 5 capsule/circular grid, operator active inversion, pressed scale spring,
- * and unique key press sound callback.
+ * Working iOS-style Calculator strictly capped within 160 dp height inside the island card.
+ * Features aligned 4 x 5 capsule/circular grid (no history row in full), non-clipping press tint,
+ * M3E 0.97 press scale + radius squish, and unique Calc Key sound callback.
  */
 @Composable
 fun CalculatorIslandView(
@@ -115,27 +118,27 @@ private fun CompactCappedCalculator(
         charCount == 7 -> 0.90f
         else -> 1.0f
     }
-    val displayFontSp = (28f * shrinkMultiplier).sp
-    val rowGap = 4.dp
-    val keyHeight = 32.dp
-    val keyFont = 15f
+    val displayFontSp = (22f * shrinkMultiplier).sp
+    val rowGap = 3.dp
+    val keyHeight = 23.dp
+    val keyFont = 13f
     var accumDrag by remember { mutableFloatStateOf(0f) }
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .height(220.dp)
-            .clip(RoundedCornerShape(22.dp))
+            .heightIn(max = 160.dp)
+            .clip(RoundedCornerShape(20.dp))
             .background(IslandColors.CalcBackground)
-            .border(0.75.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(22.dp))
-            .padding(horizontal = 12.dp, vertical = 4.dp),
+            .border(0.75.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(20.dp))
+            .padding(horizontal = 10.dp, vertical = 4.dp),
         verticalArrangement = Arrangement.spacedBy(rowGap)
     ) {
-        // Expression hint + swipe-to-backspace numeric display (34.dp)
+        // Compact expression hint + swipe-to-backspace numeric display (24 dp — zero history row)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(34.dp)
+                .height(24.dp)
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures(
                         onDragStart = { accumDrag = 0f },
@@ -150,23 +153,22 @@ private fun CompactCappedCalculator(
                         }
                     )
                 }
-                .padding(horizontal = 6.dp),
+                .padding(horizontal = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Bottom
+            verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
                 text = state.activeOperator?.let { "Op ${it.glyph}" } ?: "",
-                color = IslandColors.AccentOrange.copy(alpha = 0.90f),
+                color = IslandColors.AccentOrange.copy(alpha = 0.92f),
                 fontSize = 11.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(bottom = 4.dp)
+                fontWeight = FontWeight.SemiBold
             )
             Text(
                 text = state.display,
                 style = TextStyle(
                     color = IslandColors.CalcDigitText,
                     fontSize = displayFontSp,
-                    fontWeight = FontWeight.Light,
+                    fontWeight = FontWeight.Medium,
                     fontFeatureSettings = "tnum"
                 ),
                 maxLines = 1,
@@ -179,7 +181,7 @@ private fun CompactCappedCalculator(
         // Row 1: AC/C, ±, %, ÷
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             CompactCalcKey(
                 label = if (state.canClearEntry && state.display != "0") "C" else "AC",
@@ -187,7 +189,7 @@ private fun CompactCappedCalculator(
                 fgColor = IslandColors.CalcFunctionText,
                 height = keyHeight,
                 fontSizeSp = keyFont * 0.88f,
-                fontWeight = FontWeight.Medium,
+                fontWeight = FontWeight.SemiBold,
                 testTag = "calc_key_clear",
                 modifier = Modifier.weight(1f)
             ) { onHaptic(); onKeySound(); onClear() }
@@ -198,7 +200,7 @@ private fun CompactCappedCalculator(
                 fgColor = IslandColors.CalcFunctionText,
                 height = keyHeight,
                 fontSizeSp = keyFont,
-                fontWeight = FontWeight.Medium,
+                fontWeight = FontWeight.SemiBold,
                 testTag = "calc_key_sign",
                 modifier = Modifier.weight(1f)
             ) { onHaptic(); onKeySound(); onToggleSign() }
@@ -209,7 +211,7 @@ private fun CompactCappedCalculator(
                 fgColor = IslandColors.CalcFunctionText,
                 height = keyHeight,
                 fontSizeSp = keyFont * 0.92f,
-                fontWeight = FontWeight.Medium,
+                fontWeight = FontWeight.SemiBold,
                 testTag = "calc_key_percent",
                 modifier = Modifier.weight(1f)
             ) { onHaptic(); onKeySound(); onPercent() }
@@ -226,7 +228,7 @@ private fun CompactCappedCalculator(
         // Row 2: 7, 8, 9, ×
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             listOf("7", "8", "9").forEach { d ->
                 CompactCalcKey(
@@ -235,7 +237,7 @@ private fun CompactCappedCalculator(
                     fgColor = IslandColors.CalcDigitText,
                     height = keyHeight,
                     fontSizeSp = keyFont,
-                    fontWeight = FontWeight.Normal,
+                    fontWeight = FontWeight.Medium,
                     testTag = "calc_key_$d",
                     modifier = Modifier.weight(1f)
                 ) { onHaptic(); onKeySound(); onDigit(d) }
@@ -252,7 +254,7 @@ private fun CompactCappedCalculator(
         // Row 3: 4, 5, 6, −
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             listOf("4", "5", "6").forEach { d ->
                 CompactCalcKey(
@@ -261,7 +263,7 @@ private fun CompactCappedCalculator(
                     fgColor = IslandColors.CalcDigitText,
                     height = keyHeight,
                     fontSizeSp = keyFont,
-                    fontWeight = FontWeight.Normal,
+                    fontWeight = FontWeight.Medium,
                     testTag = "calc_key_$d",
                     modifier = Modifier.weight(1f)
                 ) { onHaptic(); onKeySound(); onDigit(d) }
@@ -278,7 +280,7 @@ private fun CompactCappedCalculator(
         // Row 4: 1, 2, 3, +
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             listOf("1", "2", "3").forEach { d ->
                 CompactCalcKey(
@@ -287,7 +289,7 @@ private fun CompactCappedCalculator(
                     fgColor = IslandColors.CalcDigitText,
                     height = keyHeight,
                     fontSizeSp = keyFont,
-                    fontWeight = FontWeight.Normal,
+                    fontWeight = FontWeight.Medium,
                     testTag = "calc_key_$d",
                     modifier = Modifier.weight(1f)
                 ) { onHaptic(); onKeySound(); onDigit(d) }
@@ -304,7 +306,7 @@ private fun CompactCappedCalculator(
         // Row 5: 0 (2x width, left-aligned), ., =
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
             CompactCalcKey(
                 label = "0",
@@ -312,7 +314,7 @@ private fun CompactCappedCalculator(
                 fgColor = IslandColors.CalcDigitText,
                 height = keyHeight,
                 fontSizeSp = keyFont,
-                fontWeight = FontWeight.Normal,
+                fontWeight = FontWeight.Medium,
                 testTag = "calc_key_0",
                 leftAlign = true,
                 modifier = Modifier.weight(2.04f)
@@ -323,8 +325,8 @@ private fun CompactCappedCalculator(
                 bgColor = IslandColors.CalcDigitBg,
                 fgColor = IslandColors.CalcDigitText,
                 height = keyHeight,
-                fontSizeSp = keyFont + 2f,
-                fontWeight = FontWeight.Medium,
+                fontSizeSp = keyFont + 1f,
+                fontWeight = FontWeight.SemiBold,
                 testTag = "calc_key_dot",
                 modifier = Modifier.weight(1f)
             ) { onHaptic(); onKeySound(); onDecimal() }
@@ -335,7 +337,7 @@ private fun CompactCappedCalculator(
                 fgColor = IslandColors.CalcOperatorText,
                 height = keyHeight,
                 fontSizeSp = keyFont + 1f,
-                fontWeight = FontWeight.SemiBold,
+                fontWeight = FontWeight.Bold,
                 testTag = "calc_key_equals",
                 modifier = Modifier.weight(1f)
             ) { onHaptic(); onKeySound(); onEquals() }
@@ -358,7 +360,7 @@ private fun CompactOperatorKey(
         fgColor = if (isActive) IslandColors.CalcOperatorActiveText else IslandColors.CalcOperatorText,
         height = height,
         fontSizeSp = fontSizeSp,
-        fontWeight = FontWeight.SemiBold,
+        fontWeight = FontWeight.Bold,
         testTag = "calc_key_${op.name.lowercase()}",
         modifier = modifier,
         onClick = onClick
@@ -381,20 +383,17 @@ private fun CompactCalcKey(
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.94f else 1.0f,
-        animationSpec = spring(dampingRatio = 0.7f, stiffness = 750f),
+        targetValue = if (pressed) MotionTokens.BUTTON_PRESS_SCALE else 1.0f,
+        animationSpec = if (pressed) spring(dampingRatio = 1f, stiffness = 900f) else spring(dampingRatio = 0.72f, stiffness = 550f),
         label = "calc_key_scale"
     )
-    val effectiveBg = if (pressed) {
-        Color(
-            red = (bgColor.red * 1.28f).coerceIn(0f, 1f),
-            green = (bgColor.green * 1.28f).coerceIn(0f, 1f),
-            blue = (bgColor.blue * 1.28f).coerceIn(0f, 1f),
-            alpha = 1f
-        )
-    } else {
-        bgColor
-    }
+    val cornerDp by animateDpAsState(
+        targetValue = if (pressed) 14.dp else 9.dp,
+        animationSpec = spring(dampingRatio = 0.75f, stiffness = 620f),
+        label = "calc_key_squish"
+    )
+    val effectiveBg = IslandColors.pressTint(bgColor, pressed)
+    val shape = RoundedCornerShape(cornerDp)
 
     Box(
         modifier = modifier
@@ -403,9 +402,9 @@ private fun CompactCalcKey(
                 scaleX = scale
                 scaleY = scale
             }
-            .clip(CircleShape)
+            .clip(shape)
             .background(effectiveBg)
-            .border(0.5.dp, Color.White.copy(alpha = 0.14f), CircleShape)
+            .border(0.5.dp, Color.White.copy(alpha = 0.14f), shape)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -420,7 +419,7 @@ private fun CompactCalcKey(
             fontSize = fontSizeSp.sp,
             fontWeight = fontWeight,
             maxLines = 1,
-            modifier = if (leftAlign) Modifier.padding(start = 22.dp) else Modifier
+            modifier = if (leftAlign) Modifier.padding(start = 18.dp) else Modifier
         )
     }
 }
@@ -447,8 +446,8 @@ private fun FullCalculator(
             .padding(horizontal = 16.dp, vertical = 12.dp)
     ) {
         val viewportW = maxWidth + 32.dp
-        val gap = 12.dp
-        val d: Dp = ((viewportW - 32.dp - 36.dp) / 4f).coerceAtLeast(48.dp)
+        val gap = 10.dp
+        val d: Dp = ((viewportW - 32.dp - 30.dp) / 4f).coerceIn(48.dp, 64.dp)
 
         val buttonFontSp = (d.value * 0.42f).sp
         val charCount = state.display.replace("-", "").replace(".", "").length
@@ -458,7 +457,7 @@ private fun FullCalculator(
             charCount == 7 -> 0.88f
             else -> 1.0f
         }
-        val displayFontSp = (buttonFontSp.value * 2.55f * shrinkMultiplier).sp
+        val displayFontSp = (buttonFontSp.value * 2.4f * shrinkMultiplier).sp
         var accumDrag by remember { mutableFloatStateOf(0f) }
 
         Column(
@@ -683,20 +682,11 @@ private fun CalcKey(
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
     val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.95f else 1.0f,
+        targetValue = if (pressed) MotionTokens.BUTTON_PRESS_SCALE else 1.0f,
         animationSpec = spring(stiffness = 700f),
         label = "calc_scale"
     )
-    val effectiveBg = if (pressed) {
-        Color(
-            red = (bgColor.red * 1.3f).coerceIn(0f, 1f),
-            green = (bgColor.green * 1.3f).coerceIn(0f, 1f),
-            blue = (bgColor.blue * 1.3f).coerceIn(0f, 1f),
-            alpha = 1f
-        )
-    } else {
-        bgColor
-    }
+    val effectiveBg = IslandColors.pressTint(bgColor, pressed)
 
     Box(
         modifier = Modifier

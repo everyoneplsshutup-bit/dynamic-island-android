@@ -22,12 +22,17 @@ private val IslandDarkColorScheme = darkColorScheme(
     secondary = IslandColors.AccentCyan,
     onSecondary = Color.Black,
     tertiary = IslandColors.AccentGreen,
-    background = IslandColors.AppBgDark,
+    background = IslandColors.SurfaceContainerLowest,
     onBackground = IslandColors.TextPrimary,
-    surface = IslandColors.AppSurfaceDark,
+    surface = IslandColors.SurfaceContainerLow,
     onSurface = IslandColors.TextPrimary,
-    surfaceVariant = IslandColors.AppSurfaceVariantDark,
+    surfaceVariant = IslandColors.SurfaceContainer,
     onSurfaceVariant = IslandColors.TextSecondary,
+    surfaceContainerLowest = IslandColors.SurfaceContainerLowest,
+    surfaceContainerLow = IslandColors.SurfaceContainerLow,
+    surfaceContainer = IslandColors.SurfaceContainer,
+    surfaceContainerHigh = IslandColors.SurfaceContainerHigh,
+    surfaceContainerHighest = IslandColors.SurfaceContainerHighest,
     error = IslandColors.AccentRed,
     onError = Color.White,
     outline = Color(0xFF2D2E38)
@@ -53,6 +58,7 @@ private val IslandLightColorScheme = lightColorScheme(
 )
 
 val IslandShapes = Shapes(
+    extraSmall = RoundedCornerShape(8.dp),
     small = RoundedCornerShape(12.dp),
     medium = RoundedCornerShape(18.dp),
     large = RoundedCornerShape(28.dp),
@@ -83,8 +89,8 @@ fun DynamicIslandTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
-        typography = DynamicIslandTypography,
         shapes = IslandShapes,
+        typography = DynamicIslandTypography,
         content = content
     )
 }

@@ -1,7 +1,7 @@
 package com.example.island
 
 /**
- * Authoritative Build #4 Redesign Checklist mapping each redesigned capability
+ * Authoritative Build #5 Checklist mapping each redesigned capability
  * to its concrete implementation symbols across packages.
  */
 object Build4Checklist {
@@ -16,69 +16,75 @@ object Build4Checklist {
     val entries: List<ChecklistEntry> = listOf(
         ChecklistEntry(
             id = 1,
-            area = "Motion & Two-Stage Physics",
-            summary = "Apple WWDC23 + M3 Expressive springs (Springy/Standard/Calm/Off), Opening Effect vs Content Effect split, Stage 1 Medium pill, non-bouncing collapse, & expanded swipe gestures.",
-            implementationRef = "MotionTokens.kt, IslandController.kt (openFromPill, no-flicker rules), IslandOverlayRoot.kt, IslandService.kt"
+            area = "120 Hz M3E Spring Choreography & Pull-Down",
+            summary = "Two-stage WWDC23 + M3 Expressive spring physics, 30% hold + 200 ms / 8 dp content reveal, non-bouncing collapse, zero-recomposition pull-down tracking, and no-flicker throttling.",
+            implementationRef = "MotionTokens.kt, IslandController.kt, IslandOverlayRoot.kt, IslandService.kt"
         ),
         ChecklistEntry(
             id = 2,
-            area = "13 Cohesive Micro-Acoustic Sounds",
-            summary = "Deleted and regenerated all 13 WAVs from one warm marimba-glass FM family with pitch/gain randomization and SoundPool gating.",
+            area = "13 Cohesive Micro-Acoustic Sounds (12 kHz LPF)",
+            summary = "Regenerated 13 mono 44.1 kHz WAVs with harmonic marimba-glass warmth, 12 kHz LPF, +/-2% pitch randomization, 25 ms rate limit, and full UI action coverage.",
             implementationRef = "res/raw/sfx_*.wav, IslandSoundManager.kt"
         ),
         ChecklistEntry(
             id = 3,
-            area = "Liquid Glass & Concentric Chrome",
-            summary = "Material You wallpaper accent tinting on outer shell (Solid Black + Apple Glass preserved), 44dp concentric outer radius, 408dp max width, 220dp unified panel height cap, Live-First expanded home with shortcuts.",
-            implementationRef = "Color.kt (extractMaterialYouAccent, blendGlassBase), IslandOverlayRoot.kt, HomeHubScreen.kt"
+            area = "Three-Way Glass Chrome & Per-Tab Heights",
+            summary = "Dark, Apple Glass, and real Kyant Backdrop Liquid Glass refraction, Material 3 Expressive Theme tokens, 360 dp max card width, and per-tab compact height caps.",
+            implementationRef = "GlassSurface.kt, Color.kt, Theme.kt, IslandOverlayRoot.kt"
         ),
         ChecklistEntry(
             id = 4,
-            area = "Camera Alignment, Low-Battery & Calibration",
-            summary = "Strict >= 8dp cutout clearance, low-battery 20/15/10% capsule & red <=15% idle glyph, vivid #FF3B30 Calibration ring + crosshairs.",
-            implementationRef = "CalibrationScreen.kt, IslandOverlayRoot.IdlePillView, BatteryMonitor.kt, IslandNotificationListener.kt"
+            area = "Camera Dead-Zone Geometry & Calibration",
+            summary = "Strict >= 8 dp cutout exclusion zone with symmetrical 88 dp slots, landscape vertical pill rotation, red DEBUG overlap guard, 26x33 dp default, and Calibration preview/confirm.",
+            implementationRef = "DeadZoneGeometry.kt, CalibrationScreen.kt, IslandOverlayRoot.kt, CameraDeadZoneTest.kt"
         ),
         ChecklistEntry(
             id = 5,
-            area = "User-Ordered Dock & Customise Dragging",
-            summary = "BottomChooserBar strictly respects user-ordered enabledTabs (main 5 + More overflow), split Active vs Disabled sections, immediate 6-dot drag reorder.",
-            implementationRef = "IslandOverlayRoot.BottomChooserBar, FeaturePickerScreen.kt"
+            area = "Notification Pill & Interactive Dwell Timer",
+            summary = "Compact notification pill displays app icon + name only, replaces rather than stacks, shows 2 dp draining dwell underline paused on touch/expand, and groups Alerts by app with Undo.",
+            implementationRef = "IslandNotificationListener.kt, IslandController.kt, IslandToolsAndModules.kt (AlertsIslandPanel)"
         ),
         ChecklistEntry(
             id = 6,
-            area = "Interactive iOS-Style OCR Selection",
-            summary = "Word bounding-box tokenization, blue start/end lollipop drag handles, Magnifier Loupe above active finger, Callout Copy/All/Share — Copy-only (never auto-copies).",
-            implementationRef = "OcrSelectionOverlay.kt, TierAAccessibilityReader.kt, TierBMlKitOcr.kt, OcrPrivacyGate.kt"
+            area = "Music Spinning Art, Wavy Seek & PixelMusic Default",
+            summary = "Rotating circular album art (toggleable), RenderThread M3E WavyProgressBar, 12 Hz bars, offline-only synced/static lyrics with designed empty state, and user music source picker.",
+            implementationRef = "MusicIslandView.kt, MediaHub.kt, SettingsScreens.kt"
         ),
         ChecklistEntry(
             id = 7,
-            area = "Tools Panel & Volumetric Beam Card",
-            summary = "Removed legacy Floating Apps button, added Screenshot -> Vault trigger and interactive Torch Brightness & Beam Card overlay.",
-            implementationRef = "IslandToolsAndModules.kt (ToolsIslandPanel, FlashlightBeamOverlayCard)"
+            area = "Shelf (10-Min Grid, Attach Clipboard & Save)",
+            summary = "Renamed Vault -> Shelf everywhere, clean 3-column grid with perimeter countdown rings, long-press delete, Attach to clipboard + Save to gallery (zero Share), and Clear all.",
+            implementationRef = "VaultManager.kt, IslandToolsAndModules.kt (VaultIslandPanel), HomeHubScreen.kt"
         ),
         ChecklistEntry(
             id = 8,
-            area = "Uncapped A-Z App Opener & Search",
-            summary = "Removed .take(8) app cap, added A-Z section headers + right-edge touchable A-Z scroller + long-press floating freeform launch + BroadcastReceiver refresh.",
-            implementationRef = "SearchEngine.kt, IslandToolsAndModules.kt (SearchIslandPanel)"
+            area = "Quick Toggles, Keep Awake & Uncapped Sidebar",
+            summary = "Keep Awake toggle wiring FLAG_KEEP_SCREEN_ON, Volumetric Torch Beam card, Screenshot -> Shelf action, and uncapped curved 56/280 dp Floating Sidebar with unread badges.",
+            implementationRef = "QuickTogglesManager.kt, IslandToolsAndModules.kt (ToolsIslandPanel), FloatingSidebarOverlay.kt"
         ),
         ChecklistEntry(
             id = 9,
-            area = "Vault 10-Min Grid, Filter Chips & Preview",
-            summary = "8dp filter chips (All/Screenshots/Photos/Trash), 3-column thumbnail grid with Canvas countdown rings, swipe-to-trash, drag-out, and full-screen preview.",
-            implementationRef = "IslandToolsAndModules.kt (VaultIslandPanel, VaultFullScreenPreviewOverlay), VaultManager.kt"
+            area = "Auto-Saving Notes & Staggered Clips",
+            summary = "Single-column ~56 dp note rows with 4 dp lime strip and inline auto-saving editor (no Save button), plus 45 ms per-row stagger entrance in Clips.",
+            implementationRef = "IslandToolsAndModules.kt (NotesIslandPanel, ClipsIslandPanel)"
         ),
         ChecklistEntry(
             id = 10,
-            area = "Music Artwork Glow, On-Device Lyrics & Sleep Dial",
-            summary = "Artwork-derived accent glow & strictly offline MediaMetadata/sidecar .lrc lyrics in Music; 24-hour draggable Bedtime/Wake circular SleepDialView in Timer tab.",
-            implementationRef = "MusicIslandView.kt, MediaHub.kt, TimerStopwatchView.kt (SleepDialView), TimerEngine.startSleepTimer"
+            area = "Flicker-Free Interactive OCR Selection",
+            summary = "Keyed pointerInput + RenderThread drag state eliminating flicker, 22 dp teardrop handles, clamped Magnifier Loupe, word/sentence/all tap cycle, and photo OCR crop widening.",
+            implementationRef = "OcrSelectionOverlay.kt, TierAAccessibilityReader.kt, TierBMlKitOcr.kt"
         ),
         ChecklistEntry(
             id = 11,
-            area = "Settings Studio, Motion Subtabs & Gestures",
-            summary = "Motion subtabs (Background/Animations/Gestures), Opening vs Content effects, Try It demo with event chips, Pill/Expanded swipe pickers, Companion Circle side, Per-Event rules.",
-            implementationRef = "SettingsScreens.kt, SettingsRepository.kt"
+            area = "When Idle Modes, Mini Capsule & Event Groups",
+            summary = "Camera Only / Dual-Slot Info Pill (12 widgets) / Hidden idle modes, Mini Capsule Compact/Standard & duration controls, Lock-screen privacy presets, and grouped Event Switches.",
+            implementationRef = "SettingsRepository.kt, IslandOverlayRoot.kt, SettingsScreens.kt"
+        ),
+        ChecklistEntry(
+            id = 12,
+            area = "Tips Onboarding, Settings Studio & Dock Ordering",
+            summary = "6-group M3 Settings Studio with Try It demo (portrait/landscape), 5 main tabs + More dock ordering with smooth 6-dot drag, and interactive Tips sheet.",
+            implementationRef = "SettingsScreens.kt, FeaturePickerScreen.kt, HomeHubScreen.kt, SetupWizardScreen.kt"
         )
     )
 }

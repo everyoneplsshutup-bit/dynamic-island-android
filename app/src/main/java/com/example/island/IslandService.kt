@@ -7,11 +7,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
-import android.media.AudioManager
 import android.content.res.Configuration
 import android.database.ContentObserver
 import android.graphics.PixelFormat
 import android.graphics.Rect
+import android.media.AudioManager
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -27,6 +27,9 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.platform.ComposeView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -48,6 +51,7 @@ import com.example.system.HapticsStrength
 import com.example.system.IslandGesture
 import com.example.system.IslandSettings
 import com.example.system.IslandTab
+import com.example.system.PillStyle
 import com.example.system.PillSwipeAction
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -60,16 +64,13 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
+import java.util.function.Consumer
 
 /**
  * AccessibilityService hosting the Dynamic Island TYPE_ACCESSIBILITY_OVERLAY.
- * Uses the two-window trick:
- *  1) Fixed full-width drawing window that never resizes (120Hz smooth)
- *  2) Invisible touch window that follows the pill bounds (or captures Select Mode tap/long-press)
- *
- * HARD PRIVACY CONSTRAINT:
- * Never calls getRootInActiveWindow() or inspects nodes unless screenReadingEnabled == true
- * AND the user explicitly triggered Select Mode.
+ * Uses the two-window pattern:
+ *  1) Fixed full-screen drawing window that never resizes (120Hz smooth)
+ *  2) Invisible touch window sized dynamically from DeadZoneGeometry (portrait & landscape)
  */
 class IslandService : AccessibilityService() {
 
@@ -79,6 +80,12 @@ class IslandService : AccessibilityService() {
 
         private val _detectedCutout = MutableStateFlow<Rect?>(null)
         val detectedCutout: StateFlow<Rect?> = _detectedCutout.asStateFlow()
+
+        private val _liveExclusionZone = MutableStateFlow<ExclusionZone?>(null)
+        val liveExclusionZone: StateFlow<ExclusionZone?> = _liveExclusionZone.asStateFlow()
+
+        private val _crossWindowBlurSupported = MutableStateFlow(false)
+        val crossWindowBlurSupported: StateFlow<Boolean> = _crossWindowBlurSupported.asStateFlow()
 
         private val _currentForegroundApp = MutableStateFlow<String?>(null)
         val currentForegroundApp: StateFlow<String?> = _currentForegroundApp.asStateFlow()
@@ -102,11 +109,16 @@ class IslandService : AccessibilityService() {
     private var touchParams: WindowManager.LayoutParams? = null
 
     private var lastTouchSignature: String = ""
-    private var lastDrawingFlags: Int = Int.MIN_VALUE
+    private var lastDrawingSignature: String = ""
+    private var blurEnabledListener: Consumer<Boolean>? = null
+
+    // Held outside StateFlow so finger pull-down NEVER recomposes the full Compose root per move event.
+    private val pullDownFractionState = mutableFloatStateOf(0f)
 
     private var overlayLifecycleOwner: OverlayLifecycleOwner? = null
     private var latestSettings: IslandSettings = IslandSettings()
     private var latestState: IslandState = IslandState()
+    private var latestKeepAwake: Boolean = false
 
     private var screenshotObserver: ContentObserver? = null
     private var screenshotCheckJob: Job? = null
@@ -118,6 +130,16 @@ class IslandService : AccessibilityService() {
             val app = applicationContext as? DynamicIslandApp ?: return
             val km = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
             app.islandController.setDeviceLocked(km?.isKeyguardLocked == true)
+            when (intent?.action) {
+                Intent.ACTION_SCREEN_OFF -> {
+                    app.islandController.setDwellPaused(DwellPauseReason.SCREEN_OFF, true)
+                    app.islandController.setFloatingSidebarOpen(false)
+                    app.islandController.setFlashlightCardOpen(false)
+                }
+                Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> {
+                    app.islandController.setDwellPaused(DwellPauseReason.SCREEN_OFF, false)
+                }
+            }
         }
     }
 
@@ -132,18 +154,16 @@ class IslandService : AccessibilityService() {
             app.settingsRepository.update { it.copy(accessibilityWasEnabled = true) }
         }
 
+        registerBlurListener()
+        measureDisplayCutout()
         app.mediaHub.start()
         setupOverlayWindows(app)
         registerLockReceiver()
         registerScreenshotObserver(app)
-        measureDisplayCutout()
         observeStateAndSettings(app)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // HARD PRIVACY CONSTRAINT:
-        // We NEVER inspect window/node text or getRootInActiveWindow() on accessibility events!
-        // We only record non-system foreground package name on window transitions so Vault tap-to-attach can target an open chat app.
         if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             val pkg = event.packageName?.toString()
             if (!pkg.isNullOrBlank() && pkg != packageName && pkg !in ignoredForegroundPackages) {
@@ -162,6 +182,7 @@ class IslandService : AccessibilityService() {
 
     override fun onDestroy() {
         _isRunning.value = false
+        unregisterBlurListener()
         unregisterLockReceiver()
         unregisterScreenshotObserver()
         teardownOverlayWindows()
@@ -169,13 +190,29 @@ class IslandService : AccessibilityService() {
         super.onDestroy()
     }
 
-    private fun measureDisplayCutout() {
+    private fun registerBlurListener() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
         val wm = windowManager ?: return
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            val cutout = wm.maximumWindowMetrics.windowInsets.displayCutout
-            val rect = cutout?.boundingRects?.firstOrNull()
-            _detectedCutout.value = rect
+        _crossWindowBlurSupported.value = runCatching { wm.isCrossWindowBlurEnabled }.getOrDefault(false)
+        val listener = Consumer<Boolean> { enabled ->
+            _crossWindowBlurSupported.value = enabled
+            updateDrawingWindowAttributes(latestState, latestSettings, latestKeepAwake)
         }
+        blurEnabledListener = listener
+        runCatching { wm.addCrossWindowBlurEnabledListener(listener) }
+    }
+
+    private fun unregisterBlurListener() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val listener = blurEnabledListener ?: return
+        runCatching { windowManager?.removeCrossWindowBlurEnabledListener(listener) }
+        blurEnabledListener = null
+    }
+
+    private fun measureDisplayCutout() {
+        val zone = DeadZoneGeometry.measureLive(this, latestSettings)
+        _liveExclusionZone.value = zone
+        _detectedCutout.value = zone.cutoutRectPx
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -242,7 +279,7 @@ class IslandService : AccessibilityService() {
                 WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         ).apply {
-            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            gravity = Gravity.TOP or Gravity.START
             x = 0
             y = 0
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -257,8 +294,13 @@ class IslandService : AccessibilityService() {
             setViewTreeSavedStateRegistryOwner(owner)
             setOnDragListener(dragListener)
             setContent {
+                val liveZone by liveExclusionZone.collectAsState()
+                val blurSupported by crossWindowBlurSupported.collectAsState()
                 IslandOverlayRoot(
                     app = app,
+                    exclusionZone = liveZone ?: DeadZoneGeometry.measureLive(this@IslandService, latestSettings),
+                    crossWindowBlurSupported = blurSupported,
+                    pullDownProgressProvider = { pullDownFractionState.floatValue },
                     onRequestHaptic = { performSelectionHaptic() },
                     onOpenAppSettings = {
                         val i = Intent(this@IslandService, com.example.MainActivity::class.java).apply {
@@ -271,7 +313,7 @@ class IslandService : AccessibilityService() {
         }
         drawingComposeView = composeView
 
-        // Window 2: Invisible touch window that follows the pill bounds
+        // Window 2: Invisible touch window that tracks pill & landscape hole anchor accurately
         val tParams = WindowManager.LayoutParams(
             (120 * density).toInt(),
             (48 * density).toInt(),
@@ -337,6 +379,17 @@ class IslandService : AccessibilityService() {
                     performSelectionHaptic()
                     val isLeft = velocityX < 0f
                     val swipeAction = if (isLeft) latestSettings.pillSwipeLeftGesture else latestSettings.pillSwipeRightGesture
+                    // Swiping an active notification pill dismisses early cleanly when notifications are active
+                    if (latestState.primaryActivity is IslandActivity.NotificationPreview &&
+                        swipeAction == PillSwipeAction.TRACK_OR_NOTIF
+                    ) {
+                        if (isLeft) {
+                            app.islandController.dismissActiveNotification()
+                        } else {
+                            app.islandController.nextNotification()
+                        }
+                        return true
+                    }
                     when (swipeAction) {
                         PillSwipeAction.TRACK_OR_NOTIF -> {
                             when (latestState.primaryActivity) {
@@ -379,23 +432,24 @@ class IslandService : AccessibilityService() {
                         MotionEvent.ACTION_DOWN -> {
                             downRawY = event.rawY
                             isPullingDown = false
+                            app.islandController.setDwellPaused(DwellPauseReason.TOUCH, true)
                         }
                         MotionEvent.ACTION_MOVE -> {
                             val dy = (event.rawY - downRawY).coerceAtLeast(0f)
-                            if (dy > 16f * density) {
+                            if (dy > 14f * density) {
                                 isPullingDown = true
-                                app.islandController.setPullDownProgress((dy / (110f * density)).coerceIn(0f, 1f))
+                                pullDownFractionState.floatValue = (dy / (110f * density)).coerceIn(0f, 1f)
                             }
                         }
                         MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                            app.islandController.setDwellPaused(DwellPauseReason.TOUCH, false)
                             if (isPullingDown) {
                                 val dy = event.rawY - downRawY
                                 isPullingDown = false
+                                pullDownFractionState.floatValue = 0f
                                 if (dy >= pullThresholdPx) {
                                     performSelectionHaptic()
                                     app.islandController.openFromPill(latestSettings.twoStageOpen)
-                                } else {
-                                    app.islandController.setPullDownProgress(0f)
                                 }
                             }
                         }
@@ -407,7 +461,7 @@ class IslandService : AccessibilityService() {
         }
         touchView = invisibleTouch
 
-        lastDrawingFlags = dParams.flags
+        lastDrawingSignature = ""
         lastTouchSignature = ""
 
         runCatching {
@@ -420,7 +474,9 @@ class IslandService : AccessibilityService() {
         serviceScope.launch {
             app.settingsRepository.settingsFlow.collectLatest { settings ->
                 latestSettings = settings
-                updateTouchWindowBounds()
+                measureDisplayCutout()
+                updateDrawingWindowAttributes(latestState, settings, latestKeepAwake)
+                updateTouchWindowBounds(force = true)
             }
         }
         serviceScope.launch {
@@ -429,13 +485,25 @@ class IslandService : AccessibilityService() {
                 app.clipboardMonitor.setForegroundActive(
                     state.mode == IslandMode.EXPANDED && latestSettings.clipboardHistoryEnabled
                 )
-                updateDrawingWindowInteractivity(state)
+                updateDrawingWindowAttributes(state, latestSettings, latestKeepAwake)
                 updateTouchWindowBounds()
+            }
+        }
+        serviceScope.launch {
+            app.quickTogglesManager.state.collectLatest { toggles ->
+                if (latestKeepAwake != toggles.isKeepAwakeOn) {
+                    latestKeepAwake = toggles.isKeepAwakeOn
+                    updateDrawingWindowAttributes(latestState, latestSettings, latestKeepAwake)
+                }
             }
         }
     }
 
-    private fun updateDrawingWindowInteractivity(state: IslandState) {
+    private fun updateDrawingWindowAttributes(
+        state: IslandState,
+        settings: IslandSettings,
+        keepAwake: Boolean
+    ) {
         val wm = windowManager ?: return
         val view = drawingComposeView ?: return
         val params = drawingParams ?: return
@@ -448,6 +516,13 @@ class IslandService : AccessibilityService() {
             state.activeFloatingMiniTab != null
         val needsIme = isInteractive && state.needsKeyboardFocus
 
+        val useCrossBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            _crossWindowBlurSupported.value &&
+            !settings.reduceGlass &&
+            !settings.solidFallback &&
+            settings.pillStyle != PillStyle.BLACK &&
+            (state.mode == IslandMode.MEDIUM || state.mode == IslandMode.EXPANDED)
+
         var flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
             WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
@@ -458,10 +533,30 @@ class IslandService : AccessibilityService() {
         if (!needsIme) {
             flags = flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
         }
+        if (keepAwake) {
+            flags = flags or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        }
+        if (useCrossBlur) {
+            flags = flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
+        }
 
-        if (lastDrawingFlags != flags) {
-            lastDrawingFlags = flags
+        val blurRadius = if (useCrossBlur) {
+            when (settings.pillStyle) {
+                PillStyle.LIQUID_GLASS -> (32 * (0.4f + 0.6f * settings.glassDensity)).toInt().coerceIn(8, 36)
+                PillStyle.APPLE_GLASS -> (20 * (0.4f + 0.6f * settings.glassDensity)).toInt().coerceIn(8, 24)
+                PillStyle.BLACK -> 0
+            }
+        } else {
+            0
+        }
+
+        val sig = "$flags:$blurRadius"
+        if (lastDrawingSignature != sig) {
+            lastDrawingSignature = sig
             params.flags = flags
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                params.blurBehindRadius = blurRadius
+            }
             runCatching { wm.updateViewLayout(view, params) }
         }
     }
@@ -470,15 +565,16 @@ class IslandService : AccessibilityService() {
         val wm = windowManager ?: return
         val view = touchView ?: return
         val params = touchParams ?: return
-        val density = resources.displayMetrics.density
+        val zone = _liveExclusionZone.value ?: DeadZoneGeometry.measureLive(this, latestSettings)
+        val density = zone.density
 
         if (latestState.isSelectModeActive) {
             val sig = "SELECT"
             if (!force && lastTouchSignature == sig) return
             lastTouchSignature = sig
 
-            // 1/255 alpha ensures MIUI 14 does not treat full-screen overlay as click-through
             view.setBackgroundColor(android.graphics.Color.argb(1, 0, 0, 0))
+            params.gravity = Gravity.TOP or Gravity.START
             params.width = WindowManager.LayoutParams.MATCH_PARENT
             params.height = WindowManager.LayoutParams.MATCH_PARENT
             params.x = 0
@@ -507,32 +603,57 @@ class IslandService : AccessibilityService() {
             return
         }
 
-        val pillWidthDp = when (latestState.mode) {
-            IslandMode.IDLE -> (latestSettings.cutoutWidthDp + 24f).coerceAtLeast(48f)
-            IslandMode.COMPACT -> 228f
-            IslandMode.MEDIUM -> 328f
-            IslandMode.SPLIT -> 296f
-            IslandMode.EXPANDED -> 360f
-        }
-        val pillHeightDp = when (latestState.mode) {
-            IslandMode.IDLE -> (latestSettings.cutoutHeightDp + 18f).coerceAtLeast(48f)
-            else -> 48f
-        }
-        val targetW = (pillWidthDp * density).toInt()
-        val targetH = (pillHeightDp * density).toInt()
-        val targetX = (latestSettings.cutoutXOffsetDp * density).toInt()
-        val targetY = (latestSettings.cutoutYOffsetDp * density).toInt().coerceAtLeast(0)
+        val metrics = DeadZoneGeometry.compactSlotMetrics(
+            holeWidthDp = zone.holeWidthDp,
+            holeHeightDp = zone.holeHeightDp,
+            isLandscape = zone.isLandscape
+        )
 
-        val sig = "PILL:$targetW:$targetH:$targetX:$targetY"
-        if (!force && lastTouchSignature == sig) return
-        lastTouchSignature = sig
+        if (!zone.isLandscape) {
+            val pillWidthDp = when (latestState.mode) {
+                IslandMode.IDLE -> (zone.holeWidthDp + 24f).coerceAtLeast(48f)
+                IslandMode.COMPACT -> metrics.totalWidthDp
+                IslandMode.SPLIT -> metrics.totalWidthDp + 52f
+                IslandMode.MEDIUM -> 320f
+                IslandMode.EXPANDED -> 360f
+            }
+            val touchW = ((pillWidthDp + 16f) * density).toInt()
+            val touchH = ((metrics.pillHeightDp + 12f).coerceAtLeast(48f) * density).toInt()
+            val targetX = ((zone.cutoutRectPx.centerX() - zone.screenWidthPx / 2f)).toInt()
+            val targetY = (zone.cutoutRectPx.top - (4 * density).toInt()).coerceAtLeast(0)
+
+            val sig = "PORTRAIT:$touchW:$touchH:$targetX:$targetY"
+            if (!force && lastTouchSignature == sig) return
+            lastTouchSignature = sig
+
+            params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            params.width = touchW
+            params.height = touchH
+            params.x = targetX
+            params.y = targetY
+        } else {
+            val verticalLenDp = when (latestState.mode) {
+                IslandMode.IDLE -> (zone.holeHeightDp + 24f).coerceAtLeast(48f)
+                else -> metrics.totalWidthDp
+            }
+            val touchW = ((metrics.pillHeightDp + 12f).coerceAtLeast(48f) * density).toInt()
+            val touchH = ((verticalLenDp + 16f) * density).toInt()
+            val targetX = if (zone.isRightEdgeInLandscape) 0 else (zone.cutoutRectPx.left).coerceAtLeast(0)
+            val targetY = (zone.cutoutRectPx.centerY() - zone.screenHeightPx / 2f).toInt()
+
+            val sig = "LANDSCAPE:${zone.isRightEdgeInLandscape}:$touchW:$touchH:$targetX:$targetY"
+            if (!force && lastTouchSignature == sig) return
+            lastTouchSignature = sig
+
+            params.gravity = (if (zone.isRightEdgeInLandscape) Gravity.END else Gravity.START) or Gravity.CENTER_VERTICAL
+            params.width = touchW
+            params.height = touchH
+            params.x = targetX
+            params.y = targetY
+        }
 
         view.setBackgroundColor(android.graphics.Color.TRANSPARENT)
         view.visibility = View.VISIBLE
-        params.width = targetW
-        params.height = targetH
-        params.x = targetX
-        params.y = targetY
         runCatching { wm.updateViewLayout(view, params) }
     }
 
@@ -603,7 +724,6 @@ class IslandService : AccessibilityService() {
             app.soundManager.playTap()
             val allowed = OcrPrivacyGate.isScreenReadingAllowed(app.settingsRepository)
 
-            // Hide full-screen touch overlay FIRST so the underlying window is unobstructed
             touchView?.setBackgroundColor(android.graphics.Color.TRANSPARENT)
             touchView?.visibility = View.GONE
             lastTouchSignature = "GONE"
@@ -614,7 +734,6 @@ class IslandService : AccessibilityService() {
                 return@launch
             }
 
-            // Wait briefly for WindowManager / SurfaceFlinger frame commit before querying windows
             delay(65L)
 
             val result = TierAAccessibilityReader.readNodeAtPoint(
@@ -627,7 +746,6 @@ class IslandService : AccessibilityService() {
 
             when (result) {
                 is TierAResult.TextFound -> {
-                    // Open adjustable blue handles + loupe + Callout Copy (never auto-copies)
                     app.islandController.setOcrSelection(result.selectionState)
                 }
                 is TierAResult.Refused -> {
@@ -659,7 +777,6 @@ class IslandService : AccessibilityService() {
 
                 screenshotCheckJob?.cancel()
                 screenshotCheckJob = serviceScope.launch(Dispatchers.IO) {
-                    // Let MIUI/Android finish writing the screenshot file cleanly
                     delay(420L)
 
                     val treeStr = latestSettings.vaultScreenshotsTreeUri
@@ -668,7 +785,6 @@ class IslandService : AccessibilityService() {
                         if (saved != null) return@launch
                     }
 
-                    // Secondary zero-permission check: if platform passed a specific Screenshot item URI and it's readable
                     if (uri != null && uri != MediaStore.Images.Media.EXTERNAL_CONTENT_URI) {
                         val looksLikeScreenshot = checkUriIsReadableScreenshot(uri)
                         if (looksLikeScreenshot) {
@@ -682,7 +798,7 @@ class IslandService : AccessibilityService() {
                         if (now - lastTreePromptTimeMs > 300_000L) {
                             lastTreePromptTimeMs = now
                             app.islandController.showTransientBanner(
-                                "Allow Screenshots folder in Vault for 10m auto-store",
+                                "Allow Screenshots folder in Shelf for 10m auto-store",
                                 durationMs = 3200L
                             )
                         }

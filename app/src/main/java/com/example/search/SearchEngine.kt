@@ -11,6 +11,7 @@ import android.graphics.drawable.Drawable
 import android.net.Uri
 import android.os.Build
 import android.provider.ContactsContract
+import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.content.ContextCompat
@@ -27,7 +28,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.concurrent.ConcurrentHashMap
 
 data class LaunchableApp(
     val packageName: String,
@@ -56,7 +56,7 @@ class SearchEngine(
     private val floatingWindowManager: FloatingWindowManager
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    private val iconCache = ConcurrentHashMap<String, ImageBitmap>()
+    private val iconCache = object : LruCache<String, ImageBitmap>(180) {}
 
     @Volatile
     private var cachedApps: List<LaunchableApp>? = null
@@ -80,7 +80,7 @@ class SearchEngine(
 
     init {
         registerPackageListener()
-        // Preload app list off main thread cleanly
+        // Preload launchable app catalog off main thread
         scope.launch { getInstalledApps(forceRefresh = false) }
     }
 
@@ -113,11 +113,11 @@ class SearchEngine(
                 val label = info.loadLabel(pm).toString().trim().ifEmpty { pkg }
                 val first = label.firstOrNull()?.uppercaseChar() ?: '#'
                 val section = if (first in 'A'..'Z') first else '#'
-                val cachedBmp = iconCache[pkg]
+                val cachedBmp = iconCache.get(pkg)
                 val drawable = if (cachedBmp == null) runCatching { info.loadIcon(pm) }.getOrNull() else null
                 val bmp = cachedBmp ?: runCatching {
                     drawable?.toBitmap(72, 72)?.asImageBitmap()
-                }.getOrNull()?.also { iconCache[pkg] = it }
+                }.getOrNull()?.also { iconCache.put(pkg, it) }
 
                 LaunchableApp(
                     packageName = pkg,
@@ -132,10 +132,6 @@ class SearchEngine(
         list
     }
 
-    /**
-     * Full uncapped App Opener + instant math + notes + optional contacts search.
-     * NEVER caps results to .take(8) — returns every installed launchable app.
-     */
     suspend fun search(query: String): SearchResults = withContext(Dispatchers.IO) {
         val trimmed = query.trim()
         val hasContactsPerm = ContextCompat.checkSelfPermission(
