@@ -341,6 +341,15 @@ class OverlayWindowHost(
                     app.islandController.openFromPill(latestSettings.twoStageOpen)
                     return true
                 }
+                if (velocityY < -520f && absY > absX && latestSettings.swipeUpDismissEnabled) {
+                    performSelectionHaptic()
+                    if (latestState.primaryActivity is IslandActivity.NotificationPreview) {
+                        app.islandController.dismissActiveNotification()
+                    } else {
+                        app.islandController.collapse()
+                    }
+                    return true
+                }
                 return false
             }
         })
@@ -483,7 +492,8 @@ class OverlayWindowHost(
             state.ocrSelection != null ||
             state.isFlashlightCardOpen ||
             state.isFloatingSidebarOpen ||
-            state.activeFloatingMiniTab != null
+            state.activeFloatingMiniTab != null ||
+            state.approvalPrompt != null
         val needsIme = isInteractive && state.needsKeyboardFocus
 
         // Keep home screen & wallpaper crisp behind the MATCH_PARENT drawing canvas so translucent
@@ -565,7 +575,8 @@ class OverlayWindowHost(
             state.ocrSelection != null ||
             state.isFlashlightCardOpen ||
             state.isFloatingSidebarOpen ||
-            state.activeFloatingMiniTab != null
+            state.activeFloatingMiniTab != null ||
+            state.approvalPrompt != null
 
         if (hideTouchWindow) {
             val sig = "GONE"
@@ -582,21 +593,25 @@ class OverlayWindowHost(
             isLandscape = zone.isLandscape,
             slotWidthDp = settings.pillSizePreset.slotWidthDp
         )
+        val idleCameraMetrics = DeadZoneGeometry.idleCameraPillMetrics(
+            holeWidthDp = zone.holeWidthDp,
+            holeHeightDp = zone.holeHeightDp
+        )
 
         if (!zone.isLandscape) {
             val idleWidthDp = when (settings.whenIdleMode) {
                 WhenIdleMode.INFO_PILL -> metrics.totalWidthDp
-                WhenIdleMode.CAMERA_ONLY -> (zone.holeWidthDp + 94f).coerceIn(114f, 152f)
-                WhenIdleMode.HIDDEN -> (zone.holeWidthDp + 24f).coerceAtLeast(48f)
+                WhenIdleMode.CAMERA_ONLY -> idleCameraMetrics.widthDp.coerceAtLeast(48f)
+                WhenIdleMode.HIDDEN -> 48f
             }
             val pillWidthDp = when (state.mode) {
                 IslandMode.IDLE -> idleWidthDp
                 IslandMode.COMPACT -> metrics.totalWidthDp
                 IslandMode.SPLIT -> metrics.totalWidthDp + 52f
-                IslandMode.MEDIUM -> 320f
-                IslandMode.EXPANDED -> 360f
+                IslandMode.MEDIUM -> DeadZoneGeometry.MEDIUM_MAX_WIDTH_DP
+                IslandMode.EXPANDED -> DeadZoneGeometry.FULL_MAX_WIDTH_DP
             }
-            val touchW = ((pillWidthDp + 16f) * density).toInt()
+            val touchW = ((pillWidthDp + 12f) * density).toInt()
             val touchH = ((metrics.pillHeightDp + 12f).coerceAtLeast(48f) * density).toInt()
             val targetX = ((zone.cutoutRectPx.centerX() - zone.screenWidthPx / 2f)).toInt()
             val targetY = (zone.cutoutRectPx.top - (2f * density).toInt()).coerceAtLeast(0)

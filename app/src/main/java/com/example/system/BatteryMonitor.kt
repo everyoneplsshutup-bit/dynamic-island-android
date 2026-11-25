@@ -80,6 +80,28 @@ class BatteryMonitor(
                     val cur = _state.value
                     islandController.updateBatteryTelemetry(cur.levelPercent, isCharging = false, isLowBatteryWarning = cur.levelPercent <= 15)
                 }
+                "android.bluetooth.device.action.BATTERY_LEVEL_CHANGED",
+                android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED -> {
+                    val lvl = intent.getIntExtra("android.bluetooth.device.extra.BATTERY_LEVEL", -1)
+                    @Suppress("DEPRECATION")
+                    val device = intent.getParcelableExtra<android.bluetooth.BluetoothDevice>(android.bluetooth.BluetoothDevice.EXTRA_DEVICE)
+                    val devName = runCatching { device?.name }.getOrNull()?.takeIf { it.isNotBlank() } ?: "Earbuds"
+                    if (lvl in 0..100) {
+                        islandController.updateEarbudsBattery(devName, lvl)
+                        if (latestSettings.batteryEnabled) {
+                            islandController.upsertActivity(
+                                IslandActivity.Alert(
+                                    id = "alert_earbuds_${devName.hashCode()}",
+                                    kind = AlertKind.EARBUDS_BATTERY,
+                                    title = "$devName · $lvl%",
+                                    subtitle = "Bluetooth audio connected"
+                                ),
+                                autoShowCompact = true,
+                                autoDismissMs = 2000L
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -90,6 +112,8 @@ class BatteryMonitor(
             addAction(Intent.ACTION_BATTERY_CHANGED)
             addAction(Intent.ACTION_POWER_CONNECTED)
             addAction(Intent.ACTION_POWER_DISCONNECTED)
+            addAction("android.bluetooth.device.action.BATTERY_LEVEL_CHANGED")
+            addAction(android.bluetooth.BluetoothDevice.ACTION_ACL_CONNECTED)
         }
         val sticky = context.registerReceiver(receiver, filter)
         registered = true
@@ -195,7 +219,7 @@ class BatteryMonitor(
                         subtitle = "Unplug charger to preserve battery health"
                     ),
                     autoShowCompact = true,
-                    autoDismissMs = latestSettings.miniCapsuleDurationMs.coerceIn(2000L, 4000L),
+                    autoDismissMs = 2000L,
                     autoExpandToFull = cfg.autoExpand
                 )
             }
@@ -213,7 +237,7 @@ class BatteryMonitor(
                 subtitle = if (pct <= 15) "Connect charger soon" else "20% battery remaining"
             ),
             autoShowCompact = true,
-            autoDismissMs = latestSettings.miniCapsuleDurationMs.coerceIn(2000L, 4000L),
+            autoDismissMs = 2000L,
             autoExpandToFull = autoExpand
         )
     }
@@ -227,7 +251,7 @@ class BatteryMonitor(
     ) {
         val cfg = latestSettings.eventConfig(EventKind.CHARGING)
         if (!latestSettings.batteryEnabled || !cfg.enabled) return
-        val capsuleDuration = latestSettings.miniCapsuleDurationMs.coerceIn(2000L, 4000L)
+        val capsuleDuration = 2000L
         islandController.upsertActivity(
             IslandActivity.Charging(
                 levelPercent = pct,

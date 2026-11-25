@@ -95,6 +95,7 @@ import com.example.system.TimerStopwatchPanel
 import com.example.ui.theme.CrimsonCircularHaloIcon
 import com.example.ui.theme.CrimsonSquircleIcon
 import com.example.ui.theme.IslandColors
+import com.example.ui.theme.LocalAppBackdrop
 import com.example.ui.theme.MainDockTab
 import com.example.ui.theme.MotionTokens
 import com.example.ui.theme.ObsidianCrimsonBackground
@@ -214,7 +215,7 @@ fun HomeHubScreen(
                             reduceGlass = settings.reduceGlass,
                             solidFallback = settings.solidFallback,
                             accentColor = accentColor,
-                            backdrop = null
+                            backdrop = LocalAppBackdrop.current
                         )
                 ) {
                     Column(
@@ -277,7 +278,7 @@ fun HomeHubScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .weight(1f, fill = false)
-                                .heightIn(max = 78.dp)
+                                .heightIn(min = 150.dp, max = 188.dp)
                         ) {
                             AnimatedContent(
                                 targetState = islandState.activeTab,
@@ -631,6 +632,69 @@ fun HomeHubScreen(
                             modifier = Modifier.weight(1f)
                         )
                     }
+                }
+
+                // Live Diagnostics & Quick Pill Test Card
+                val overlayPermissionOk = Settings.canDrawOverlays(context)
+                val diag = islandState.diagnostics
+                val crossBlurSupported = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    runCatching {
+                        val wm = context.getSystemService(android.view.WindowManager::class.java)
+                        wm?.isCrossWindowBlurEnabled == true
+                    }.getOrDefault(false)
+                } else {
+                    false
+                }
+                ObsidianGlassCard(cornerRadius = 22.dp, contentPadding = PaddingValues(14.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Live Diagnostics", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                            Text(
+                                "Overlay: ${if (overlayPermissionOk) "OK" else "Off"} · Accessibility: ${if (isAccHosting) "Live" else if (isServiceRunning) "On" else "Off"}",
+                                color = IslandColors.TextSecondary,
+                                fontSize = 11.sp
+                            )
+                        }
+                        Button(
+                            onClick = {
+                                app.soundManager.playNotification()
+                                app.islandController.upsertActivity(
+                                    com.example.island.IslandActivity.NotificationPreview(
+                                        id = "test_diag_${System.currentTimeMillis()}",
+                                        packageName = context.packageName,
+                                        appName = "Dynamic Island",
+                                        title = "Preview Alert",
+                                        text = "Liquid glass capsule & cutout alignment check"
+                                    ),
+                                    autoShowCompact = true,
+                                    autoDismissMs = settings.alertsDwellMs
+                                )
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = accentColor),
+                            shape = CircleShape,
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            modifier = Modifier.height(36.dp).testTag("home_test_pill_btn")
+                        ) {
+                            Text("Test Pill", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Cross-Window Blur: ${if (crossBlurSupported) "Supported" else "Layer Fallback"} · Collisions: ${diag.deadZoneCollisionCount}",
+                        color = IslandColors.TextSecondary,
+                        fontSize = 11.sp
+                    )
+                    Text(
+                        "Last Notif: ${diag.lastNotificationApp} · Suppressed: ${diag.lastSuppressionReason}",
+                        color = IslandColors.TextTertiary,
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }

@@ -39,7 +39,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [36], qualifiers = "w412dp-h915dp-440dpi")
 class CameraDeadZoneTest {
 
     @get:Rule
@@ -183,7 +183,7 @@ class CameraDeadZoneTest {
             composeRule.runOnUiThread { activeCase.value = case }
             composeRule.waitForIdle()
             assertNoTextIntersectsExclusionZone(
-                root = composeRule.onRoot().fetchSemanticsNode(),
+                root = composeRule.onRoot(useUnmergedTree = true).fetchSemanticsNode(),
                 zone = case.third.second,
                 contextLabel = case.first
             )
@@ -271,7 +271,7 @@ class CameraDeadZoneTest {
             composeRule.runOnUiThread { activeRender.value = renderCase }
             composeRule.waitForIdle()
             assertNoTextIntersectsExclusionZone(
-                root = composeRule.onRoot().fetchSemanticsNode(),
+                root = composeRule.onRoot(useUnmergedTree = true).fetchSemanticsNode(),
                 zone = zone,
                 contextLabel = if (isExpanded) "ExpandedCard[holeW=$holeW]" else "MediumPill[holeW=$holeW]"
             )
@@ -279,17 +279,17 @@ class CameraDeadZoneTest {
     }
 
     @Test
-    fun `Alex compact expansion caps Medium max 320x120 and Full max 360x160 across all tabs`() {
+    fun `round 2 roomy expansion cards fit within 380x240 Medium and 380x340 Full with 12dp margins at 1080x2400`() {
         val app = composeRule.activity.application as DynamicIslandApp
         val densityVal = 2.75f
-        val screenWidthDp = 393f
+        val screenWidthDp = 1080f / densityVal // 392.73dp on Redmi Note 10 Pro (1080x2400)
         val zone = DeadZoneGeometry.fromSyntheticHole(
-            holeWidthDp = 26f,
-            holeHeightDp = 33f,
+            holeWidthDp = 27f,
+            holeHeightDp = 34f,
             screenWidthDp = screenWidthDp,
             density = densityVal
         )
-        val settings = IslandSettings(cutoutWidthDp = 26f, cutoutHeightDp = 33f)
+        val settings = IslandSettings(cutoutWidthDp = 27f, cutoutHeightDp = 34f)
 
         // Pair(isExpanded, Pair(tab, showMoreRow))
         val cases = mutableListOf<Pair<Boolean, Pair<IslandTab, Boolean>>>()
@@ -361,10 +361,50 @@ class CameraDeadZoneTest {
             val wDp = bounds.width / densityVal
             val hDp = bounds.height / densityVal
             assertTrue(
-                "Compact expansion cap violated for isExpanded=$isExpanded tab=$tab showMore=$showMore: ${wDp}dp x ${hDp}dp",
+                "Roomy expansion cap violated for isExpanded=$isExpanded tab=$tab showMore=$showMore: ${wDp}dp x ${hDp}dp",
                 DeadZoneGeometry.isCompactExpansionWithinCap(wDp, hDp, isExpanded = isExpanded)
             )
+            assertTrue(
+                "Expected >=12dp horizontal margins on 1080x2400 (max ${(screenWidthDp - 24f)}dp) but got ${wDp}dp",
+                wDp <= (screenWidthDp - 23.5f)
+            )
+            if (!isExpanded) {
+                assertTrue("Medium card height ${hDp}dp should be >= 170dp", hDp >= 169.5f)
+                assertTrue("Medium card width ${wDp}dp should be >= 340dp", wDp >= 339.5f)
+            }
         }
+    }
+
+    @Test
+    fun `idle camera-only pill tightly hugs camera cutout without wide bar and card anchor clears cutout`() {
+        val zone = DeadZoneGeometry.fromSyntheticHole(
+            holeWidthDp = 27f,
+            holeHeightDp = 34f,
+            screenWidthDp = 1080f / 2.75f,
+            density = 2.75f
+        )
+        val idleMetrics = DeadZoneGeometry.idleCameraPillMetrics(zone.holeWidthDp, zone.holeHeightDp)
+        assertTrue("Idle camera pill must be narrow (<60dp), got ${idleMetrics.widthDp}", idleMetrics.widthDp < 60f)
+        assertTrue("Card top anchor must clear camera bottom (${zone.cutoutRectDp.bottom}dp)", DeadZoneGeometry.cardTopAnchorDp(zone) > zone.cutoutRectDp.bottom)
+
+        composeRule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(2.75f, fontScale = 1f)) {
+                Box(modifier = Modifier.width(393.dp), contentAlignment = Alignment.TopCenter) {
+                    com.example.island.IdlePillView(
+                        settings = IslandSettings(whenIdleMode = com.example.system.WhenIdleMode.CAMERA_ONLY),
+                        exclusionZone = zone,
+                        accentColor = Color(0xFF0A84FF),
+                        isCalibrationPreview = false,
+                        isDragOverIsland = false,
+                        isLowBatteryWarning = false
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+        val idleBounds = composeRule.onNodeWithTag("idle_camera_ring").fetchSemanticsNode().boundsInRoot
+        val idleWidthDp = idleBounds.width / 2.75f
+        assertTrue("Rendered idle_camera_ring must be tight around camera (<70dp), got $idleWidthDp", idleWidthDp < 70f)
     }
 
     private fun assertNoTextIntersectsExclusionZone(

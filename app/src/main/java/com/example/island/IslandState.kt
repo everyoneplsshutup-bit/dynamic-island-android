@@ -1,7 +1,10 @@
 package com.example.island
 
+import android.app.PendingIntent
+import android.graphics.Bitmap
 import android.graphics.Rect
 import com.example.system.IslandTab
+import java.util.concurrent.ConcurrentHashMap
 
 enum class IslandMode {
     IDLE,
@@ -18,6 +21,7 @@ enum class AlertKind {
     VAULT_EXPIRING,
     ACCESSIBILITY_RECOVERED,
     OCR_COPIED,
+    EARBUDS_BATTERY,
     GENERAL
 }
 
@@ -26,6 +30,69 @@ enum class DwellPauseReason {
     EXPANDED,
     SCREEN_OFF
 }
+
+data class NotificationActionItem(
+    val index: Int,
+    val title: String,
+    val pendingIntent: PendingIntent? = null
+)
+
+object NotificationMediaCache {
+    private val pictureBitmaps = ConcurrentHashMap<String, Bitmap>()
+    private val contentIntents = ConcurrentHashMap<String, PendingIntent>()
+
+    fun putPicture(notifId: String, bitmap: Bitmap?) {
+        if (bitmap == null) {
+            pictureBitmaps.remove(notifId)
+        } else {
+            if (pictureBitmaps.size > 24) {
+                val oldest = pictureBitmaps.keys().nextElement()
+                pictureBitmaps.remove(oldest)
+            }
+            pictureBitmaps[notifId] = bitmap
+        }
+    }
+
+    fun getPicture(notifId: String): Bitmap? = pictureBitmaps[notifId]
+
+    fun putContentIntent(notifId: String, pi: PendingIntent?) {
+        if (pi == null) contentIntents.remove(notifId)
+        else {
+            if (contentIntents.size > 40) {
+                val oldest = contentIntents.keys().nextElement()
+                contentIntents.remove(oldest)
+            }
+            contentIntents[notifId] = pi
+        }
+    }
+
+    fun getContentIntent(notifId: String): PendingIntent? = contentIntents[notifId]
+
+    fun remove(notifId: String) {
+        pictureBitmaps.remove(notifId)
+        contentIntents.remove(notifId)
+    }
+
+    fun clear() {
+        pictureBitmaps.clear()
+        contentIntents.clear()
+    }
+}
+
+data class ApprovalPromptState(
+    val permissionKey: String,
+    val title: String,
+    val reason: String,
+    val actionLabel: String = "Allow"
+)
+
+data class DiagnosticsSnapshot(
+    val lastNotificationApp: String = "None yet",
+    val lastNotificationTitle: String = "",
+    val lastNotificationTimeMs: Long = 0L,
+    val lastSuppressionReason: String = "None",
+    val deadZoneCollisionCount: Int = 0
+)
 
 data class OcrTextToken(
     val text: String,
@@ -105,7 +172,9 @@ sealed interface IslandActivity {
         val packageName: String,
         val appName: String,
         val title: String,
-        val text: String
+        val text: String,
+        val hasPicture: Boolean = false,
+        val actions: List<NotificationActionItem> = emptyList()
     ) : IslandActivity
 
     data class Alert(
@@ -148,6 +217,11 @@ data class IslandState(
     val batteryLevelPercent: Int = 100,
     val isBatteryCharging: Boolean = false,
     val isLowBatteryWarning: Boolean = false,
+    val earbudsName: String? = null,
+    val earbudsBatteryPercent: Int? = null,
+    val currentForegroundPackage: String? = null,
+    val approvalPrompt: ApprovalPromptState? = null,
+    val diagnostics: DiagnosticsSnapshot = DiagnosticsSnapshot(),
     val dwellTargetActivityId: String? = null,
     val dwellTotalMs: Long = 0L,
     val dwellRemainingMs: Long = 0L,
@@ -169,4 +243,16 @@ data class IslandState(
 
     val companionCount: Int
         get() = (activityQueue.size - 1).coerceAtLeast(0)
+
+    val isReelAppForeground: Boolean
+        get() = currentForegroundPackage in REEL_PACKAGES
+
+    companion object {
+        val REEL_PACKAGES = setOf(
+            "com.instagram.android",
+            "com.zhiliaoapp.musically",
+            "com.ss.android.ugc.trill",
+            "com.google.android.youtube"
+        )
+    }
 }

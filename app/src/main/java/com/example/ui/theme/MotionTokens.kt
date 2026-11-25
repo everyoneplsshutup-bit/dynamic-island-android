@@ -53,6 +53,7 @@ object MotionTokens {
     const val CONTENT_ENTER_MS = 300
     const val CONTENT_ENTER_DELAY_MS = 300
     const val CONTENT_STAGGER_MS = 200
+    const val TILE_STAGGER_MS = 40
     const val COLLAPSE_MS = 240
     const val CONTENT_CROSSFADE_MS = 180
     const val TIMER_TICK_CROSSFADE_MS = 140
@@ -77,6 +78,27 @@ object MotionTokens {
         dampingRatio = PILL_MORPH_DAMPING,
         stiffness = PILL_MORPH_STIFFNESS
     )
+
+    fun <T> liquidOpenSpec(
+        style: AnimationStyle = AnimationStyle.FRUIT,
+        elasticity: Float = 0.65f,
+        durationScale: Float = 1.0f
+    ): SpringSpec<T> {
+        val scale = durationScale.coerceIn(0.5f, 1.8f)
+        val damping = if (style == AnimationStyle.SMOOTH || style == AnimationStyle.NONE) {
+            Spring.DampingRatioNoBouncy
+        } else {
+            (0.76f - elasticity * 0.14f).coerceIn(0.58f, 0.85f)
+        }
+        return spring(
+            dampingRatio = damping,
+            stiffness = 320f * scale
+        )
+    }
+
+    fun <T> swipeDismissSpec(style: AnimationStyle = AnimationStyle.SPRING): FiniteAnimationSpec<T> =
+        if (style == AnimationStyle.NONE) snap()
+        else spring(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 1250f)
 
     fun <T> spatialDefault(
         style: AnimationStyle = AnimationStyle.SPRING,
@@ -174,7 +196,8 @@ object MotionTokens {
         return when (openingEffect) {
             OpeningEffect.POP -> spatialFast(style, elasticity, durationScale)
             OpeningEffect.SMOOTH -> spatialDefault(AnimationStyle.SMOOTH, elasticity, durationScale)
-            OpeningEffect.LIQUID, OpeningEffect.SPRING -> spatialDefault(style, elasticity, durationScale)
+            OpeningEffect.LIQUID -> liquidOpenSpec(style, elasticity, durationScale)
+            OpeningEffect.SPRING -> spatialDefault(style, elasticity, durationScale)
         }
     }
 

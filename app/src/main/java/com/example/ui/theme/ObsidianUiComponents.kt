@@ -43,9 +43,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -81,12 +84,17 @@ fun ObsidianCrimsonBackground(
     showHorizonPlanet: Boolean = false,
     content: @Composable BoxScope.() -> Unit
 ) {
+    val appBackdrop = rememberLayerBackdrop()
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(IslandColors.ObsidianBg)
     ) {
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        Canvas(
+            modifier = Modifier
+                .fillMaxSize()
+                .layerBackdrop(appBackdrop)
+        ) {
             val w = size.width
             val h = size.height
 
@@ -256,7 +264,9 @@ fun ObsidianCrimsonBackground(
             }
         }
 
-        content()
+        CompositionLocalProvider(LocalAppBackdrop provides appBackdrop) {
+            content()
+        }
     }
 }
 

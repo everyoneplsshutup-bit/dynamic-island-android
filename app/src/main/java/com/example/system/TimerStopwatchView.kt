@@ -77,8 +77,9 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
- * Compact Timer, Stopwatch & Sleep Dial attached directly inside the Dynamic Island pill (<= 78 dp).
- * Timer tick updates ONLY the tabular numeral text with a 140 ms crossfade; container never re-animates.
+ * Roomy Timer, Stopwatch & Sleep Dial card for the Dynamic Island pill.
+ * Features clear Timer / Stopwatch / Sleep tabs, 32sp+ tabular digits,
+ * full Start pill, and 44dp+ touch targets.
  */
 @Composable
 fun TimerStopwatchPanel(
@@ -103,37 +104,37 @@ fun TimerStopwatchPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(max = 78.dp)
-            .padding(horizontal = 12.dp, vertical = 1.dp),
+            .padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(3.dp)
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(22.dp)
+                .height(34.dp)
                 .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.06f))
-                .padding(2.dp),
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
+                .background(Color.White.copy(alpha = 0.08f))
+                .border(0.75.dp, Color.White.copy(alpha = 0.14f), CircleShape)
+                .padding(3.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             listOf("Timer", "Stopwatch", "Sleep").forEachIndexed { idx, label ->
                 val selected = modeIndex == idx
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(18.dp)
+                        .height(28.dp)
                         .clip(CircleShape)
-                        .background(if (selected) crimsonAccent.copy(alpha = 0.28f) else Color.Transparent)
+                        .background(if (selected) crimsonAccent.copy(alpha = 0.34f) else Color.Transparent)
                         .clickable { onHaptic(); onTimerSetSound(); modeIndex = idx }
                         .testTag("timer_mode_${label.lowercase()}"),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = label,
-                        fontSize = 10.sp,
-                        fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                        color = if (selected) crimsonAccent else IslandColors.TextSecondary,
+                        fontSize = 12.sp,
+                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                        color = if (selected) Color.White else Color.White.copy(alpha = 0.72f),
                         maxLines = 1
                     )
                 }
@@ -194,9 +195,6 @@ fun TimerStopwatchPanel(
     }
 }
 
-/**
- * Interactive 24h circular Bedtime-to-Wake Sleep Dial compactly sized to 50 dp inside the pill.
- */
 @Composable
 private fun SleepDialView(
     accentColor: Color,
@@ -218,20 +216,20 @@ private fun SleepDialView(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(50.dp)
+            .height(92.dp)
             .testTag("sleep_dial_panel"),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Box(
             modifier = Modifier
-                .size(48.dp)
+                .size(84.dp)
                 .pointerInput(Unit) {
                     detectDragGestures(
                         onDragStart = { start ->
                             val cx = size.width / 2f
                             val cy = size.height / 2f
-                            val r = (minOf(size.width, size.height) / 2f) - 5.dp.toPx()
+                            val r = (minOf(size.width, size.height) / 2f) - 7.dp.toPx()
                             val bedRad = minutesToRad(bedtimeMin)
                             val wakeRad = minutesToRad(wakeMin)
                             val bedPos = Offset(cx + cos(bedRad).toFloat() * r, cy + sin(bedRad).toFloat() * r)
@@ -262,14 +260,14 @@ private fun SleepDialView(
                 },
             contentAlignment = Alignment.Center
         ) {
-            Canvas(modifier = Modifier.size(46.dp)) {
-                val strokeW = 5.dp.toPx()
-                val r = (size.minDimension - strokeW - 4.dp.toPx()) / 2f
+            Canvas(modifier = Modifier.size(80.dp)) {
+                val strokeW = 7.dp.toPx()
+                val r = (size.minDimension - strokeW - 6.dp.toPx()) / 2f
                 val cx = size.width / 2f
                 val cy = size.height / 2f
 
                 drawCircle(
-                    color = Color.White.copy(alpha = 0.09f),
+                    color = Color.White.copy(alpha = 0.12f),
                     radius = r,
                     style = Stroke(width = strokeW)
                 )
@@ -295,15 +293,15 @@ private fun SleepDialView(
                 val bedPos = Offset(cx + cos(bedRad).toFloat() * r, cy + sin(bedRad).toFloat() * r)
                 val wakePos = Offset(cx + cos(wakeRad).toFloat() * r, cy + sin(wakeRad).toFloat() * r)
 
-                drawCircle(color = IslandColors.AccentPurple, radius = 3.5.dp.toPx(), center = bedPos)
-                drawCircle(color = accentColor, radius = 3.5.dp.toPx(), center = wakePos)
+                drawCircle(color = IslandColors.AccentPurple, radius = 5.dp.toPx(), center = bedPos)
+                drawCircle(color = accentColor, radius = 5.dp.toPx(), center = wakePos)
             }
 
             Text(
                 text = "${sleepHours}h${sleepRemMin}m",
                 style = TextStyle(
-                    color = IslandColors.TextPrimary,
-                    fontSize = 9.sp,
+                    color = Color.White,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                     fontFeatureSettings = "tnum"
                 ),
@@ -313,27 +311,28 @@ private fun SleepDialView(
 
         Column(
             modifier = Modifier.weight(1f),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
+            verticalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                Icon(Icons.Filled.Bedtime, contentDescription = null, tint = IslandColors.AccentPurple, modifier = Modifier.size(11.dp))
+                Icon(Icons.Filled.Bedtime, contentDescription = null, tint = IslandColors.AccentPurple, modifier = Modifier.size(16.dp))
                 Text(
                     text = "${formatClockMinutes(bedtimeMin)} → ${formatClockMinutes(wakeMin)}",
                     style = TextStyle(
-                        color = IslandColors.TextPrimary,
-                        fontSize = 11.sp,
+                        color = Color.White,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.SemiBold,
                         fontFeatureSettings = "tnum"
-                    )
+                    ),
+                    maxLines = 1
                 )
             }
             Text(
                 text = "Drag dial · ${sleepHours}h ${sleepRemMin}m sleep",
-                color = IslandColors.TextSecondary,
-                fontSize = 10.sp,
+                color = Color.White.copy(alpha = 0.72f),
+                fontSize = 12.sp,
                 maxLines = 1
             )
         }
@@ -343,12 +342,12 @@ private fun SleepDialView(
             enabled = sleepMinutes > 0,
             colors = ButtonDefaults.buttonColors(containerColor = IslandColors.AccentPurple, contentColor = Color.White),
             shape = CircleShape,
-            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 2.dp),
+            contentPadding = PaddingValues(horizontal = 18.dp, vertical = 8.dp),
             modifier = Modifier
-                .height(34.dp)
+                .height(44.dp)
                 .testTag("sleep_start_button")
         ) {
-            Text("Start", fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Text("Start", fontSize = 14.sp, fontWeight = FontWeight.Bold)
         }
     }
 }
@@ -386,95 +385,105 @@ private fun ActiveTimerRingView(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(50.dp),
+            .height(92.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceEvenly
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        // Left: Crimson circular progress ring with centered bold tabular countdown (Mockup 4)
-        Box(
-            modifier = Modifier
-                .size(48.dp)
-                .graphicsLayer {
-                    scaleX = urgentPulseState.value
-                    scaleY = urgentPulseState.value
-                },
-            contentAlignment = Alignment.Center
-        ) {
-            Canvas(modifier = Modifier.size(46.dp)) {
-                val strokeW = 3.5.dp.toPx()
-                val stroke = Stroke(width = strokeW, cap = StrokeCap.Round)
-                drawArc(
-                    color = Color.White.copy(alpha = 0.12f),
-                    startAngle = -90f,
-                    sweepAngle = 360f,
-                    useCenter = false,
-                    style = stroke
-                )
-                val sweep = 360f * progress
-                drawArc(
-                    color = ringColor,
-                    startAngle = -90f,
-                    sweepAngle = sweep,
-                    useCenter = false,
-                    style = stroke
-                )
-            }
-            AnimatedContent(
-                targetState = formattedText,
-                transitionSpec = {
-                    fadeIn(tween(MotionTokens.TIMER_TICK_CROSSFADE_MS)) togetherWith
-                        fadeOut(tween(MotionTokens.TIMER_TICK_CROSSFADE_MS))
-                },
-                label = "timer_tick_crossfade"
-            ) { textVal ->
-                Text(
-                    text = textVal,
-                    style = TextStyle(
-                        color = if (isUrgent) IslandColors.AccentRed else IslandColors.TextPrimary,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFeatureSettings = "tnum"
-                    ),
-                    maxLines = 1,
-                    modifier = Modifier.testTag("timer_remaining_text")
-                )
-            }
-        }
-
-        if (state.mirroredClockLabel != null && state.mirroredRemainingMs != null) {
-            Text(
-                text = "${state.mirroredClockLabel} ${TimerEngine.formatDuration(state.mirroredRemainingMs)}",
-                color = ringColor,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Medium,
-                maxLines = 1
-            )
-        }
-
-        // Subtle vertical separator matching Mockup 4
-        Box(
-            modifier = Modifier
-                .width(1.dp)
-                .height(32.dp)
-                .background(Color.White.copy(alpha = 0.14f))
-        )
-
-        // Right: Glowing Crimson Play/Pause + Obsidian Cancel/Reset circles
         Row(
+            verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.weight(1f)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(56.dp)
+                    .graphicsLayer {
+                        scaleX = urgentPulseState.value
+                        scaleY = urgentPulseState.value
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Canvas(modifier = Modifier.size(52.dp)) {
+                    val strokeW = 4.5.dp.toPx()
+                    val stroke = Stroke(width = strokeW, cap = StrokeCap.Round)
+                    drawArc(
+                        color = Color.White.copy(alpha = 0.14f),
+                        startAngle = -90f,
+                        sweepAngle = 360f,
+                        useCenter = false,
+                        style = stroke
+                    )
+                    drawArc(
+                        color = ringColor,
+                        startAngle = -90f,
+                        sweepAngle = 360f * progress,
+                        useCenter = false,
+                        style = stroke
+                    )
+                }
+                Text(
+                    text = "${(progress * 100).roundToInt()}%",
+                    color = Color.White.copy(alpha = 0.78f),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                AnimatedContent(
+                    targetState = formattedText,
+                    transitionSpec = {
+                        fadeIn(tween(MotionTokens.TIMER_TICK_CROSSFADE_MS)) togetherWith
+                            fadeOut(tween(MotionTokens.TIMER_TICK_CROSSFADE_MS))
+                    },
+                    label = "timer_tick_crossfade"
+                ) { textVal ->
+                    Text(
+                        text = textVal,
+                        style = TextStyle(
+                            color = if (isUrgent) IslandColors.AccentRed else Color.White,
+                            fontSize = 34.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFeatureSettings = "tnum"
+                        ),
+                        maxLines = 1,
+                        modifier = Modifier.testTag("timer_remaining_text")
+                    )
+                }
+                if (state.mirroredClockLabel != null && state.mirroredRemainingMs != null) {
+                    Text(
+                        text = "${state.mirroredClockLabel} ${TimerEngine.formatDuration(state.mirroredRemainingMs)}",
+                        color = ringColor,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1
+                    )
+                } else {
+                    Text(
+                        text = if (state.isRunning) state.label.ifBlank { "Counting down" } else "Paused",
+                        color = Color.White.copy(alpha = 0.70f),
+                        fontSize = 12.sp,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
                     .minimumInteractiveComponentSize()
-                    .size(38.dp)
+                    .size(46.dp)
                     .clip(CircleShape)
                     .background(
                         Brush.radialGradient(
-                            colors = listOf(ringColor, ringColor.copy(alpha = 0.72f))
+                            colors = listOf(ringColor, ringColor.copy(alpha = 0.74f))
                         )
                     )
-                    .border(1.dp, Color.White.copy(alpha = 0.45f), CircleShape)
+                    .border(1.2.dp, Color.White.copy(alpha = 0.50f), CircleShape)
                     .clickable(onClick = if (state.isRunning) onPause else onResume)
                     .testTag("timer_pause_resume_button"),
                 contentAlignment = Alignment.Center
@@ -483,22 +492,22 @@ private fun ActiveTimerRingView(
                     imageVector = if (state.isRunning) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                     contentDescription = if (state.isRunning) "Pause timer" else "Resume timer",
                     tint = Color.White,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
 
             Box(
                 modifier = Modifier
                     .minimumInteractiveComponentSize()
-                    .size(36.dp)
+                    .size(44.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.10f))
-                    .border(0.9.dp, Color.White.copy(alpha = 0.24f), CircleShape)
+                    .background(Color.White.copy(alpha = 0.12f))
+                    .border(1.dp, Color.White.copy(alpha = 0.26f), CircleShape)
                     .clickable(onClick = onCancel)
                     .testTag("timer_cancel_button"),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(Icons.Filled.Refresh, contentDescription = "Cancel timer", tint = Color.White, modifier = Modifier.size(17.dp))
+                Icon(Icons.Filled.Refresh, contentDescription = "Cancel timer", tint = Color.White, modifier = Modifier.size(20.dp))
             }
         }
     }
@@ -514,16 +523,17 @@ private fun WheelTimerPickerView(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(50.dp),
+            .height(92.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         Row(
             modifier = Modifier
                 .weight(1f)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color.White.copy(alpha = 0.05f))
-                .padding(horizontal = 4.dp),
+                .clip(RoundedCornerShape(16.dp))
+                .background(Color.White.copy(alpha = 0.07f))
+                .border(0.75.dp, Color.White.copy(alpha = 0.12f), RoundedCornerShape(16.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -561,12 +571,12 @@ private fun WheelTimerPickerView(
                 contentColor = Color.White
             ),
             shape = CircleShape,
-            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
             modifier = Modifier
-                .height(36.dp)
+                .height(46.dp)
                 .testTag("timer_start_button")
         ) {
-            Text("Start", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Text("Start", fontWeight = FontWeight.Bold, fontSize = 14.sp)
         }
     }
 }
@@ -582,14 +592,14 @@ private fun NumberWheelColumn(
     onSelected: (Int) -> Unit
 ) {
     val values = remember(range) { range.toList() }
-    val itemHeight = 16.dp
+    val itemHeight = 26.dp
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = selected.coerceIn(0, values.lastIndex))
     val flingBehavior = rememberSnapFlingBehavior(lazyListState = listState)
 
     val centerIndex by remember {
         derivedStateOf {
             val offset = listState.firstVisibleItemScrollOffset
-            val idx = listState.firstVisibleItemIndex + if (offset > 16) 1 else 0
+            val idx = listState.firstVisibleItemIndex + if (offset > 22) 1 else 0
             idx.coerceIn(0, values.lastIndex)
         }
     }
@@ -602,7 +612,7 @@ private fun NumberWheelColumn(
     Row(verticalAlignment = Alignment.CenterVertically) {
         Box(
             modifier = Modifier
-                .width(34.dp)
+                .width(42.dp)
                 .height(itemHeight * 3)
                 .testTag(testTag),
             contentAlignment = Alignment.Center
@@ -611,8 +621,8 @@ private fun NumberWheelColumn(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(itemHeight)
-                    .clip(RoundedCornerShape(4.dp))
-                    .background(Color.White.copy(alpha = 0.08f))
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.White.copy(alpha = 0.10f))
             )
 
             LazyColumn(
@@ -634,16 +644,16 @@ private fun NumberWheelColumn(
                     ) {
                         Text(
                             text = String.format("%02d", num),
-                            fontSize = if (isCenter) 13.sp else 9.sp,
-                            fontWeight = if (isCenter) FontWeight.SemiBold else FontWeight.Normal,
-                            color = if (isCenter) accentColor else IslandColors.TextSecondary.copy(alpha = 0.50f)
+                            fontSize = if (isCenter) 20.sp else 12.sp,
+                            fontWeight = if (isCenter) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isCenter) accentColor else Color.White.copy(alpha = 0.50f)
                         )
                     }
                 }
             }
         }
-        Spacer(Modifier.width(1.dp))
-        Text(label, fontSize = 9.sp, color = IslandColors.TextSecondary)
+        Spacer(Modifier.width(3.dp))
+        Text(label, fontSize = 12.sp, color = Color.White.copy(alpha = 0.72f), fontWeight = FontWeight.Medium)
     }
 }
 
@@ -659,40 +669,43 @@ private fun StopwatchView(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(50.dp),
+            .height(92.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.weight(1f)) {
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
             Text(
                 text = TimerEngine.formatStopwatch(state.stopwatchElapsedMs),
                 style = TextStyle(
-                    color = IslandColors.TextPrimary,
-                    fontSize = 22.sp,
+                    color = Color.White,
+                    fontSize = 34.sp,
                     fontWeight = FontWeight.Light,
                     fontFeatureSettings = "tnum"
                 ),
+                maxLines = 1,
                 modifier = Modifier.testTag("stopwatch_display")
             )
-            if (state.laps.isNotEmpty()) {
-                Text(
-                    text = "Lap ${state.laps.size} · ${TimerEngine.formatStopwatch(state.laps.first())}",
-                    style = TextStyle(color = IslandColors.TextSecondary, fontSize = 10.sp, fontFeatureSettings = "tnum")
-                )
-            }
+            Text(
+                text = if (state.laps.isNotEmpty()) {
+                    "Lap ${state.laps.size} · ${TimerEngine.formatStopwatch(state.laps.first())}"
+                } else {
+                    if (state.isStopwatchRunning) "Running" else "Tap Start to time"
+                },
+                style = TextStyle(color = Color.White.copy(alpha = 0.72f), fontSize = 12.sp, fontFeatureSettings = "tnum")
+            )
         }
 
         Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
                     .minimumInteractiveComponentSize()
-                    .size(34.dp)
+                    .size(44.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.10f))
-                    .border(0.9.dp, Color.White.copy(alpha = 0.24f), CircleShape)
+                    .background(Color.White.copy(alpha = 0.12f))
+                    .border(1.dp, Color.White.copy(alpha = 0.26f), CircleShape)
                     .clickable(onClick = if (state.isStopwatchRunning) onLap else onReset)
                     .testTag("stopwatch_lap_reset_button"),
                 contentAlignment = Alignment.Center
@@ -700,22 +713,22 @@ private fun StopwatchView(
                 Icon(
                     imageVector = if (state.isStopwatchRunning) Icons.Filled.Flag else Icons.Filled.Refresh,
                     contentDescription = if (state.isStopwatchRunning) "Lap" else "Reset",
-                    tint = IslandColors.TextPrimary,
-                    modifier = Modifier.size(16.dp)
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
                 )
             }
 
             Box(
                 modifier = Modifier
                     .minimumInteractiveComponentSize()
-                    .size(38.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
                     .background(
                         Brush.radialGradient(
-                            colors = listOf(accentColor, accentColor.copy(alpha = 0.72f))
+                            colors = listOf(accentColor, accentColor.copy(alpha = 0.76f))
                         )
                     )
-                    .border(1.dp, Color.White.copy(alpha = 0.45f), CircleShape)
+                    .border(1.2.dp, Color.White.copy(alpha = 0.50f), CircleShape)
                     .clickable(onClick = if (state.isStopwatchRunning) onPause else onStart)
                     .testTag("stopwatch_start_pause_button"),
                 contentAlignment = Alignment.Center
@@ -724,7 +737,7 @@ private fun StopwatchView(
                     imageVector = if (state.isStopwatchRunning) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                     contentDescription = if (state.isStopwatchRunning) "Pause stopwatch" else "Start stopwatch",
                     tint = Color.White,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
         }

@@ -50,6 +50,12 @@ data class DpRect(
     val centerY: Float get() = (top + bottom) / 2f
 }
 
+data class IdleCameraPillMetrics(
+    val widthDp: Float,
+    val heightDp: Float,
+    val cornerRadiusDp: Float
+)
+
 data class CompactSlotMetrics(
     val leftSlotDp: Float,
     val centerSpacerDp: Float,
@@ -60,29 +66,61 @@ data class CompactSlotMetrics(
     val pillHeightDp: Float,
     val isVerticalLandscape: Boolean
 ) {
-    val musicTitleMaxDp: Float get() = (rightSlotDp - innerSafetyInsetDp - 20f).coerceAtLeast(48f) // 66 dp at 88 dp slot
-    val notificationAppNameMaxDp: Float get() = (rightSlotDp - innerSafetyInsetDp - 6f).coerceAtLeast(56f) // 80 dp at 88 dp slot
+    val musicTitleMaxDp: Float get() = (rightSlotDp - innerSafetyInsetDp - 20f).coerceAtLeast(48f)
+    val notificationAppNameMaxDp: Float get() = (rightSlotDp - innerSafetyInsetDp - 6f).coerceAtLeast(56f)
 }
 
 object DeadZoneGeometry {
 
     const val REQUIRED_MARGIN_DP = 8f
-    const val DEFAULT_SLOT_WIDTH_DP = 88f
+    const val DEFAULT_SLOT_WIDTH_DP = 80f
     const val OUTER_PAD_DP = 10f
     const val INNER_SAFETY_INSET_DP = 2f
     const val COMPACT_PILL_MIN_HEIGHT_DP = 37f
     const val LANDSCAPE_SLOT_HEIGHT_DP = 44f
+    const val SCREEN_EDGE_MARGIN_DP = 12f
 
-    // Alex Hard Rule — Compact Expansion Limits
-    const val MEDIUM_MAX_WIDTH_DP = 320f
-    const val MEDIUM_MAX_HEIGHT_DP = 120f
-    const val FULL_MAX_WIDTH_DP = 360f
-    const val FULL_MAX_HEIGHT_DP = 160f
+    // Round 2 Roomy Card Bounds (fit inside screen width with >=12dp margin, top card, never squeezed)
+    const val MEDIUM_MIN_WIDTH_DP = 340f
+    const val MEDIUM_MIN_HEIGHT_DP = 170f
+    const val MEDIUM_MAX_WIDTH_DP = 380f
+    const val MEDIUM_MAX_HEIGHT_DP = 240f
+    const val FULL_MAX_WIDTH_DP = 380f
+    const val FULL_MAX_HEIGHT_DP = 340f
 
     fun isCompactExpansionWithinCap(widthDp: Float, heightDp: Float, isExpanded: Boolean): Boolean {
         val maxW = if (isExpanded) FULL_MAX_WIDTH_DP else MEDIUM_MAX_WIDTH_DP
         val maxH = if (isExpanded) FULL_MAX_HEIGHT_DP else MEDIUM_MAX_HEIGHT_DP
         return widthDp <= maxW + 0.5f && heightDp <= maxH + 0.5f
+    }
+
+    /**
+     * Idle camera-only pill tightly hugs the front camera punch-hole with subtle black framing.
+     * Never stretches into a wide full-top line while idle.
+     */
+    fun idleCameraPillMetrics(holeWidthDp: Float, holeHeightDp: Float): IdleCameraPillMetrics {
+        val w = (holeWidthDp.coerceAtLeast(18f) + 14f).coerceIn(36f, 96f)
+        val h = (holeHeightDp.coerceAtLeast(18f) + 4f).coerceIn(34f, 44f)
+        return IdleCameraPillMetrics(
+            widthDp = w,
+            heightDp = h,
+            cornerRadiusDp = h / 2f
+        )
+    }
+
+    /**
+     * Top Y clearance so MEDIUM / EXPANDED cards sit cleanly below Android's status bar & camera cutout,
+     * keeping the status clock (left), battery/Wi-Fi (right), and camera hole 100% uncovered.
+     */
+    fun cardTopAnchorDp(zone: ExclusionZone): Float {
+        if (zone.isLandscape) return 10f
+        return (zone.cutoutRectDp.bottom + 6f).coerceIn(36f, 56f)
+    }
+
+    fun boundedCardWidthDp(screenWidthPx: Int, density: Float, desiredMaxDp: Float): Float {
+        val screenWidthDp = (screenWidthPx / density.coerceAtLeast(1f)).coerceAtLeast(320f)
+        val maxAllowed = (screenWidthDp - SCREEN_EDGE_MARGIN_DP * 2f).coerceAtLeast(300f)
+        return desiredMaxDp.coerceAtMost(maxAllowed)
     }
 
     /**
@@ -100,7 +138,6 @@ object DeadZoneGeometry {
         if (leftSlotDp <= 0f || rightSlotDp <= 0f || holeWidthDp <= 0f) return false
         if (abs(leftSlotDp - rightSlotDp) > 0.5f) return false
         val requiredSpacer = holeWidthDp + expansionDp * 2f
-        // Check symmetric outer/spacer geometry: content starts outside [holeCenter +/- (holeW/2 + expansionDp)]
         val leftSlotInnerEdgeFromCenter = -(requiredSpacer / 2f)
         val rightSlotInnerEdgeFromCenter = +(requiredSpacer / 2f)
         val holeLeftFromCenter = -holeWidthDp / 2f
@@ -119,7 +156,7 @@ object DeadZoneGeometry {
         val safeHoleW = holeWidthDp.coerceAtLeast(14f)
         val safeHoleH = holeHeightDp.coerceAtLeast(14f)
         return if (!isLandscape) {
-            val slot = slotWidthDp.coerceIn(64f, 120f)
+            val slot = slotWidthDp.coerceIn(64f, 108f)
             val spacer = safeHoleW + REQUIRED_MARGIN_DP * 2f
             val totalW = slot + spacer + slot + OUTER_PAD_DP * 2f
             val pillH = (safeHoleH + 4f).coerceAtLeast(COMPACT_PILL_MIN_HEIGHT_DP)

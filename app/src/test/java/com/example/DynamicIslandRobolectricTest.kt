@@ -58,7 +58,7 @@ import org.robolectric.Shadows
 import org.robolectric.annotation.Config
 
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [36])
+@Config(sdk = [36], qualifiers = "w412dp-h915dp-440dpi")
 class DynamicIslandRobolectricTest {
 
     @get:Rule
@@ -819,5 +819,43 @@ class DynamicIslandRobolectricTest {
         assertEquals(com.example.system.PillStyle.APPLE_GLASS, saved.pillStyle)
         assertEquals(com.example.system.PillSizePreset.LARGE, saved.pillSizePreset)
         repo.resetSettings()
+    }
+
+    @Test
+    fun `round 2 defaults, shelf main dock, reels overlay, diagnostics, and approval prompt behave cleanly`() {
+        val defaults = IslandSettings()
+        assertEquals(2000L, defaults.alertsDwellMs)
+        assertEquals(com.example.system.PillStyle.LIQUID_GLASS, defaults.pillStyle)
+        assertTrue(defaults.reelOverlayEnabled)
+        assertTrue(defaults.swipeUpDismissEnabled)
+        assertTrue(defaults.hideNotifInForegroundApp)
+        assertTrue(IslandTab.VAULT.isMainRow)
+        assertTrue(defaults.enabledTabs.take(5).contains(IslandTab.VAULT))
+
+        val controller = IslandController()
+        controller.selectTab(IslandTab.VAULT)
+        assertFalse(controller.state.value.isMoreRowOpen)
+
+        controller.setForegroundPackage("com.instagram.android")
+        assertTrue(controller.state.value.isReelAppForeground)
+        controller.setForegroundPackage("com.example")
+        assertFalse(controller.state.value.isReelAppForeground)
+
+        controller.recordNotificationDiagnostic("WhatsApp", "Ping", 1234L, suppressionReason = "ForegroundApp")
+        controller.recordDeadZoneCollision()
+        assertEquals("WhatsApp", controller.state.value.diagnostics.lastNotificationApp)
+        assertEquals("ForegroundApp", controller.state.value.diagnostics.lastSuppressionReason)
+        assertEquals(1, controller.state.value.diagnostics.deadZoneCollisionCount)
+
+        controller.showApprovalPrompt(
+            com.example.island.ApprovalPromptState(
+                permissionKey = "overlay",
+                title = "Enable Overlay",
+                reason = "Required to draw above apps"
+            )
+        )
+        assertNotNull(controller.state.value.approvalPrompt)
+        controller.dismissApprovalPrompt()
+        assertNull(controller.state.value.approvalPrompt)
     }
 }

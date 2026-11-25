@@ -136,6 +136,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -264,28 +265,28 @@ fun SearchIslandPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(max = 78.dp)
-            .padding(horizontal = 12.dp, vertical = 1.dp)
+            .heightIn(min = 160.dp, max = 232.dp)
+            .padding(horizontal = 16.dp, vertical = 4.dp)
     ) {
-        // Slim 24dp Liquid Glass search pill (with inline math copy badge) so pinned section + list always fit cleanly
+        // Roomy Liquid Glass search bar
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(24.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color.White.copy(alpha = 0.09f))
+                .height(40.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color.White.copy(alpha = 0.10f))
                 .border(
-                    width = 0.8.dp,
+                    width = 0.9.dp,
                     brush = Brush.horizontalGradient(
-                        colors = listOf(Color.White.copy(alpha = 0.30f), accentColor.copy(alpha = 0.52f))
+                        colors = listOf(Color.White.copy(alpha = 0.34f), accentColor.copy(alpha = 0.56f))
                     ),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(20.dp)
                 )
-                .padding(horizontal = 8.dp)
+                .padding(horizontal = 12.dp)
         ) {
-            Icon(Icons.Filled.Search, contentDescription = "Search", tint = accentColor, modifier = Modifier.size(13.dp))
-            Spacer(Modifier.width(5.dp))
+            Icon(Icons.Filled.Search, contentDescription = "Search", tint = accentColor, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.width(8.dp))
             Box(
                 contentAlignment = Alignment.CenterStart,
                 modifier = Modifier.weight(1f)
@@ -294,7 +295,7 @@ fun SearchIslandPanel(
                     Text(
                         text = "Search apps, math, notes...",
                         color = IslandColors.TextTertiary,
-                        fontSize = 10.sp,
+                        fontSize = 13.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -303,7 +304,7 @@ fun SearchIslandPanel(
                     value = query,
                     onValueChange = { query = it },
                     singleLine = true,
-                    textStyle = TextStyle(color = IslandColors.TextPrimary, fontSize = 11.sp),
+                    textStyle = TextStyle(color = IslandColors.TextPrimary, fontSize = 13.sp),
                     cursorBrush = SolidColor(accentColor),
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
                     keyboardActions = KeyboardActions(onSearch = {
@@ -327,51 +328,55 @@ fun SearchIslandPanel(
                             app.clipboardMonitor.copyToClipboard(results.inlineMathResult!!)
                             app.islandController.showTransientBanner("Copied ${results.inlineMathResult}")
                         }
-                        .padding(horizontal = 6.dp, vertical = 1.dp)
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
-                    Text("= ${results.inlineMathResult}", color = accentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("= ${results.inlineMathResult}", color = accentColor, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(6.dp))
             }
             if (query.isNotEmpty()) {
-                Icon(
-                    imageVector = Icons.Filled.Close,
-                    contentDescription = "Clear search",
-                    tint = IslandColors.TextSecondary,
+                Box(
+                    contentAlignment = Alignment.Center,
                     modifier = Modifier
-                        .size(14.dp)
+                        .size(28.dp)
+                        .clip(CircleShape)
                         .clickable { query = "" }
-                )
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Close,
+                        contentDescription = "Clear search",
+                        tint = IslandColors.TextSecondary,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
         }
 
         if (pinnedApps.isNotEmpty()) {
-            Spacer(Modifier.height(2.dp))
+            Spacer(Modifier.height(6.dp))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(22.dp)
+                    .height(30.dp)
                     .horizontalScroll(rememberScrollState())
                     .testTag("search_pinned_section")
             ) {
                 Text(
-                    text = "Pinned · ${pinnedApps.size}",
-                    color = IslandColors.TextPrimary.copy(alpha = 0.88f),
-                    fontSize = 8.sp,
-                    lineHeight = 10.sp,
+                    text = "Pinned (${pinnedApps.size})",
+                    color = IslandColors.TextSecondary,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 0.4.sp,
                     modifier = Modifier.padding(start = 2.dp)
                 )
                 pinnedApps.forEach { pinned ->
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .height(20.dp)
+                            .height(28.dp)
                             .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.11f))
+                            .background(Color.White.copy(alpha = 0.12f))
                             .border(0.75.dp, accentColor.copy(alpha = 0.55f), CircleShape)
                             .combinedClickable(
                                 onClick = {
@@ -385,58 +390,40 @@ fun SearchIslandPanel(
                                     onCollapse()
                                 }
                             )
-                            .padding(horizontal = 5.dp)
+                            .padding(horizontal = 8.dp)
                             .testTag("search_pinned_chip_${pinned.packageName}")
                     ) {
-                        Box(modifier = Modifier.size(15.dp), contentAlignment = Alignment.Center) {
-                            val bmp = pinned.iconBitmap
-                            if (bmp != null) {
-                                Image(
-                                    bitmap = bmp,
-                                    contentDescription = pinned.label,
-                                    modifier = Modifier.size(13.dp).clip(RoundedCornerShape(4.dp))
-                                )
-                            } else {
-                                Box(
-                                    modifier = Modifier
-                                        .size(13.dp)
-                                        .clip(RoundedCornerShape(4.dp))
-                                        .background(Color.White.copy(alpha = 0.14f))
-                                )
-                            }
+                        val bmp = pinned.iconBitmap
+                        if (bmp != null) {
+                            Image(
+                                bitmap = bmp,
+                                contentDescription = pinned.label,
+                                modifier = Modifier.size(16.dp).clip(RoundedCornerShape(4.dp))
+                            )
+                        } else {
                             Box(
                                 modifier = Modifier
-                                    .align(Alignment.TopEnd)
-                                    .size(7.dp)
-                                    .clip(CircleShape)
-                                    .background(accentColor),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.PushPin,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(5.dp)
-                                )
-                            }
+                                    .size(16.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(Color.White.copy(alpha = 0.16f))
+                            )
                         }
-                        Spacer(Modifier.width(4.dp))
+                        Spacer(Modifier.width(5.dp))
                         Text(
                             text = pinned.label,
                             color = IslandColors.TextPrimary,
-                            fontSize = 10.sp,
-                            lineHeight = 11.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Spacer(Modifier.width(3.dp))
+                        Spacer(Modifier.width(5.dp))
                         Icon(
                             imageVector = Icons.Filled.Close,
                             contentDescription = "Unpin ${pinned.label}",
                             tint = IslandColors.TextSecondary,
                             modifier = Modifier
-                                .size(10.dp)
+                                .size(14.dp)
                                 .clickable { togglePin(pinned.packageName) }
                         )
                     }
@@ -444,7 +431,7 @@ fun SearchIslandPanel(
             }
         }
 
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(6.dp))
 
         Box(
             modifier = Modifier
@@ -453,9 +440,10 @@ fun SearchIslandPanel(
         ) {
             LazyColumn(
                 state = listState,
+                verticalArrangement = Arrangement.spacedBy(2.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(end = if (!isTyping && availableLetters.size > 1) 20.dp else 0.dp)
+                    .padding(end = if (!isTyping && availableLetters.size > 1) 30.dp else 0.dp)
                     .testTag("search_app_opener_list")
             ) {
                 if (isTyping) {
@@ -463,20 +451,21 @@ fun SearchIslandPanel(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color.White.copy(alpha = 0.07f))
+                                .heightIn(min = 42.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.08f))
                                 .clickable {
                                     app.soundManager.playSearchOpen()
                                     app.searchEngine.launchWebSearch(query, preferFloating = false)
                                     onCollapse()
                                 }
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
                                 .testTag("search_google_row"),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Google Search", tint = accentColor, modifier = Modifier.size(13.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Google \"$query\"", color = IslandColors.TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Google Search", tint = accentColor, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text("Google \"$query\"", color = IslandColors.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
@@ -486,8 +475,8 @@ fun SearchIslandPanel(
                         Text(
                             text = "No matches for \"$query\"",
                             color = IslandColors.TextSecondary,
-                            fontSize = 11.sp,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                            fontSize = 13.sp,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 8.dp)
                         )
                     }
                 }
@@ -506,11 +495,11 @@ fun SearchIslandPanel(
                             Text(
                                 text = row.letter.toString(),
                                 color = accentColor,
-                                fontSize = 9.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .padding(horizontal = 4.dp, vertical = 1.dp)
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
                         is SearchListRow.AppItem -> {
@@ -520,7 +509,8 @@ fun SearchIslandPanel(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .heightIn(min = 44.dp)
+                                    .clip(RoundedCornerShape(10.dp))
                                     .combinedClickable(
                                         onClick = {
                                             app.soundManager.playTap()
@@ -534,20 +524,20 @@ fun SearchIslandPanel(
                                             onCollapse()
                                         }
                                     )
-                                    .padding(horizontal = 4.dp, vertical = 2.dp)
+                                    .padding(horizontal = 6.dp, vertical = 4.dp)
                                     .testTag("search_app_row_${launchApp.packageName}")
                             ) {
                                 val bmp = launchApp.iconBitmap
                                 if (bmp != null) {
-                                    Image(bitmap = bmp, contentDescription = launchApp.label, modifier = Modifier.size(20.dp).clip(CircleShape))
+                                    Image(bitmap = bmp, contentDescription = launchApp.label, modifier = Modifier.size(28.dp).clip(CircleShape))
                                 } else {
-                                    Box(Modifier.size(20.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.14f)))
+                                    Box(Modifier.size(28.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.14f)))
                                 }
-                                Spacer(Modifier.width(7.dp))
+                                Spacer(Modifier.width(10.dp))
                                 Text(
                                     text = launchApp.label,
                                     color = IslandColors.TextPrimary,
-                                    fontSize = 11.sp,
+                                    fontSize = 14.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f)
@@ -555,7 +545,7 @@ fun SearchIslandPanel(
                                 Box(
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier
-                                        .size(24.dp)
+                                        .size(34.dp)
                                         .clip(CircleShape)
                                         .clickable { togglePin(launchApp.packageName) }
                                         .testTag("search_pin_${launchApp.packageName}")
@@ -563,59 +553,68 @@ fun SearchIslandPanel(
                                     Icon(
                                         imageVector = if (isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
                                         contentDescription = if (isPinned) "Unpin ${launchApp.label}" else "Pin ${launchApp.label}",
-                                        tint = if (isPinned) accentColor else IslandColors.TextSecondary.copy(alpha = 0.7f),
-                                        modifier = Modifier.size(13.dp)
+                                        tint = if (isPinned) accentColor else IslandColors.TextSecondary.copy(alpha = 0.78f),
+                                        modifier = Modifier.size(16.dp)
                                     )
                                 }
-                                Icon(
-                                    imageVector = Icons.Filled.OpenInNew,
-                                    contentDescription = "Open ${launchApp.label} in floating window",
-                                    tint = IslandColors.TextSecondary.copy(alpha = 0.7f),
+                                Box(
+                                    contentAlignment = Alignment.Center,
                                     modifier = Modifier
-                                        .size(20.dp)
+                                        .size(32.dp)
+                                        .clip(CircleShape)
                                         .clickable {
                                             app.soundManager.playExpand()
                                             app.floatingWindowManager.launchAppInFloatingWindow(launchApp.packageName)
                                             onCollapse()
                                         }
-                                        .padding(3.dp)
-                                )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Filled.OpenInNew,
+                                        contentDescription = "Open ${launchApp.label} in floating window",
+                                        tint = IslandColors.TextSecondary.copy(alpha = 0.78f),
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
                                 Icon(
                                     imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
                                     contentDescription = null,
                                     tint = IslandColors.TextSecondary.copy(alpha = 0.65f),
-                                    modifier = Modifier.size(14.dp)
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
                         }
                     }
                 }
 
-                items(results.notes.take(if (isTyping) 2 else 2), key = { "note_${it.id}" }) { note ->
+                items(results.notes.take(2), key = { "note_${it.id}" }) { note ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
+                            .heightIn(min = 38.dp)
+                            .clip(RoundedCornerShape(10.dp))
                             .clickable {
                                 app.soundManager.playTap()
                                 app.clipboardMonitor.copyToClipboard(note.content)
                                 app.islandController.showTransientBanner("Copied note")
                             }
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Note: ${note.title}", color = IslandColors.TextPrimary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("Note: ${note.title}", color = IslandColors.TextPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
 
-                items(results.contacts.take(if (isTyping) 2 else 2), key = { "contact_${it.name}_${it.phone}" }) { contact ->
+                items(results.contacts.take(2), key = { "contact_${it.name}_${it.phone}" }) { contact ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                            .heightIn(min = 38.dp)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(contact.name, color = IslandColors.TextPrimary, fontSize = 11.sp)
-                        Text(contact.phone, color = accentColor, fontSize = 11.sp)
+                        Text(contact.name, color = IslandColors.TextPrimary, fontSize = 13.sp)
+                        Text(contact.phone, color = accentColor, fontSize = 13.sp)
                     }
                 }
             }
@@ -636,11 +635,12 @@ fun SearchIslandPanel(
                 Column(
                     modifier = Modifier
                         .align(Alignment.CenterEnd)
-                        .width(18.dp)
+                        .padding(end = 2.dp)
+                        .width(22.dp)
                         .fillMaxHeight()
                         .clip(CircleShape)
                         .background(accentColor.copy(alpha = 0.14f))
-                        .border(0.6.dp, accentColor.copy(alpha = 0.35f), CircleShape)
+                        .border(0.75.dp, accentColor.copy(alpha = 0.35f), CircleShape)
                         .onSizeChanged { stripHeightPx = it.height.toFloat().coerceAtLeast(1f) }
                         .pointerInput(availableLetters) {
                             detectVerticalDragGestures(
@@ -653,24 +653,25 @@ fun SearchIslandPanel(
                                 onDragCancel = { activeScrubLetter = null }
                             )
                         }
-                        .padding(vertical = 1.dp)
+                        .padding(vertical = 4.dp)
                         .testTag("search_az_strip"),
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.SpaceEvenly
                 ) {
-                    val displayedLetters = if (availableLetters.size <= 6) {
+                    val displayedLetters = if (availableLetters.size <= 10) {
                         availableLetters
                     } else {
-                        val step = (availableLetters.size / 5).coerceAtLeast(2)
-                        availableLetters.filterIndexed { i, _ -> i % step == 0 || i == availableLetters.lastIndex }
+                        val step = (availableLetters.size / 8).coerceAtLeast(2)
+                        availableLetters.filterIndexed { i, _ -> i % step == 0 || i == availableLetters.lastIndex }.take(10)
                     }
                     displayedLetters.forEach { letter ->
                         Text(
                             text = letter.toString(),
-                            fontSize = 7.sp,
+                            fontSize = 9.sp,
                             fontWeight = if (activeScrubLetter == letter) FontWeight.Bold else FontWeight.Medium,
                             color = if (activeScrubLetter == letter) Color.White else accentColor,
-                            lineHeight = 8.sp
+                            lineHeight = 10.sp,
+                            maxLines = 1
                         )
                     }
                 }
@@ -680,7 +681,7 @@ fun SearchIslandPanel(
                 Box(
                     modifier = Modifier
                         .align(Alignment.Center)
-                        .size(32.dp)
+                        .size(40.dp)
                         .clip(CircleShape)
                         .background(accentColor),
                     contentAlignment = Alignment.Center
@@ -688,7 +689,7 @@ fun SearchIslandPanel(
                     Text(
                         text = activeScrubLetter.toString(),
                         color = Color.White,
-                        fontSize = 14.sp,
+                        fontSize = 18.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -712,128 +713,143 @@ fun ToolsIslandPanel(
         app.quickTogglesManager.refreshSystemStates()
     }
 
+    val gridToggles = remember(settings.includedQuickToggles) {
+        val primary = settings.includedQuickToggles.filter {
+            it != QuickToggleType.SELECT_OCR && it != QuickToggleType.VAULT_CAPTURE
+        }
+        (if (primary.isNotEmpty()) primary else settings.includedQuickToggles).take(6)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(max = 78.dp)
-            .padding(horizontal = 12.dp, vertical = 1.dp),
-        verticalArrangement = Arrangement.spacedBy(3.dp)
+            .heightIn(max = 232.dp)
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(settings.includedQuickToggles) { type ->
-                val (icon, active, onClick) = when (type) {
-                    QuickToggleType.FLASHLIGHT -> Triple(
-                        Icons.Filled.FlashlightOn,
-                        toggleState.isTorchOn
-                    ) {
-                        onHaptic()
-                        val nextOn = !toggleState.isTorchOn
-                        app.soundManager.playToggle(isOn = nextOn)
-                        app.quickTogglesManager.toggleFlashlight()
-                        app.islandController.setFlashlightCardOpen(nextOn)
-                    }
+        gridToggles.chunked(3).forEach { rowItems ->
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                rowItems.forEach { type ->
+                    val (icon, active, onClick) = when (type) {
+                        QuickToggleType.FLASHLIGHT -> Triple(
+                            Icons.Filled.FlashlightOn,
+                            toggleState.isTorchOn
+                        ) {
+                            onHaptic()
+                            val nextOn = !toggleState.isTorchOn
+                            app.soundManager.playToggle(isOn = nextOn)
+                            app.quickTogglesManager.toggleFlashlight()
+                            app.islandController.setFlashlightCardOpen(nextOn)
+                        }
 
-                    QuickToggleType.DND -> Triple(
-                        Icons.Filled.DoNotDisturbOn,
-                        toggleState.isDndOn
-                    ) {
-                        onHaptic()
-                        app.soundManager.playToggle(isOn = !toggleState.isDndOn)
-                        app.quickTogglesManager.toggleDoNotDisturb()
-                        Unit
-                    }
+                        QuickToggleType.DND -> Triple(
+                            Icons.Filled.DoNotDisturbOn,
+                            toggleState.isDndOn
+                        ) {
+                            onHaptic()
+                            app.soundManager.playToggle(isOn = !toggleState.isDndOn)
+                            app.quickTogglesManager.toggleDoNotDisturb()
+                            Unit
+                        }
 
-                    QuickToggleType.KEEP_AWAKE -> Triple(
-                        Icons.Filled.WbSunny,
-                        toggleState.isKeepAwakeOn
-                    ) {
-                        onHaptic()
-                        val next = app.quickTogglesManager.toggleKeepAwake()
-                        app.soundManager.playToggle(isOn = next)
-                    }
+                        QuickToggleType.KEEP_AWAKE -> Triple(
+                            Icons.Filled.WbSunny,
+                            toggleState.isKeepAwakeOn
+                        ) {
+                            onHaptic()
+                            val next = app.quickTogglesManager.toggleKeepAwake()
+                            app.soundManager.playToggle(isOn = next)
+                        }
 
-                    QuickToggleType.BRIGHTNESS -> Triple(
-                        Icons.Filled.BrightnessHigh,
-                        toggleState.hasWriteSettingsPermission
-                    ) {
-                        onHaptic()
-                        app.soundManager.playTap()
-                        if (!toggleState.hasWriteSettingsPermission) app.quickTogglesManager.openWriteSettings()
-                    }
+                        QuickToggleType.BRIGHTNESS -> Triple(
+                            Icons.Filled.BrightnessHigh,
+                            toggleState.hasWriteSettingsPermission
+                        ) {
+                            onHaptic()
+                            app.soundManager.playTap()
+                            if (!toggleState.hasWriteSettingsPermission) app.quickTogglesManager.openWriteSettings()
+                        }
 
-                    QuickToggleType.WIFI -> Triple(
-                        Icons.Filled.Wifi,
-                        false
-                    ) {
-                        onHaptic()
-                        app.soundManager.playTap()
-                        app.quickTogglesManager.openWifiPanel()
-                        onCollapse()
-                    }
+                        QuickToggleType.WIFI -> Triple(
+                            Icons.Filled.Wifi,
+                            false
+                        ) {
+                            onHaptic()
+                            app.soundManager.playTap()
+                            app.quickTogglesManager.openWifiPanel()
+                            onCollapse()
+                        }
 
-                    QuickToggleType.BLUETOOTH -> Triple(
-                        Icons.Filled.Bluetooth,
-                        false
-                    ) {
-                        onHaptic()
-                        app.soundManager.playTap()
-                        app.quickTogglesManager.openBluetoothPanel()
-                        onCollapse()
-                    }
+                        QuickToggleType.BLUETOOTH -> Triple(
+                            Icons.Filled.Bluetooth,
+                            false
+                        ) {
+                            onHaptic()
+                            app.soundManager.playTap()
+                            app.quickTogglesManager.openBluetoothPanel()
+                            onCollapse()
+                        }
 
-                    QuickToggleType.SELECT_OCR -> Triple(
-                        Icons.Filled.SelectAll,
-                        false
-                    ) {
-                        onHaptic()
-                        if (!settings.screenReadingEnabled) {
-                            app.soundManager.playError()
-                            app.islandController.showTransientBanner("Enable Screen Reading in Settings → Privacy first")
-                        } else {
-                            app.soundManager.playToggle(isOn = true)
-                            app.islandController.setSelectMode(true)
+                        QuickToggleType.SELECT_OCR -> Triple(
+                            Icons.Filled.SelectAll,
+                            false
+                        ) {
+                            onHaptic()
+                            if (!settings.screenReadingEnabled) {
+                                app.soundManager.playError()
+                                app.islandController.showTransientBanner("Enable Screen Reading in Settings → Privacy first")
+                            } else {
+                                app.soundManager.playToggle(isOn = true)
+                                app.islandController.setSelectMode(true)
+                            }
+                        }
+
+                        QuickToggleType.VAULT_CAPTURE -> Triple(
+                            Icons.Filled.CameraAlt,
+                            false
+                        ) {
+                            onHaptic()
+                            app.soundManager.playTap()
+                            onCollapse()
+                            MediaProjectionPromptActivity.launchForVaultScreenshot(context)
                         }
                     }
 
-                    QuickToggleType.VAULT_CAPTURE -> Triple(
-                        Icons.Filled.CameraAlt,
-                        false
-                    ) {
-                        onHaptic()
-                        app.soundManager.playTap()
-                        onCollapse()
-                        MediaProjectionPromptActivity.launchForVaultScreenshot(context)
-                    }
+                    ToggleTile(
+                        label = type.label,
+                        icon = icon,
+                        isActive = active,
+                        accentColor = accentColor,
+                        onClick = onClick,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
-
-                ToggleTile(
-                    label = type.label,
-                    icon = icon,
-                    isActive = active,
-                    accentColor = accentColor,
-                    onClick = onClick
-                )
+                repeat(3 - rowItems.size) {
+                    Spacer(Modifier.weight(1f))
+                }
             }
         }
 
-        // Compact 14dp Brightness / Torch strip
+        // Roomy Brightness / Torch strip
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(14.dp)
+                .height(24.dp)
         ) {
-            Icon(Icons.Filled.BrightnessHigh, contentDescription = "Brightness", tint = IslandColors.TextSecondary, modifier = Modifier.size(12.dp))
-            Spacer(Modifier.width(6.dp))
+            Icon(Icons.Filled.BrightnessHigh, contentDescription = "Brightness", tint = IslandColors.TextSecondary, modifier = Modifier.size(16.dp))
+            Spacer(Modifier.width(8.dp))
             if (toggleState.hasWriteSettingsPermission) {
                 var barWidthPx by remember { mutableFloatStateOf(1f) }
                 val frac = ((toggleState.brightness - 10f) / 245f).coerceIn(0f, 1f)
                 Box(
+                    contentAlignment = Alignment.CenterStart,
                     modifier = Modifier
                         .weight(1f)
-                        .height(10.dp)
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.14f))
+                        .height(24.dp)
                         .onSizeChanged { barWidthPx = it.width.toFloat().coerceAtLeast(1f) }
                         .pointerInput(Unit) {
                             detectHorizontalDragGestures { change, _ ->
@@ -845,42 +861,51 @@ fun ToolsIslandPanel(
                 ) {
                     Box(
                         modifier = Modifier
-                            .fillMaxHeight()
-                            .fillMaxWidth(frac)
+                            .fillMaxWidth()
+                            .height(10.dp)
                             .clip(CircleShape)
-                            .background(accentColor)
-                    )
+                            .background(Color.White.copy(alpha = 0.16f))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxHeight()
+                                .fillMaxWidth(frac.coerceAtLeast(0.04f))
+                                .clip(CircleShape)
+                                .background(accentColor)
+                        )
+                    }
                 }
             } else {
                 Text(
                     text = "Allow brightness control",
                     color = accentColor,
-                    fontSize = 10.sp,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
                     modifier = Modifier.clickable { app.soundManager.playTap(); app.quickTogglesManager.openWriteSettings() }
                 )
                 Spacer(Modifier.weight(1f))
             }
             if (toggleState.isTorchOn) {
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(8.dp))
                 Box(
                     modifier = Modifier
                         .clip(CircleShape)
-                        .background(accentColor.copy(alpha = 0.22f))
+                        .background(accentColor.copy(alpha = 0.24f))
                         .clickable {
                             onHaptic()
                             app.soundManager.playExpand()
                             app.islandController.setFlashlightCardOpen(true)
                         }
-                        .padding(horizontal = 6.dp, vertical = 1.dp)
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
                 ) {
-                    Text("Beam", color = accentColor, fontSize = 9.sp, fontWeight = FontWeight.SemiBold)
+                    Text("Beam", color = accentColor, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
         }
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             if (settings.vaultEnabled) {
                 Row(
@@ -888,20 +913,22 @@ fun ToolsIslandPanel(
                     horizontalArrangement = Arrangement.Center,
                     modifier = Modifier
                         .weight(1f)
-                        .height(26.dp)
+                        .height(42.dp)
                         .clip(CircleShape)
                         .background(Color.White.copy(alpha = 0.14f))
+                        .border(0.75.dp, Color.White.copy(alpha = 0.22f), CircleShape)
                         .clickable {
                             onHaptic()
                             app.soundManager.playVaultAdd()
                             onCollapse()
                             MediaProjectionPromptActivity.launchForVaultScreenshot(context)
                         }
+                        .padding(horizontal = 8.dp)
                         .testTag("tools_screenshot_vault_btn")
                 ) {
-                    Icon(Icons.Filled.Screenshot, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
-                    Spacer(Modifier.width(5.dp))
-                    Text("Screenshot → Shelf", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Icon(Icons.Filled.Screenshot, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Screenshot → Shelf", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                 }
             }
             if (settings.ocrFeatureEnabled) {
@@ -910,9 +937,10 @@ fun ToolsIslandPanel(
                     horizontalArrangement = Arrangement.Center,
                     modifier = Modifier
                         .weight(1f)
-                        .height(26.dp)
+                        .height(42.dp)
                         .clip(CircleShape)
-                        .background(if (settings.screenReadingEnabled) accentColor.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.08f))
+                        .background(if (settings.screenReadingEnabled) accentColor.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.10f))
+                        .border(0.75.dp, if (settings.screenReadingEnabled) accentColor else Color.White.copy(alpha = 0.20f), CircleShape)
                         .clickable {
                             onHaptic()
                             if (!settings.screenReadingEnabled) {
@@ -923,11 +951,12 @@ fun ToolsIslandPanel(
                                 app.islandController.setSelectMode(true)
                             }
                         }
+                        .padding(horizontal = 8.dp)
                         .testTag("tools_select_ocr_btn")
                 ) {
-                    Icon(Icons.Filled.SelectAll, contentDescription = null, tint = Color.White, modifier = Modifier.size(13.dp))
-                    Spacer(Modifier.width(5.dp))
-                    Text("Select OCR", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                    Icon(Icons.Filled.SelectAll, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Select OCR", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                 }
             }
         }
@@ -1074,7 +1103,8 @@ private fun ToggleTile(
     icon: ImageVector,
     isActive: Boolean,
     accentColor: Color,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
@@ -1083,7 +1113,7 @@ private fun ToggleTile(
         animationSpec = MotionTokens.spatialFast(),
         label = "toggle_tile_scale"
     )
-    val tileShape = RoundedCornerShape(12.dp)
+    val tileShape = RoundedCornerShape(14.dp)
     val tileBackground = if (isActive) {
         Brush.radialGradient(
             colors = listOf(
@@ -1102,9 +1132,8 @@ private fun ToggleTile(
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
-        modifier = Modifier
-            .width(56.dp)
-            .height(30.dp)
+        modifier = modifier
+            .height(52.dp)
             .graphicsLayer {
                 scaleX = scaleState.value
                 scaleY = scaleState.value
@@ -1112,7 +1141,7 @@ private fun ToggleTile(
             .clip(tileShape)
             .background(tileBackground)
             .border(
-                width = 0.85.dp,
+                width = 0.9.dp,
                 brush = Brush.linearGradient(
                     colors = if (isActive) {
                         listOf(Color.White.copy(alpha = 0.55f), accentColor.copy(alpha = 0.85f))
@@ -1127,15 +1156,23 @@ private fun ToggleTile(
                 indication = null,
                 onClick = onClick
             )
-            .padding(vertical = 2.dp, horizontal = 3.dp)
+            .padding(vertical = 4.dp, horizontal = 4.dp)
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
             tint = if (isActive) Color.White else accentColor,
-            modifier = Modifier.size(13.dp)
+            modifier = Modifier.size(18.dp)
         )
-        Text(label, color = IslandColors.TextPrimary, fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text = label,
+            color = IslandColors.TextPrimary,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Medium,
+            maxLines = 1,
+            softWrap = false
+        )
     }
 }
 
@@ -1215,16 +1252,16 @@ fun VaultIslandPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(max = 78.dp)
-            .padding(horizontal = 12.dp, vertical = 1.dp)
+            .heightIn(min = 160.dp, max = 232.dp)
+            .padding(horizontal = 16.dp, vertical = 4.dp)
     ) {
         val cropTarget = croppingItem
         val inspectTarget = detailItem
 
         if (cropTarget != null) {
-            // Compact Header for Inline Shelf Crop Mode
+            // Roomy Inline Shelf Crop Mode
             Row(
-                modifier = Modifier.fillMaxWidth().height(20.dp),
+                modifier = Modifier.fillMaxWidth().height(28.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -1476,14 +1513,14 @@ fun VaultIslandPanel(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(5.dp), modifier = Modifier.fillMaxWidth()) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         if (!inspectTarget.isTrashed) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(23.dp)
+                                    .height(36.dp)
                                     .clip(CircleShape)
                                     .background(accentColor.copy(alpha = 0.22f))
                                     .clickable {
@@ -1493,16 +1530,16 @@ fun VaultIslandPanel(
                                     }
                                     .testTag("shelf_crop_open_btn")
                             ) {
-                                Icon(Icons.Filled.Crop, contentDescription = null, tint = accentColor, modifier = Modifier.size(12.dp))
-                                Spacer(Modifier.width(3.dp))
-                                Text("Crop", color = accentColor, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                                Icon(Icons.Filled.Crop, contentDescription = null, tint = accentColor, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Crop", color = accentColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                             }
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(23.dp)
+                                    .height(36.dp)
                                     .clip(CircleShape)
                                     .background(accentColor)
                                     .clickable {
@@ -1512,9 +1549,9 @@ fun VaultIslandPanel(
                                         onCollapse()
                                     }
                             ) {
-                                Icon(Icons.Filled.ContentCopy, contentDescription = null, tint = Color.White, modifier = Modifier.size(11.dp))
-                                Spacer(Modifier.width(3.dp))
-                                Text("Attach", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Icon(Icons.Filled.ContentCopy, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(4.dp))
+                                Text("Attach", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                         Row(
@@ -1522,7 +1559,7 @@ fun VaultIslandPanel(
                             horizontalArrangement = Arrangement.Center,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(23.dp)
+                                .height(36.dp)
                                 .clip(CircleShape)
                                 .background(Color.White.copy(alpha = 0.12f))
                                 .clickable {
@@ -1538,13 +1575,14 @@ fun VaultIslandPanel(
                                 imageVector = if (inspectTarget.isTrashed) Icons.Filled.Restore else Icons.Filled.Delete,
                                 contentDescription = null,
                                 tint = if (inspectTarget.isTrashed) IslandColors.AccentGreen else IslandColors.AccentRed,
-                                modifier = Modifier.size(12.dp)
+                                modifier = Modifier.size(15.dp)
                             )
-                            Spacer(Modifier.width(3.dp))
+                            Spacer(Modifier.width(4.dp))
                             Text(
                                 text = if (inspectTarget.isTrashed) "Restore" else "Trash",
                                 color = if (inspectTarget.isTrashed) IslandColors.AccentGreen else IslandColors.AccentRed,
-                                fontSize = 10.sp
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold
                             )
                         }
                     }
@@ -1554,9 +1592,9 @@ fun VaultIslandPanel(
                             horizontalArrangement = Arrangement.Center,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(21.dp)
+                                .height(34.dp)
                                 .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.08f))
+                                .background(Color.White.copy(alpha = 0.10f))
                                 .clickable {
                                     app.soundManager.playTap()
                                     scope.launch {
@@ -1568,76 +1606,91 @@ fun VaultIslandPanel(
                                     }
                                 }
                         ) {
-                            Icon(Icons.Filled.Download, contentDescription = null, tint = Color.White, modifier = Modifier.size(11.dp))
-                            Spacer(Modifier.width(4.dp))
-                            Text("Save to Gallery", color = Color.White, fontSize = 9.sp)
+                            Icon(Icons.Filled.Download, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(6.dp))
+                            Text("Save to Gallery", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
                         }
                     }
                 }
             }
         } else {
-            // Browse Shelf Mode
+            // Browse Shelf Mode: Row 1 = Filter tabs (never clipped), Row 2 = Auto/Clear + "+ Add Photo"
             Row(
-                modifier = Modifier.fillMaxWidth().height(22.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(30.dp)
+                    .horizontalScroll(rememberScrollState())
+            ) {
+                VaultFilter.entries.forEach { filter ->
+                    val isSelected = selectedFilter == filter
+                    val count = when (filter) {
+                        VaultFilter.ALL -> active.size
+                        VaultFilter.SCREENSHOTS -> active.count { it.sourceType.contains("SCREENSHOT", ignoreCase = true) }
+                        VaultFilter.PHOTOS -> active.count { !it.sourceType.contains("SCREENSHOT", ignoreCase = true) }
+                        VaultFilter.TRASH -> trashed.size
+                    }
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .height(28.dp)
+                            .clip(RoundedCornerShape(IslandColors.ChipRadius))
+                            .background(if (isSelected) accentColor.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.08f))
+                            .border(
+                                0.85.dp,
+                                if (isSelected) accentColor else Color.White.copy(alpha = 0.14f),
+                                RoundedCornerShape(IslandColors.ChipRadius)
+                            )
+                            .clickable {
+                                app.soundManager.playTap()
+                                selectedItemId = null
+                                selectedFilter = filter
+                            }
+                            .padding(horizontal = 10.dp)
+                            .testTag("vault_filter_${filter.name.lowercase()}")
+                    ) {
+                        Text(
+                            text = "${filter.label} ($count)",
+                            color = if (isSelected) accentColor else IslandColors.TextPrimary,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
+                            maxLines = 1,
+                            softWrap = false
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(6.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth().height(30.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    items(VaultFilter.entries) { filter ->
-                        val isSelected = selectedFilter == filter
-                        val count = when (filter) {
-                            VaultFilter.ALL -> active.size
-                            VaultFilter.SCREENSHOTS -> active.count { it.sourceType.contains("SCREENSHOT", ignoreCase = true) }
-                            VaultFilter.PHOTOS -> active.count { !it.sourceType.contains("SCREENSHOT", ignoreCase = true) }
-                            VaultFilter.TRASH -> trashed.size
-                        }
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(IslandColors.ChipRadius))
-                                .background(if (isSelected) accentColor.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.08f))
-                                .border(
-                                    0.75.dp,
-                                    if (isSelected) accentColor else Color.White.copy(alpha = 0.12f),
-                                    RoundedCornerShape(IslandColors.ChipRadius)
-                                )
-                                .clickable {
-                                    app.soundManager.playTap()
-                                    selectedItemId = null
-                                    selectedFilter = filter
-                                }
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                .testTag("vault_filter_${filter.name.lowercase()}")
-                        ) {
-                            Text(
-                                text = "${filter.label} ($count)",
-                                color = if (isSelected) accentColor else IslandColors.TextPrimary,
-                                fontSize = 9.sp,
-                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                                maxLines = 1
-                            )
-                        }
-                    }
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (selectedFilter != VaultFilter.TRASH && active.isNotEmpty()) {
-                        Text(
-                            text = "Clear",
-                            color = IslandColors.AccentRed,
-                            fontSize = 10.sp,
-                            modifier = Modifier.clickable {
+                if (selectedFilter != VaultFilter.TRASH && active.isNotEmpty()) {
+                    Text(
+                        text = "Clear Active",
+                        color = IslandColors.AccentRed,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable {
                                 app.soundManager.playCollapse()
                                 selectedItemId = null
                                 scope.launch { app.vaultManager.clearAllActiveItemsImmediate() }
                             }
-                        )
-                    } else if (settings.vaultScreenshotsTreeUri.isNullOrBlank()) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable {
+                            .padding(horizontal = 6.dp, vertical = 4.dp)
+                    )
+                } else {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.08f))
+                            .clickable {
                                 app.soundManager.playTap()
                                 if (screenshotsFolderPicker != null) {
                                     val initial = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -1649,18 +1702,28 @@ fun VaultIslandPanel(
                                     screenshotsFolderPicker.launch(initial)
                                 }
                             }
-                        ) {
-                            Icon(Icons.Filled.FolderOpen, contentDescription = null, tint = IslandColors.AccentGreen, modifier = Modifier.size(11.dp))
-                            Spacer(Modifier.width(2.dp))
-                            Text("Auto", color = IslandColors.AccentGreen, fontSize = 9.sp)
-                        }
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                    ) {
+                        Icon(Icons.Filled.FolderOpen, contentDescription = null, tint = IslandColors.AccentGreen, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            text = if (settings.vaultScreenshotsTreeUri.isNullOrBlank()) "Auto-Capture Folder" else "Auto-Capture ON",
+                            color = IslandColors.AccentGreen,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Medium,
+                            maxLines = 1
+                        )
                     }
-                    Text(
-                        text = "+ Add",
-                        color = accentColor,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        modifier = Modifier.clickable {
+                }
+
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .height(28.dp)
+                        .clip(CircleShape)
+                        .background(accentColor.copy(alpha = 0.24f))
+                        .border(0.85.dp, accentColor.copy(alpha = 0.70f), CircleShape)
+                        .clickable {
                             app.soundManager.playTap()
                             if (photoPicker != null) {
                                 photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
@@ -1669,17 +1732,27 @@ fun VaultIslandPanel(
                                 MediaProjectionPromptActivity.launchForVaultScreenshot(context)
                             }
                         }
+                        .padding(horizontal = 12.dp)
+                ) {
+                    Text(
+                        text = "+ Add",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        softWrap = false
                     )
                 }
             }
 
-            Spacer(Modifier.height(3.dp))
+            Spacer(Modifier.height(6.dp))
 
             if (filteredItems.isEmpty()) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f),
+                        .weight(1f)
+                        .padding(vertical = 2.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
@@ -1689,13 +1762,19 @@ fun VaultIslandPanel(
                                 width = 1.dp.toPx(),
                                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f)
                             ),
-                            cornerRadius = CornerRadius(12.dp.toPx(), 12.dp.toPx())
+                            cornerRadius = CornerRadius(14.dp.toPx(), 14.dp.toPx())
                         )
                     }
                     Text(
-                        text = if (selectedFilter == VaultFilter.TRASH) "Trash empty (24h window)" else "Tap + Add · Auto-deletes in 10 min",
+                        text = if (selectedFilter == VaultFilter.TRASH) {
+                            "Trash empty (24h restore window)"
+                        } else {
+                            "Tap + Add · Items auto-delete after 10 min"
+                        },
                         color = IslandColors.TextSecondary,
-                        fontSize = 10.sp
+                        fontSize = 12.sp,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 16.dp)
                     )
                 }
             } else {
@@ -1761,7 +1840,7 @@ fun VaultIslandPanel(
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
-                                .width(92.dp)
+                                .width(102.dp)
                                 .graphicsLayer {
                                     translationY = swipeY
                                     scaleX = tileScaleState.value
@@ -1772,8 +1851,8 @@ fun VaultIslandPanel(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(40.dp)
-                                    .clip(RoundedCornerShape(10.dp))
+                                    .height(78.dp)
+                                    .clip(RoundedCornerShape(12.dp))
                                     .background(Color(0xFF140E11))
                                     .combinedClickable(
                                         onClick = {
@@ -1886,11 +1965,12 @@ fun VaultIslandPanel(
                                 }
                             }
 
+                            Spacer(Modifier.height(3.dp))
                             Text(
                                 text = if (item.isTrashed) "Trash" else TimerEngine.formatDuration(remainingMs),
                                 style = TextStyle(
                                     color = if (item.isTrashed || remainingMs < 60_000L) IslandColors.AccentRed else IslandColors.TextSecondary,
-                                    fontSize = 8.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium,
                                     fontFeatureSettings = "tnum"
                                 ),
@@ -1915,33 +1995,39 @@ fun ClipsIslandPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(max = 78.dp)
-            .padding(horizontal = 12.dp, vertical = 1.dp)
+            .heightIn(min = 160.dp, max = 232.dp)
+            .padding(horizontal = 16.dp, vertical = 4.dp)
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth().height(20.dp),
+            modifier = Modifier.fillMaxWidth().height(28.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(status, color = IslandColors.TextSecondary, fontSize = 10.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(status, color = IslandColors.TextSecondary, fontSize = 12.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(
                 text = "Capture",
                 color = accentColor,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clickable {
-                    app.soundManager.playTap()
-                    app.clipboardMonitor.captureIfAllowed(isForeground = true)
-                }
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .clickable {
+                        app.soundManager.playTap()
+                        app.clipboardMonitor.captureIfAllowed(isForeground = true)
+                    }
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
             )
         }
 
         if (clips.isEmpty()) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                Text("No clips captured in foreground yet", color = IslandColors.TextSecondary, fontSize = 11.sp)
+                Text("No clips captured in foreground yet", color = IslandColors.TextSecondary, fontSize = 13.sp, textAlign = TextAlign.Center)
             }
         } else {
-            LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f)) {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth().weight(1f)
+            ) {
                 itemsIndexed(clips, key = { _, c -> c.id }) { idx, clip ->
                     var visible by remember(clip.id) { mutableStateOf(false) }
                     LaunchedEffect(clip.id) {
@@ -1955,18 +2041,20 @@ fun ClipsIslandPanel(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
+                                .heightIn(min = 40.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.06f))
                                 .clickable {
                                     app.soundManager.playTap()
                                     app.clipboardMonitor.copyToClipboard(clip.content)
                                     app.islandController.showTransientBanner("Copied to clipboard")
                                 }
-                                .padding(horizontal = 6.dp, vertical = 3.dp),
+                                .padding(horizontal = 10.dp, vertical = 6.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(Icons.Filled.ContentCopy, contentDescription = null, tint = accentColor, modifier = Modifier.size(12.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text(clip.content, color = IslandColors.TextPrimary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                            Icon(Icons.Filled.ContentCopy, contentDescription = null, tint = accentColor, modifier = Modifier.size(16.dp))
+                            Spacer(Modifier.width(8.dp))
+                            Text(clip.content, color = IslandColors.TextPrimary, fontSize = 13.sp, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                         }
                     }
                 }
@@ -2025,13 +2113,13 @@ fun NotesIslandPanel(
         label = "notes_mode_switch",
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(max = 78.dp)
-            .padding(horizontal = 12.dp, vertical = 1.dp)
+            .heightIn(min = 160.dp, max = 232.dp)
+            .padding(horizontal = 16.dp, vertical = 4.dp)
     ) { editing ->
         if (editing) {
             Column(modifier = Modifier.fillMaxWidth().fillMaxHeight()) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().height(20.dp),
+                    modifier = Modifier.fillMaxWidth().height(28.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
@@ -2043,11 +2131,11 @@ fun NotesIslandPanel(
                                 app.soundManager.playTap()
                                 isEditing = false
                             }
-                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                            .padding(horizontal = 6.dp, vertical = 3.dp)
                     ) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Notes", tint = IslandColors.AccentLime, modifier = Modifier.size(13.dp))
-                        Spacer(Modifier.width(3.dp))
-                        Text("Notes", color = IslandColors.AccentLime, fontSize = 10.sp, fontWeight = FontWeight.SemiBold)
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to Notes", tint = IslandColors.AccentLime, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(4.dp))
+                        Text("Notes", color = IslandColors.AccentLime, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
                     }
                     IconButton(
                         onClick = {
@@ -2060,23 +2148,23 @@ fun NotesIslandPanel(
                             draftText = ""
                             isEditing = false
                         },
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(28.dp)
                     ) {
-                        Icon(Icons.Filled.Delete, contentDescription = "Delete note", tint = IslandColors.AccentRed, modifier = Modifier.size(13.dp))
+                        Icon(Icons.Filled.Delete, contentDescription = "Delete note", tint = IslandColors.AccentRed, modifier = Modifier.size(16.dp))
                     }
                 }
-                Spacer(Modifier.height(3.dp))
+                Spacer(Modifier.height(6.dp))
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(RoundedCornerShape(12.dp))
                         .background(Color.White.copy(alpha = 0.06f))
-                        .border(0.75.dp, IslandColors.AccentLime.copy(alpha = 0.7f), RoundedCornerShape(10.dp))
-                        .padding(horizontal = 8.dp, vertical = 5.dp)
+                        .border(0.85.dp, IslandColors.AccentLime.copy(alpha = 0.7f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
                 ) {
                     if (draftText.isEmpty()) {
-                        Text("Start typing — auto-saved...", color = IslandColors.TextTertiary, fontSize = 11.sp)
+                        Text("Start typing — auto-saved...", color = IslandColors.TextTertiary, fontSize = 13.sp)
                     }
                     BasicTextField(
                         value = draftText,
@@ -2084,9 +2172,9 @@ fun NotesIslandPanel(
                             draftText = next
                             persistDraft(next)
                         },
-                        textStyle = TextStyle(color = IslandColors.TextPrimary, fontSize = 11.sp),
+                        textStyle = TextStyle(color = IslandColors.TextPrimary, fontSize = 13.sp),
                         cursorBrush = SolidColor(IslandColors.AccentLime),
-                        maxLines = 3,
+                        maxLines = 6,
                         modifier = Modifier
                             .fillMaxSize()
                             .onFocusChanged { if (it.isFocused) app.islandController.setKeyboardFocusNeeded(true) }
@@ -2096,14 +2184,14 @@ fun NotesIslandPanel(
         } else {
             Column(modifier = Modifier.fillMaxWidth().fillMaxHeight()) {
                 Row(
-                    modifier = Modifier.fillMaxWidth().height(20.dp),
+                    modifier = Modifier.fillMaxWidth().height(28.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "${notes.size} Notes",
                         color = IslandColors.TextSecondary,
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Medium
                     )
                     Row(
@@ -2117,30 +2205,31 @@ fun NotesIslandPanel(
                                 draftText = ""
                                 isEditing = true
                             }
-                            .padding(horizontal = 8.dp, vertical = 2.dp)
+                            .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
-                        Icon(Icons.Filled.Add, contentDescription = null, tint = Color.Black, modifier = Modifier.size(12.dp))
-                        Spacer(Modifier.width(2.dp))
-                        Text("New note", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Filled.Add, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(3.dp))
+                        Text("New note", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     }
                 }
 
-                Spacer(Modifier.height(3.dp))
+                Spacer(Modifier.height(6.dp))
 
                 if (notes.isEmpty() && links.isEmpty()) {
                     Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                        Text("No notes yet", color = IslandColors.TextSecondary, fontSize = 11.sp)
+                        Text("No notes yet", color = IslandColors.TextSecondary, fontSize = 13.sp)
                     }
                 } else {
                     LazyColumn(
-                        verticalArrangement = Arrangement.spacedBy(3.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
                         modifier = Modifier.fillMaxWidth().weight(1f)
                     ) {
                         items(links.take(2), key = { "link_${it.id}" }) { link ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
+                                    .heightIn(min = 38.dp)
+                                    .clip(RoundedCornerShape(10.dp))
                                     .background(Color.White.copy(alpha = 0.06f))
                                     .clickable {
                                         app.soundManager.playTap()
@@ -2150,21 +2239,21 @@ fun NotesIslandPanel(
                                             }
                                         }
                                     }
-                                    .padding(horizontal = 6.dp, vertical = 3.dp),
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(Icons.Filled.Link, contentDescription = null, tint = accentColor, modifier = Modifier.size(12.dp))
-                                Spacer(Modifier.width(5.dp))
-                                Text("${link.itemType}: ${link.title}", color = IslandColors.TextPrimary, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Icon(Icons.Filled.Link, contentDescription = null, tint = accentColor, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("${link.itemType}: ${link.title}", color = IslandColors.TextPrimary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                         items(notes, key = { "note_${it.id}" }) { note ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(34.dp)
-                                    .clip(RoundedCornerShape(9.dp))
-                                    .background(Color.White.copy(alpha = 0.06f))
+                                    .heightIn(min = 44.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(Color.White.copy(alpha = 0.07f))
                                     .combinedClickable(
                                         onClick = {
                                             app.soundManager.playTap()
@@ -2177,22 +2266,22 @@ fun NotesIslandPanel(
                                             scope.launch { app.database.noteDao().deleteById(note.id) }
                                         }
                                     )
-                                    .padding(end = 6.dp),
+                                    .padding(end = 10.dp, top = 5.dp, bottom = 5.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Box(
                                     modifier = Modifier
-                                        .width(3.dp)
-                                        .height(24.dp)
+                                        .width(3.5.dp)
+                                        .height(30.dp)
                                         .clip(RoundedCornerShape(3.dp))
                                         .background(IslandColors.AccentLime)
                                 )
-                                Spacer(Modifier.width(6.dp))
+                                Spacer(Modifier.width(8.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = note.title.ifBlank { "Untitled" },
                                         color = IslandColors.TextPrimary,
-                                        fontSize = 11.sp,
+                                        fontSize = 13.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -2200,7 +2289,7 @@ fun NotesIslandPanel(
                                     Text(
                                         text = note.content,
                                         color = IslandColors.TextSecondary,
-                                        fontSize = 9.sp,
+                                        fontSize = 11.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -2208,7 +2297,7 @@ fun NotesIslandPanel(
                                 Text(
                                     text = timeFmt.format(Date(note.updatedAt)),
                                     color = IslandColors.TextTertiary,
-                                    fontSize = 9.sp
+                                    fontSize = 11.sp
                                 )
                             }
                         }
@@ -2231,15 +2320,15 @@ fun MemoIslandPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(max = 78.dp)
-            .padding(horizontal = 12.dp, vertical = 1.dp)
+            .heightIn(min = 160.dp, max = 232.dp)
+            .padding(horizontal = 16.dp, vertical = 4.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(28.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(if (ui.isRecording) IslandColors.AccentRed.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.08f))
+                .height(42.dp)
+                .clip(RoundedCornerShape(14.dp))
+                .background(if (ui.isRecording) IslandColors.AccentRed.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.10f))
                 .clickable {
                     if (ui.isRecording) {
                         app.soundManager.playTap()
@@ -2252,7 +2341,7 @@ fun MemoIslandPanel(
                         app.soundManager.playTap()
                     }
                 }
-                .padding(horizontal = 10.dp),
+                .padding(horizontal = 12.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -2261,50 +2350,62 @@ fun MemoIslandPanel(
                     imageVector = if (ui.isRecording) Icons.Filled.Stop else Icons.Filled.Mic,
                     contentDescription = "Voice Memo",
                     tint = if (ui.isRecording) IslandColors.AccentRed else accentColor,
-                    modifier = Modifier.size(15.dp)
+                    modifier = Modifier.size(18.dp)
                 )
-                Spacer(Modifier.width(6.dp))
+                Spacer(Modifier.width(8.dp))
                 Text(
                     text = if (ui.isRecording) "Recording · ${TimerEngine.formatDuration(ui.recordingElapsedMs)} (Tap to stop)" else "Tap to Record Voice Memo",
                     color = IslandColors.TextPrimary,
-                    fontSize = 11.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Medium
                 )
             }
         }
 
-        Spacer(Modifier.height(3.dp))
+        Spacer(Modifier.height(6.dp))
 
-        LazyColumn(modifier = Modifier.fillMaxWidth().weight(1f)) {
-            items(memos, key = { it.id }) { memo ->
-                val isPlayingThis = ui.playingMemoId == memo.id && ui.isPlaying
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(26.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    IconButton(
-                        onClick = {
-                            app.soundManager.playTap()
-                            app.voiceMemoManager.togglePlayMemo(memo)
-                        },
-                        modifier = Modifier.size(24.dp)
+        if (memos.isEmpty()) {
+            Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                Text("No voice memos recorded yet", color = IslandColors.TextSecondary, fontSize = 13.sp)
+            }
+        } else {
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth().weight(1f)
+            ) {
+                items(memos, key = { it.id }) { memo ->
+                    val isPlayingThis = ui.playingMemoId == memo.id && ui.isPlaying
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 42.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.White.copy(alpha = 0.06f))
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = if (isPlayingThis) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                            contentDescription = "Play memo",
-                            tint = accentColor,
-                            modifier = Modifier.size(15.dp)
-                        )
-                    }
-                    Text(memo.title, color = IslandColors.TextPrimary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                    Text(TimerEngine.formatDuration(memo.durationMs), color = IslandColors.TextSecondary, fontSize = 9.sp)
-                    IconButton(
-                        onClick = { app.soundManager.playTap(); app.voiceMemoManager.deleteMemo(memo) },
-                        modifier = Modifier.size(24.dp)
-                    ) {
-                        Icon(Icons.Filled.Delete, contentDescription = "Delete memo", tint = IslandColors.TextSecondary, modifier = Modifier.size(13.dp))
+                        IconButton(
+                            onClick = {
+                                app.soundManager.playTap()
+                                app.voiceMemoManager.togglePlayMemo(memo)
+                            },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (isPlayingThis) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                contentDescription = "Play memo",
+                                tint = accentColor,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        Text(memo.title, color = IslandColors.TextPrimary, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                        Text(TimerEngine.formatDuration(memo.durationMs), color = IslandColors.TextSecondary, fontSize = 11.sp)
+                        IconButton(
+                            onClick = { app.soundManager.playTap(); app.voiceMemoManager.deleteMemo(memo) },
+                            modifier = Modifier.size(34.dp)
+                        ) {
+                            Icon(Icons.Filled.Delete, contentDescription = "Delete memo", tint = IslandColors.TextSecondary, modifier = Modifier.size(16.dp))
+                        }
                     }
                 }
             }
@@ -2329,35 +2430,34 @@ fun AlertsIslandPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(max = 78.dp)
-            .padding(horizontal = 12.dp, vertical = 1.dp)
+            .heightIn(min = 160.dp, max = 232.dp)
+            .padding(horizontal = 16.dp, vertical = 4.dp)
     ) {
-        // Sticky header (20dp)
         Row(
-            modifier = Modifier.fillMaxWidth().height(20.dp),
+            modifier = Modifier.fillMaxWidth().height(28.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text("Notifications", color = IslandColors.TextPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text("Notifications", color = IslandColors.TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
                 if (totalCount > 0) {
                     Box(
                         modifier = Modifier
                             .clip(CircleShape)
                             .background(accentColor.copy(alpha = 0.24f))
-                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                            .padding(horizontal = 7.dp, vertical = 2.dp)
                     ) {
-                        Text(totalCount.toString(), color = accentColor, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Text(totalCount.toString(), color = accentColor, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (state.undoableClearedInbox != null) {
                     Text(
                         text = "Undo",
                         color = IslandColors.AccentLime,
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.clickable { app.islandController.undoInboxClear() }
                     )
@@ -2366,7 +2466,7 @@ fun AlertsIslandPanel(
                     Text(
                         text = "Clear all",
                         color = IslandColors.AccentRed,
-                        fontSize = 10.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         modifier = Modifier.clickable { app.islandController.clearInboxWithUndo() }
                     )
@@ -2374,13 +2474,15 @@ fun AlertsIslandPanel(
             }
         }
 
+        Spacer(Modifier.height(4.dp))
+
         if (totalCount == 0) {
             Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-                Text("No notifications", color = IslandColors.TextSecondary, fontSize = 11.sp)
+                Text("No notifications right now", color = IslandColors.TextSecondary, fontSize = 13.sp, textAlign = TextAlign.Center)
             }
         } else {
             LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(3.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier.fillMaxWidth().weight(1f)
             ) {
                 groupedNotifs.forEach { (pkg, itemsForApp) ->
@@ -2390,14 +2492,15 @@ fun AlertsIslandPanel(
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color.White.copy(alpha = 0.06f))
-                                .padding(horizontal = 7.dp, vertical = 3.dp)
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color.White.copy(alpha = 0.07f))
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .heightIn(min = 38.dp)
                                     .pointerInput(pkg) {
                                         var dx = 0f
                                         detectHorizontalDragGestures(
@@ -2412,21 +2515,22 @@ fun AlertsIslandPanel(
                                     }
                                     .clickable { expandedApps[pkg] = !isExpanded }
                             ) {
-                                Icon(Icons.Filled.Notifications, contentDescription = null, tint = accentColor, modifier = Modifier.size(13.dp))
-                                Spacer(Modifier.width(5.dp))
+                                Icon(Icons.Filled.Notifications, contentDescription = null, tint = accentColor, modifier = Modifier.size(16.dp))
+                                Spacer(Modifier.width(8.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(
                                         text = "${first.appName.ifBlank { pkg }} (${itemsForApp.size})",
                                         color = IslandColors.TextPrimary,
-                                        fontSize = 10.sp,
+                                        fontSize = 13.sp,
                                         fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     if (!isExpanded) {
                                         Text(
                                             text = first.title.ifBlank { first.text },
                                             color = IslandColors.TextSecondary,
-                                            fontSize = 9.sp,
+                                            fontSize = 12.sp,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis
                                         )
@@ -2436,19 +2540,20 @@ fun AlertsIslandPanel(
                                     imageVector = if (isExpanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore,
                                     contentDescription = if (isExpanded) "Collapse" else "Expand",
                                     tint = IslandColors.TextSecondary,
-                                    modifier = Modifier.size(14.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
 
                             if (isExpanded) {
-                                Spacer(Modifier.height(3.dp))
+                                Spacer(Modifier.height(4.dp))
                                 itemsForApp.forEach { n ->
                                     val otp = OTP_REGEX.find("${n.title} ${n.text}")?.groupValues?.getOrNull(1)
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clip(RoundedCornerShape(6.dp))
+                                            .heightIn(min = 38.dp)
+                                            .clip(RoundedCornerShape(8.dp))
                                             .pointerInput(n.id) {
                                                 var dx = 0f
                                                 detectHorizontalDragGestures(
@@ -2463,27 +2568,28 @@ fun AlertsIslandPanel(
                                                 app.soundManager.playTap()
                                                 app.searchEngine.launchApp(n.packageName)
                                             }
-                                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                                            .padding(horizontal = 6.dp, vertical = 4.dp)
                                     ) {
                                         Column(modifier = Modifier.weight(1f)) {
-                                            Text(n.title, color = IslandColors.TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                            Text(n.title, color = IslandColors.TextPrimary, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                             if (n.text.isNotBlank()) {
-                                                Text(n.text, color = IslandColors.TextSecondary, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                                Text(n.text, color = IslandColors.TextSecondary, fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
                                             }
                                         }
                                         if (otp != null) {
+                                            Spacer(Modifier.width(6.dp))
                                             Box(
                                                 modifier = Modifier
                                                     .clip(CircleShape)
-                                                    .background(accentColor.copy(alpha = 0.22f))
+                                                    .background(accentColor.copy(alpha = 0.24f))
                                                     .clickable {
                                                         app.soundManager.playTap()
                                                         app.clipboardMonitor.copyToClipboard(otp)
                                                         app.islandController.showTransientBanner("Copied OTP")
                                                     }
-                                                    .padding(horizontal = 6.dp, vertical = 1.dp)
+                                                    .padding(horizontal = 8.dp, vertical = 4.dp)
                                             ) {
-                                                Text("••••${otp.takeLast(2)} Copy", color = accentColor, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                                Text("••••${otp.takeLast(2)} Copy", color = accentColor, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                             }
                                         }
                                     }
@@ -2497,7 +2603,9 @@ fun AlertsIslandPanel(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
+                            .heightIn(min = 42.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color.White.copy(alpha = 0.06f))
                             .pointerInput(alert.id) {
                                 var totalDrag = 0f
                                 detectHorizontalDragGestures(
@@ -2510,19 +2618,19 @@ fun AlertsIslandPanel(
                                     }
                                 )
                             }
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Icon(
                             Icons.Filled.Notifications,
                             contentDescription = null,
                             tint = if (alert.kind == AlertKind.LOW_BATTERY) IslandColors.AccentRed else accentColor,
-                            modifier = Modifier.size(13.dp)
+                            modifier = Modifier.size(16.dp)
                         )
-                        Spacer(Modifier.width(5.dp))
+                        Spacer(Modifier.width(8.dp))
                         Column(modifier = Modifier.weight(1f)) {
-                            Text(alert.title, color = IslandColors.TextPrimary, fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-                            Text(alert.subtitle, color = IslandColors.TextSecondary, fontSize = 9.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(alert.title, color = IslandColors.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(alert.subtitle, color = IslandColors.TextSecondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }

@@ -144,10 +144,12 @@ class IslandService : AccessibilityService() {
                             subtitle = "Tap or pull down the pill"
                         ),
                         autoShowCompact = true,
-                        autoDismissMs = 2500L
+                        autoDismissMs = 2000L
                     )
                 }
             }
+            val km = getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+            app.islandController.setDeviceLocked(km?.isKeyguardLocked == true)
             observeStateAndSettings(app)
         }
     }
@@ -157,6 +159,7 @@ class IslandService : AccessibilityService() {
             val pkg = event.packageName?.toString()
             if (!pkg.isNullOrBlank() && pkg != packageName && pkg !in ignoredForegroundPackages) {
                 _currentForegroundApp.value = pkg
+                (applicationContext as? DynamicIslandApp)?.islandController?.setForegroundPackage(pkg)
             }
         }
     }

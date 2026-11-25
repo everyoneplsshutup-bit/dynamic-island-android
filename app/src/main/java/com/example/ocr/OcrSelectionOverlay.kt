@@ -586,7 +586,8 @@ private fun buildLineBands(
         val curCenterY = (cur.top + cur.bottom) / 2f
         val tCenterY = (t.topPx + t.bottomPx) / 2f
         val lineTolerance = ((cur.bottom - cur.top).coerceAtLeast(24) * 0.55f)
-        if (abs(tCenterY - curCenterY) <= lineTolerance && t.leftPx >= cur.left - 12) {
+        val horizontalGap = t.leftPx - cur.right
+        if (abs(tCenterY - curCenterY) <= lineTolerance && t.leftPx >= cur.left - 12 && horizontalGap <= 160) {
             cur = SelectionLineBand(
                 left = minOf(cur.left, t.leftPx),
                 top = minOf(cur.top, t.topPx),

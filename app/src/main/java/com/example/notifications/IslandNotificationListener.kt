@@ -10,6 +10,9 @@ import android.service.notification.StatusBarNotification
 import androidx.core.graphics.drawable.toBitmap
 import com.example.DynamicIslandApp
 import com.example.island.IslandActivity
+import com.example.island.NotificationActionItem
+import com.example.island.NotificationMediaCache
+import com.example.system.LockScreenPreset
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -150,28 +153,85 @@ class IslandNotificationListener : NotificationListenerService() {
                 return@launch
             }
 
+            val notifId = "notif_${sbn.key}"
+            val notifTitle = resolvedTitle.ifEmpty { appName }
             val entity = NotificationEntity(
                 notificationKey = sbn.key,
                 packageName = pkg,
                 appName = appName,
-                title = resolvedTitle.ifEmpty { appName },
+                title = notifTitle,
                 text = resolvedText,
                 category = notification.category ?: "",
                 timestamp = sbn.postTime
             )
             app.database.notificationDao().insert(entity)
 
+            // Polite rules: hide banner if user is currently inside that exact app
+            val fgPkg = app.islandController.state.value.currentForegroundPackage
+            if (settings.hideNotifInForegroundApp && fgPkg == pkg) {
+                app.islandController.recordNotificationDiagnostic(
+                    appName = appName,
+                    title = notifTitle,
+                    timeMs = sbn.postTime,
+                    suppressionReason = "Suppressed: $appName open in foreground"
+                )
+                return@launch
+            }
+
+            // Lock-screen privacy rules
+            val isLocked = app.islandController.state.value.isDeviceLocked
+            if (isLocked && settings.lockScreenPreset == LockScreenPreset.HIDDEN) {
+                app.islandController.recordNotificationDiagnostic(
+                    appName = appName,
+                    title = notifTitle,
+                    timeMs = sbn.postTime,
+                    suppressionReason = "Suppressed: hidden on lock screen"
+                )
+                return@launch
+            }
+            val visibleText = if (isLocked && settings.lockScreenPreset == LockScreenPreset.PRIVACY_HIDE_TEXT) {
+                "Notification content hidden"
+            } else {
+                resolvedText
+            }
+
+            // Extract rich BigPicture + non-reply actions + contentIntent for opened notification card
+            val bigPicture = extractBigPictureOnly(notification)?.let { downscaleNotifPicture(it) }
+            NotificationMediaCache.putPicture(notifId, bigPicture)
+            NotificationMediaCache.putContentIntent(notifId, notification.contentIntent)
+
+            // Rule §9: NO inline reply — exclude actions that attach RemoteInput
+            val safeActions = notification.actions.orEmpty()
+                .filter { action -> action.remoteInputs.isNullOrEmpty() && !action.title.isNullOrBlank() }
+                .take(3)
+                .mapIndexed { idx, action ->
+                    NotificationActionItem(
+                        index = idx,
+                        title = action.title.toString().trim(),
+                        pendingIntent = action.actionIntent
+                    )
+                }
+
+            app.islandController.recordNotificationDiagnostic(
+                appName = appName,
+                title = notifTitle,
+                timeMs = sbn.postTime,
+                suppressionReason = if (isLocked && visibleText != resolvedText) "Redacted text on lock screen" else "None"
+            )
+
             app.islandController.upsertActivity(
                 IslandActivity.NotificationPreview(
-                    id = "notif_${sbn.key}",
+                    id = notifId,
                     packageName = pkg,
                     appName = appName,
-                    title = resolvedTitle.ifEmpty { appName },
-                    text = resolvedText,
+                    title = notifTitle,
+                    text = visibleText,
+                    hasPicture = bigPicture != null,
+                    actions = safeActions,
                     timestamp = sbn.postTime
                 ),
                 autoShowCompact = true,
-                autoDismissMs = settings.alertsDwellMs.coerceIn(4000L, 10000L),
+                autoDismissMs = settings.alertsDwellMs.coerceIn(1500L, 10000L),
                 autoExpandToFull = notifCfg.autoExpand
             )
         }
@@ -180,12 +240,34 @@ class IslandNotificationListener : NotificationListenerService() {
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         sbn ?: return
         lastPostedFingerprints.remove(sbn.key)
+        NotificationMediaCache.remove("notif_${sbn.key}")
         val app = applicationContext as? DynamicIslandApp ?: return
         if (sbn.packageName in clockPackages) {
             app.timerEngine.updateMirroredClockTimer(null, null)
         }
         app.islandController.removeActivity("notif_${sbn.key}")
     }
+
+    @Suppress("DEPRECATION")
+    private fun extractBigPictureOnly(notification: Notification): Bitmap? {
+        val extras = notification.extras ?: return null
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            extras.getParcelable(Notification.EXTRA_PICTURE, Bitmap::class.java)
+        } else {
+            extras.getParcelable(Notification.EXTRA_PICTURE)
+        }
+    }
+
+    private fun downscaleNotifPicture(src: Bitmap): Bitmap? = runCatching {
+        val maxSide = 512
+        val w = src.width.coerceAtLeast(1)
+        val h = src.height.coerceAtLeast(1)
+        if (w <= maxSide && h <= maxSide) src
+        else {
+            val scale = maxSide.toFloat() / maxOf(w, h).toFloat()
+            Bitmap.createScaledBitmap(src, (w * scale).toInt().coerceAtLeast(16), (h * scale).toInt().coerceAtLeast(16), true)
+        }
+    }.getOrNull()
 
     private fun isScreenshotNotification(
         pkg: String,

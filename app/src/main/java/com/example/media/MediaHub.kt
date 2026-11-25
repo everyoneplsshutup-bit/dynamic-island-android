@@ -87,6 +87,19 @@ class MediaHub(
     private var accentJob: Job? = null
     private var sessionsListenerRegistered = false
 
+    private data class OptimisticOverrides(
+        val trackKey: String,
+        var isPlaying: Boolean? = null,
+        var isLiked: Boolean? = null,
+        var isShuffled: Boolean? = null,
+        var repeatModeLabel: String? = null,
+        var updatedAtMs: Long = android.os.SystemClock.elapsedRealtime()
+    )
+
+    private var optimisticOverrides: OptimisticOverrides? = null
+
+    private fun trackKeyFor(pkg: String, title: String, artist: String): String = "$pkg|$title|$artist"
+
     init {
         settingsRepository?.let { repo ->
             scope.launch {
@@ -195,6 +208,7 @@ class MediaHub(
             chosen.registerCallback(controllerCallback)
             syncFromController()
         } else {
+            optimisticOverrides = null
             _state.value = MediaUiState(hasNotificationAccess = isNotificationListenerEnabled())
             islandController.removeActivity("music_session")
         }
@@ -210,6 +224,7 @@ class MediaHub(
     private fun syncFromController() {
         val controller = activeController
         if (controller == null) {
+            optimisticOverrides = null
             _state.update { MediaUiState(hasNotificationAccess = isNotificationListenerEnabled()) }
             islandController.removeActivity("music_session")
             return
@@ -218,6 +233,7 @@ class MediaHub(
         val pkg = controller.packageName
         if (latestSettings.allowedMusicPackages.isNotEmpty() && pkg !in latestSettings.allowedMusicPackages) {
             detachController()
+            optimisticOverrides = null
             _state.value = MediaUiState(hasNotificationAccess = isNotificationListenerEnabled())
             islandController.removeActivity("music_session")
             return
@@ -226,8 +242,9 @@ class MediaHub(
         val hasAccess = isNotificationListenerEnabled()
         val metadata = controller.metadata
         val playback = controller.playbackState
-        val isPlaying = playback?.state == PlaybackState.STATE_PLAYING
-        if (metadata == null && !isPlaying && playback?.state != PlaybackState.STATE_PAUSED) {
+        val rawIsPlaying = playback?.state == PlaybackState.STATE_PLAYING
+        if (metadata == null && !rawIsPlaying && playback?.state != PlaybackState.STATE_PAUSED) {
+            optimisticOverrides = null
             _state.value = MediaUiState(hasNotificationAccess = hasAccess)
             islandController.removeActivity("music_session")
             progressJob?.cancel()
@@ -245,22 +262,76 @@ class MediaHub(
             ?: metadata?.getBitmap(MediaMetadata.METADATA_KEY_ART)
         val art = rawArt?.let { downsampleArtwork(it) }
         val duration = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.coerceAtLeast(0L) ?: 0L
-        val pos = playback?.position?.coerceAtLeast(0L) ?: 0L
+        val reportedPos = playback?.position?.coerceAtLeast(0L) ?: 0L
 
         val customActions = playback?.customActions ?: emptyList()
         val extras = controller.extras
         val supportsShuffle = hasAccess && (
-            customActions.any { it.action.contains(CMD_TOGGLE_SHUFFLE, ignoreCase = true) || it.action.contains("shuffle", ignoreCase = true) } ||
+            isPixelMusic ||
+                customActions.any { it.action.contains(CMD_TOGGLE_SHUFFLE, ignoreCase = true) || it.action.contains("shuffle", ignoreCase = true) } ||
                 extras?.getBoolean("supports_toggle_shuffle", false) == true
             )
         val supportsRepeat = hasAccess && (
-            customActions.any { it.action.contains(CMD_CYCLE_REPEAT, ignoreCase = true) || it.action.contains("repeat", ignoreCase = true) } ||
+            isPixelMusic ||
+                customActions.any { it.action.contains(CMD_CYCLE_REPEAT, ignoreCase = true) || it.action.contains("repeat", ignoreCase = true) } ||
                 extras?.getBoolean("supports_cycle_repeat", false) == true
             )
         val supportsLike = hasAccess && (
-            customActions.any { it.action.contains(CMD_LIKE, ignoreCase = true) || it.action.contains("favorite", ignoreCase = true) } ||
+            isPixelMusic ||
+                customActions.any { it.action.contains(CMD_LIKE, ignoreCase = true) || it.action.contains("favorite", ignoreCase = true) } ||
                 extras?.getBoolean("supports_like", false) == true
             )
+
+        val currentTrackKey = trackKeyFor(pkg, title, artist)
+        val prevState = _state.value
+        val activeOverride = optimisticOverrides?.takeIf { ov ->
+            ov.trackKey == currentTrackKey &&
+                (android.os.SystemClock.elapsedRealtime() - ov.updatedAtMs) < 8_000L
+        }
+        if (optimisticOverrides != null && optimisticOverrides?.trackKey != currentTrackKey) {
+            optimisticOverrides = null
+        }
+
+        val controllerHasShuffle = extras?.containsKey("shuffle_enabled") == true
+        val controllerHasRepeat = extras?.containsKey("repeat_mode") == true
+        val controllerHasLike = extras?.containsKey("is_liked") == true
+
+        val resolvedIsPlaying = if (activeOverride?.isPlaying != null && (android.os.SystemClock.elapsedRealtime() - activeOverride.updatedAtMs) < 1_600L) {
+            if (activeOverride.isPlaying == rawIsPlaying) {
+                activeOverride.isPlaying = null
+                rawIsPlaying
+            } else {
+                activeOverride.isPlaying!!
+            }
+        } else {
+            rawIsPlaying
+        }
+
+        val rawShuffle = if (controllerHasShuffle) extras?.getBoolean("shuffle_enabled", false) ?: false else if (prevState.packageName == pkg && trackKeyFor(prevState.packageName, prevState.title, prevState.artist) == currentTrackKey) prevState.isShuffled else false
+        val resolvedShuffled = activeOverride?.isShuffled?.let { ov ->
+            if (controllerHasShuffle && rawShuffle == ov) {
+                activeOverride.isShuffled = null
+                rawShuffle
+            } else ov
+        } ?: rawShuffle
+
+        val rawRepeat = if (controllerHasRepeat) extras?.getString("repeat_mode") ?: "Off" else if (prevState.packageName == pkg && trackKeyFor(prevState.packageName, prevState.title, prevState.artist) == currentTrackKey) prevState.repeatModeLabel else "Off"
+        val resolvedRepeat = activeOverride?.repeatModeLabel?.let { ov ->
+            if (controllerHasRepeat && rawRepeat == ov) {
+                activeOverride.repeatModeLabel = null
+                rawRepeat
+            } else ov
+        } ?: rawRepeat
+
+        val rawLiked = if (controllerHasLike) extras?.getBoolean("is_liked", false) ?: false else if (prevState.packageName == pkg && trackKeyFor(prevState.packageName, prevState.title, prevState.artist) == currentTrackKey) prevState.isLiked else false
+        val resolvedLiked = activeOverride?.isLiked?.let { ov ->
+            if (controllerHasLike && rawLiked == ov) {
+                activeOverride.isLiked = null
+                rawLiked
+            } else ov
+        } ?: rawLiked
+
+        val pos = computeSmoothPosition(playback, prevState, currentTrackKey, reportedPos, duration)
 
         // Strictly on-device lyrics only (embedded tags or local sidecar .lrc; never network).
         val mediaUriStr = metadata?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI)
@@ -284,16 +355,16 @@ class MediaHub(
             artist = artist,
             albumArt = art,
             artworkAccentArgb = _state.value.artworkAccentArgb,
-            isPlaying = isPlaying,
+            isPlaying = resolvedIsPlaying,
             positionMs = pos,
             durationMs = duration,
             isPixelMusic = isPixelMusic,
             supportsShuffle = supportsShuffle,
             supportsRepeat = supportsRepeat,
             supportsLike = supportsLike,
-            isShuffled = extras?.getBoolean("shuffle_enabled", false) ?: false,
-            repeatModeLabel = extras?.getString("repeat_mode") ?: "Off",
-            isLiked = extras?.getBoolean("is_liked", false) ?: false,
+            isShuffled = resolvedShuffled,
+            repeatModeLabel = resolvedRepeat,
+            isLiked = resolvedLiked,
             lyrics = parsedLyrics
         )
 
@@ -310,16 +381,39 @@ class MediaHub(
                     packageName = pkg,
                     title = title,
                     artist = artist,
-                    isPlaying = isPlaying,
+                    isPlaying = resolvedIsPlaying,
                     positionMs = pos,
                     durationMs = duration
                 ),
-                autoShowCompact = isPlaying,
-                autoExpandToFull = isPlaying && musicCfg.autoExpand
+                autoShowCompact = resolvedIsPlaying,
+                autoExpandToFull = resolvedIsPlaying && musicCfg.autoExpand
             )
         }
 
-        if (isPlaying) startProgressTicker() else progressJob?.cancel()
+        if (resolvedIsPlaying) startProgressTicker() else progressJob?.cancel()
+    }
+
+    private fun computeSmoothPosition(
+        playback: PlaybackState?,
+        prevState: MediaUiState,
+        currentTrackKey: String,
+        reportedPos: Long,
+        durationMs: Long
+    ): Long {
+        val base = if (playback != null && playback.state == PlaybackState.STATE_PLAYING &&
+            playback.lastPositionUpdateTime > 0L && playback.playbackSpeed > 0f
+        ) {
+            val elapsed = (android.os.SystemClock.elapsedRealtime() - playback.lastPositionUpdateTime).coerceAtLeast(0L)
+            reportedPos + (elapsed * playback.playbackSpeed).toLong()
+        } else {
+            val sameTrack = trackKeyFor(prevState.packageName, prevState.title, prevState.artist) == currentTrackKey
+            if (sameTrack && prevState.isPlaying && reportedPos < prevState.positionMs && prevState.positionMs - reportedPos < 2_500L) {
+                prevState.positionMs
+            } else {
+                reportedPos
+            }
+        }
+        return base.coerceAtLeast(0L).let { p -> if (durationMs > 0L) p.coerceAtMost(durationMs) else p }
     }
 
     private fun downsampleArtwork(src: Bitmap): Bitmap? = runCatching {
@@ -384,17 +478,28 @@ class MediaHub(
     private fun startProgressTicker() {
         progressJob?.cancel()
         progressJob = scope.launch {
+            var lastTickMs = android.os.SystemClock.elapsedRealtime()
             while (isActive) {
+                val now = android.os.SystemClock.elapsedRealtime()
+                val delta = (now - lastTickMs).coerceIn(50L, 1_000L)
+                lastTickMs = now
+
                 val controller = activeController ?: break
                 val pb = controller.playbackState
-                if (pb?.state == PlaybackState.STATE_PLAYING) {
-                    val elapsedSinceUpdate = android.os.SystemClock.elapsedRealtime() - pb.lastPositionUpdateTime
-                    val estimated = (pb.position + (elapsedSinceUpdate * pb.playbackSpeed).toLong())
-                        .coerceAtLeast(0L)
-                        .let { pos ->
-                            val dur = _state.value.durationMs
-                            if (dur > 0L) pos.coerceAtMost(dur) else pos
-                        }
+                val curState = _state.value
+                if (!curState.hasActiveSession || !curState.isPlaying) break
+
+                val dur = curState.durationMs
+                val estimated = if (pb != null && pb.state == PlaybackState.STATE_PLAYING &&
+                    pb.lastPositionUpdateTime > 0L && pb.playbackSpeed > 0f
+                ) {
+                    val elapsedSinceUpdate = (now - pb.lastPositionUpdateTime).coerceAtLeast(0L)
+                    (pb.position + (elapsedSinceUpdate * pb.playbackSpeed).toLong())
+                } else {
+                    maxOf(curState.positionMs, pb?.position ?: 0L) + delta
+                }.coerceAtLeast(0L).let { pos -> if (dur > 0L) pos.coerceAtMost(dur) else pos }
+
+                if (estimated != curState.positionMs) {
                     _state.update { it.copy(positionMs = estimated) }
                 }
                 delay(250L)
@@ -402,9 +507,36 @@ class MediaHub(
         }
     }
 
+    private fun ensureOverrides(): OptimisticOverrides {
+        val cur = _state.value
+        val key = trackKeyFor(cur.packageName, cur.title, cur.artist)
+        val existing = optimisticOverrides
+        return if (existing != null && existing.trackKey == key) {
+            existing.apply { updatedAtMs = android.os.SystemClock.elapsedRealtime() }
+        } else {
+            OptimisticOverrides(trackKey = key).also { optimisticOverrides = it }
+        }
+    }
+
     fun togglePlayPause() {
         val c = activeController ?: return
-        if (c.playbackState?.state == PlaybackState.STATE_PLAYING) {
+        val currentlyPlaying = _state.value.isPlaying
+        val nextPlaying = !currentlyPlaying
+        ensureOverrides().isPlaying = nextPlaying
+        _state.update { it.copy(isPlaying = nextPlaying) }
+        islandController.upsertActivity(
+            IslandActivity.Music(
+                packageName = _state.value.packageName,
+                title = _state.value.title,
+                artist = _state.value.artist,
+                isPlaying = nextPlaying,
+                positionMs = _state.value.positionMs,
+                durationMs = _state.value.durationMs
+            ),
+            autoShowCompact = false
+        )
+        if (nextPlaying) startProgressTicker() else progressJob?.cancel()
+        if (currentlyPlaying) {
             c.transportControls.pause()
         } else {
             c.transportControls.play()
@@ -412,21 +544,48 @@ class MediaHub(
     }
 
     fun skipNext() {
+        optimisticOverrides = null
         activeController?.transportControls?.skipToNext()
     }
 
     fun skipPrevious() {
+        optimisticOverrides = null
         activeController?.transportControls?.skipToPrevious()
     }
 
     fun seekTo(positionMs: Long) {
-        activeController?.transportControls?.seekTo(positionMs.coerceAtLeast(0L))
-        _state.update { it.copy(positionMs = positionMs.coerceAtLeast(0L)) }
+        val clamped = positionMs.coerceAtLeast(0L).let { p ->
+            val dur = _state.value.durationMs
+            if (dur > 0L) p.coerceAtMost(dur) else p
+        }
+        activeController?.transportControls?.seekTo(clamped)
+        _state.update { it.copy(positionMs = clamped) }
     }
 
-    fun sendShuffleCommand() = sendPixelMusicCustomCommand(CMD_TOGGLE_SHUFFLE)
-    fun sendRepeatCommand() = sendPixelMusicCustomCommand(CMD_CYCLE_REPEAT)
-    fun sendLikeCommand() = sendPixelMusicCustomCommand(CMD_LIKE)
+    fun sendShuffleCommand() {
+        val next = !_state.value.isShuffled
+        ensureOverrides().isShuffled = next
+        _state.update { it.copy(isShuffled = next) }
+        sendPixelMusicCustomCommand(CMD_TOGGLE_SHUFFLE)
+    }
+
+    fun sendRepeatCommand() {
+        val next = when (_state.value.repeatModeLabel.lowercase()) {
+            "all" -> "One"
+            "one" -> "Off"
+            else -> "All"
+        }
+        ensureOverrides().repeatModeLabel = next
+        _state.update { it.copy(repeatModeLabel = next) }
+        sendPixelMusicCustomCommand(CMD_CYCLE_REPEAT)
+    }
+
+    fun sendLikeCommand() {
+        val next = !_state.value.isLiked
+        ensureOverrides().isLiked = next
+        _state.update { it.copy(isLiked = next) }
+        sendPixelMusicCustomCommand(CMD_LIKE)
+    }
 
     private fun sendPixelMusicCustomCommand(commandName: String) {
         if (!isNotificationListenerEnabled()) return

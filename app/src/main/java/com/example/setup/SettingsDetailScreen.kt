@@ -98,6 +98,7 @@ import com.example.system.IslandSettings
 import com.example.system.LockScreenPreset
 import com.example.system.MiniCapsuleSize
 import com.example.system.OpeningEffect
+import com.example.ui.theme.LocalAppBackdrop
 import com.example.system.PillSizePreset
 import com.example.system.PillStyle
 import com.example.system.PillSwipeAction
@@ -227,7 +228,7 @@ fun SettingsGroupDetailScreen(
                                                         solidFallback = false,
                                                         accentColor = lookAccent,
                                                         isHighlighted = selected,
-                                                        backdrop = null
+                                                        backdrop = LocalAppBackdrop.current
                                                     )
                                                     .clickable {
                                                         app.soundManager.playTap()
@@ -746,9 +747,9 @@ fun SettingsGroupDetailScreen(
                                     Text("${String.format("%.1f", settings.alertsDwellMs / 1000f)} s", color = IslandColors.CrimsonBright)
                                 }
                                 Slider(
-                                    value = settings.alertsDwellMs.toFloat(),
-                                    valueRange = 4000f..10000f,
-                                    steps = 5,
+                                    value = settings.alertsDwellMs.toFloat().coerceIn(1500f, 10000f),
+                                    valueRange = 1500f..10000f,
+                                    steps = 16,
                                     onValueChange = { v -> scope.launch { app.settingsRepository.update { it.copy(alertsDwellMs = v.toLong()) } } },
                                     modifier = Modifier.testTag("pill_alerts_dwell_slider")
                                 )
@@ -811,6 +812,30 @@ fun SettingsGroupDetailScreen(
                                 selectedLabel = settings.lockScreenPreset.name.replace("_", " ").lowercase().replaceFirstChar { it.uppercase() },
                                 options = LockScreenPreset.entries.map { it.name.replace("_", " ").lowercase().replaceFirstChar { c -> c.uppercase() } to it },
                                 onSelect = { p -> scope.launch { app.settingsRepository.update { it.copy(lockScreenPreset = p) } } }
+                            )
+                        }
+                        item {
+                            SwitchRow(
+                                title = "Reels / Shorts Shelf Shortcut",
+                                helper = "Show a quick Save to Shelf pill when watching Instagram, TikTok, or YouTube.",
+                                checked = settings.reelOverlayEnabled,
+                                onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(reelOverlayEnabled = c) } } }
+                            )
+                        }
+                        item {
+                            SwitchRow(
+                                title = "Swipe Up to Dismiss",
+                                helper = "Swipe up on the compact or expanded island to dismiss alerts or collapse.",
+                                checked = settings.swipeUpDismissEnabled,
+                                onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(swipeUpDismissEnabled = c) } } }
+                            )
+                        }
+                        item {
+                            SwitchRow(
+                                title = "Hide Notification When App Is Open",
+                                helper = "Suppress banner pop-ups from whichever app is already open on screen.",
+                                checked = settings.hideNotifInForegroundApp,
+                                onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(hideNotifInForegroundApp = c) } } }
                             )
                         }
                     }
@@ -1073,6 +1098,8 @@ fun SettingsGroupDetailScreen(
                                 lifecycleOwner.lifecycle.addObserver(observer)
                                 onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
                             }
+                            val islandStateDiag by app.islandController.state.collectAsState()
+                            val diag = islandStateDiag.diagnostics
                             ObsidianGlassCard {
                                 Text("Dynamic Island v${BuildConfig.VERSION_NAME}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                 Text("Application ID: ${BuildConfig.APPLICATION_ID}", color = IslandColors.TextSecondary, fontSize = 12.sp)
@@ -1087,6 +1114,12 @@ fun SettingsGroupDetailScreen(
                                 Text("• Microphone: ${if (permSnap.microphoneGranted) "Granted" else "In-context"}", color = IslandColors.TextSecondary, fontSize = 12.sp)
                                 Text("• Exact Alarms: ${if (permSnap.exactAlarmGranted) "Granted" else "Not granted"}", color = IslandColors.TextSecondary, fontSize = 12.sp)
                                 Text("• Battery Unrestricted: ${if (permSnap.batteryUnrestricted) "Granted" else "Restricted"}", color = IslandColors.TextSecondary, fontSize = 12.sp)
+                                HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.14f))
+                                Text("Runtime Diagnostics:", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                                Spacer(Modifier.height(4.dp))
+                                Text("• Last Notification: ${diag.lastNotificationApp}", color = IslandColors.TextSecondary, fontSize = 12.sp)
+                                Text("• Last Suppression Reason: ${diag.lastSuppressionReason}", color = IslandColors.TextSecondary, fontSize = 12.sp)
+                                Text("• Dead-Zone Collisions: ${diag.deadZoneCollisionCount}", color = IslandColors.TextSecondary, fontSize = 12.sp)
                             }
                         }
                         item {

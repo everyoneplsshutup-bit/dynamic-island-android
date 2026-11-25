@@ -113,7 +113,7 @@ private val settingsIndex = listOf(
     SettingsSearchEntry("Camera Calibration", "Nudge X, Y, width, and height around punch-hole", "Pill > Calibration", SettingsGroup.PILL),
     SettingsSearchEntry("Companion Circle Side", "Place +1 split bubble on Left or Right", "Pill > Split", SettingsGroup.PILL),
     SettingsSearchEntry("When Idle Mode", "Camera Only, Dual-Slot Info Pill, or Hidden", "Pill > Idle", SettingsGroup.PILL),
-    SettingsSearchEntry("Alerts Dwell Timer", "Adjust compact notification dwell 4s to 10s", "Pill > Alerts", SettingsGroup.PILL),
+    SettingsSearchEntry("Alerts Dwell Timer", "Adjust compact notification dwell 1.5s to 10s", "Pill > Alerts", SettingsGroup.PILL),
     SettingsSearchEntry("Compact Pill Content", "Auto, Music, Timer, Battery, or Notifications", "Pill > Compact", SettingsGroup.PILL),
     SettingsSearchEntry("Idle Widget", "12 left & right micro-widgets alongside camera", "Pill > Idle", SettingsGroup.PILL),
     SettingsSearchEntry("Lock-Screen Preset", "Minimal, Hide Message Text, or Hidden", "Pill > Lock Screen", SettingsGroup.PILL),
@@ -361,7 +361,8 @@ fun SettingsHomeScreen(
                                                         reduceGlass = settings.reduceGlass,
                                                         solidFallback = false,
                                                         accentColor = lookAccent,
-                                                        isHighlighted = selected
+                                                        isHighlighted = selected,
+                                                        backdrop = com.example.ui.theme.LocalAppBackdrop.current
                                                     )
                                             )
                                             Text(

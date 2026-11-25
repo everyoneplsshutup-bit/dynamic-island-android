@@ -7,6 +7,7 @@ import android.graphics.Bitmap
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
 import android.net.TrafficStats
+import android.net.Uri
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
@@ -36,6 +37,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -113,12 +115,15 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
@@ -132,6 +137,7 @@ import com.example.floating.FloatingSidebarOverlay
 import com.example.media.MediaUiState
 import com.example.media.MusicCompactWaveform
 import com.example.media.MusicExpandedView
+import com.example.ocr.MediaProjectionPromptActivity
 import com.example.ocr.OcrSelectionOverlay
 import com.example.system.AccentTheme
 import com.example.system.AnimationStyle
@@ -151,6 +157,7 @@ import com.example.system.WhenIdleMode
 import com.example.ui.theme.IslandColors
 import com.example.ui.theme.LocalAppBackdrop
 import com.example.ui.theme.MotionTokens
+import com.example.ui.theme.WavyProgressBar
 import com.example.ui.theme.islandGlassChrome
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -158,6 +165,7 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 private class DeadZoneGuardState(var violated: Boolean = false)
@@ -260,12 +268,26 @@ private fun DrawScope.drawMorphCapsuleChrome(
             drawRoundRect(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = 0.11f * g),
-                        accentColor.copy(alpha = 0.15f * g),
+                        Color.White.copy(alpha = 0.16f * g),
+                        accentColor.copy(alpha = 0.14f * g),
                         Color.Transparent
                     ),
-                    center = Offset(left + w * 0.28f, h * 0.18f),
+                    center = Offset(left + w * 0.24f, h * 0.14f),
                     radius = (maxOf(w, h) * 0.88f).coerceAtLeast(1f)
+                ),
+                topLeft = Offset(left, 0f),
+                size = Size(w, h),
+                cornerRadius = corner
+            )
+            drawRoundRect(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color(0x2890E0FF).copy(alpha = 0.16f * g),
+                        accentColor.copy(alpha = 0.10f * g),
+                        Color.Transparent
+                    ),
+                    center = Offset(left + w * 0.80f, h * 0.84f),
+                    radius = (maxOf(w, h) * 0.70f).coerceAtLeast(1f)
                 ),
                 topLeft = Offset(left, 0f),
                 size = Size(w, h),
@@ -279,9 +301,9 @@ private fun DrawScope.drawMorphCapsuleChrome(
     } else {
         Brush.verticalGradient(
             colors = listOf(
-                Color.White.copy(alpha = 0.24f + (if (isLiquid) 0.34f else 0.16f) * g),
-                accentColor.copy(alpha = (if (isLiquid) 0.42f else 0.22f) * g + 0.10f),
-                Color.White.copy(alpha = 0.14f + 0.16f * g)
+                Color.White.copy(alpha = 0.24f + (if (isLiquid) 0.44f else 0.16f) * g),
+                accentColor.copy(alpha = (if (isLiquid) 0.48f else 0.22f) * g + 0.10f),
+                Color.White.copy(alpha = 0.16f + (if (isLiquid) 0.24f else 0.14f) * g)
             ),
             startY = 0f,
             endY = h
@@ -292,42 +314,43 @@ private fun DrawScope.drawMorphCapsuleChrome(
         topLeft = Offset(left, 0f),
         size = Size(w, h),
         cornerRadius = corner,
-        style = Stroke(width = (if (isHighlighted) 1.5f else if (isLiquid) 1.15f else 0.9f).dp.toPx())
+        style = Stroke(width = (if (isHighlighted) 1.5f else if (isLiquid) 1.25f else 0.9f).dp.toPx())
     )
 }
 
 /**
  * Runtime debug guard ensuring no rendered text/glyph enters the camera cutout exclusion zone.
+ * Never paints visible debug boxes on-screen; records collision diagnostics cleanly.
  */
 internal fun Modifier.debugCameraDeadZoneGuard(
     exclusionZone: ExclusionZone,
-    label: String
+    label: String,
+    onViolation: (() -> Unit)? = null
 ): Modifier {
     if (!BuildConfig.DEBUG) return this
     val guardState = DeadZoneGuardState()
-    return this
-        .onGloballyPositioned { coords ->
-            val bounds = coords.boundsInWindow()
-            val hit = DeadZoneGeometry.rectsIntersect(
-                aLeft = bounds.left,
-                aTop = bounds.top,
-                aRight = bounds.right,
-                aBottom = bounds.bottom,
-                bLeft = exclusionZone.exclusionRectPx.left.toFloat(),
-                bTop = exclusionZone.exclusionRectPx.top.toFloat(),
-                bRight = exclusionZone.exclusionRectPx.right.toFloat(),
-                bBottom = exclusionZone.exclusionRectPx.bottom.toFloat()
-            )
-            guardState.violated = hit
-            if (hit) {
-                Log.e("DeadZoneGuard", "Overlap detected for $label: bounds=$bounds vs cutout=${exclusionZone.exclusionRectPx}")
+    return this.onGloballyPositioned { coords ->
+        val bounds = coords.boundsInWindow()
+        val hit = DeadZoneGeometry.rectsIntersect(
+            aLeft = bounds.left,
+            aTop = bounds.top,
+            aRight = bounds.right,
+            aBottom = bounds.bottom,
+            bLeft = exclusionZone.exclusionRectPx.left.toFloat(),
+            bTop = exclusionZone.exclusionRectPx.top.toFloat(),
+            bRight = exclusionZone.exclusionRectPx.right.toFloat(),
+            bBottom = exclusionZone.exclusionRectPx.bottom.toFloat()
+        )
+        if (hit) {
+            if (!guardState.violated) {
+                guardState.violated = true
+                onViolation?.invoke()
             }
+            Log.e("DeadZoneGuard", "Overlap detected for $label: bounds=$bounds vs cutout=${exclusionZone.exclusionRectPx}")
+        } else {
+            guardState.violated = false
         }
-        .drawBehind {
-            if (guardState.violated) {
-                drawRect(color = Color.Red, style = Stroke(width = 1.5.dp.toPx()))
-            }
-        }
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -384,13 +407,40 @@ fun IslandOverlayRoot(
             slotWidthDp = settings.pillSizePreset.slotWidthDp
         )
     }
-    val idleWidthDp = remember(settings.whenIdleMode, compactMetrics.totalWidthDp, holeW) {
+    val idleMetrics = remember(holeW, holeH) {
+        DeadZoneGeometry.idleCameraPillMetrics(holeW, holeH)
+    }
+    val idleWidthDp = remember(settings.whenIdleMode, compactMetrics.totalWidthDp, idleMetrics.widthDp) {
         when (settings.whenIdleMode) {
             WhenIdleMode.INFO_PILL -> compactMetrics.totalWidthDp
-            WhenIdleMode.CAMERA_ONLY -> (holeW + 94f).coerceIn(114f, 152f)
-            WhenIdleMode.HIDDEN -> (holeW + 24f).coerceAtLeast(48f)
+            WhenIdleMode.CAMERA_ONLY, WhenIdleMode.HIDDEN -> idleMetrics.widthDp
         }
     }
+    val idleHeightDp = remember(settings.whenIdleMode, compactMetrics.pillHeightDp, idleMetrics.heightDp) {
+        when (settings.whenIdleMode) {
+            WhenIdleMode.INFO_PILL -> compactMetrics.pillHeightDp
+            WhenIdleMode.CAMERA_ONLY, WhenIdleMode.HIDDEN -> idleMetrics.heightDp
+        }
+    }
+    val mediumTargetWidthDp = remember(exclusionZone.screenWidthPx, exclusionZone.density) {
+        DeadZoneGeometry.boundedCardWidthDp(
+            screenWidthPx = exclusionZone.screenWidthPx,
+            density = exclusionZone.density,
+            desiredMaxDp = DeadZoneGeometry.MEDIUM_MAX_WIDTH_DP
+        )
+    }
+    val fullTargetWidthDp = remember(exclusionZone.screenWidthPx, exclusionZone.density) {
+        DeadZoneGeometry.boundedCardWidthDp(
+            screenWidthPx = exclusionZone.screenWidthPx,
+            density = exclusionZone.density,
+            desiredMaxDp = DeadZoneGeometry.FULL_MAX_WIDTH_DP
+        )
+    }
+    val cardTopClearanceDp = remember(exclusionZone) {
+        DeadZoneGeometry.cardTopAnchorDp(exclusionZone)
+    }
+    var measuredMediumHeightDp by remember { mutableFloatStateOf(202f) }
+    var measuredExpandedHeightDp by remember { mutableFloatStateOf(316f) }
     val densityPx = androidx.compose.ui.platform.LocalDensity.current.density
 
     val morphTransition = updateTransition(targetState = state.mode, label = "island_morph")
@@ -426,8 +476,8 @@ fun IslandOverlayRoot(
             IslandMode.IDLE -> idleWidthDp
             IslandMode.COMPACT -> compactMetrics.totalWidthDp
             IslandMode.SPLIT -> compactMetrics.totalWidthDp + 44f
-            IslandMode.MEDIUM -> DeadZoneGeometry.MEDIUM_MAX_WIDTH_DP
-            IslandMode.EXPANDED -> DeadZoneGeometry.FULL_MAX_WIDTH_DP
+            IslandMode.MEDIUM -> mediumTargetWidthDp
+            IslandMode.EXPANDED -> fullTargetWidthDp
         }
     }
     val morphHeightDpState = morphTransition.animateFloat(
@@ -435,9 +485,10 @@ fun IslandOverlayRoot(
         label = "morph_height"
     ) { mode ->
         when (mode) {
-            IslandMode.IDLE, IslandMode.COMPACT, IslandMode.SPLIT -> compactMetrics.pillHeightDp
-            IslandMode.MEDIUM -> DeadZoneGeometry.MEDIUM_MAX_HEIGHT_DP
-            IslandMode.EXPANDED -> DeadZoneGeometry.FULL_MAX_HEIGHT_DP
+            IslandMode.IDLE -> idleHeightDp
+            IslandMode.COMPACT, IslandMode.SPLIT -> compactMetrics.pillHeightDp
+            IslandMode.MEDIUM -> measuredMediumHeightDp.coerceIn(DeadZoneGeometry.MEDIUM_MIN_HEIGHT_DP, DeadZoneGeometry.MEDIUM_MAX_HEIGHT_DP)
+            IslandMode.EXPANDED -> measuredExpandedHeightDp.coerceIn(220f, DeadZoneGeometry.FULL_MAX_HEIGHT_DP)
         }
     }
     val morphRadiusDpState = morphTransition.animateFloat(
@@ -445,7 +496,8 @@ fun IslandOverlayRoot(
         label = "morph_radius"
     ) { mode ->
         when (mode) {
-            IslandMode.IDLE, IslandMode.COMPACT, IslandMode.SPLIT -> compactMetrics.pillHeightDp * 0.5f
+            IslandMode.IDLE -> idleHeightDp * 0.5f
+            IslandMode.COMPACT, IslandMode.SPLIT -> compactMetrics.pillHeightDp * 0.5f
             IslandMode.MEDIUM -> IslandColors.MediumOuterRadius.value
             IslandMode.EXPANDED -> IslandColors.ExpandedOuterRadius.value
         }
@@ -456,8 +508,7 @@ fun IslandOverlayRoot(
     ) { mode ->
         when (mode) {
             IslandMode.IDLE, IslandMode.COMPACT, IslandMode.SPLIT -> 0f
-            IslandMode.MEDIUM -> 2f
-            IslandMode.EXPANDED -> 4f
+            IslandMode.MEDIUM, IslandMode.EXPANDED -> cardTopClearanceDp
         }
     }
     val glassAlphaState = morphTransition.animateFloat(
@@ -599,11 +650,40 @@ fun IslandOverlayRoot(
         } else {
             0.dp
         }
+        val swipeUpDismissModifier = if (settings.swipeUpDismissEnabled && state.mode != IslandMode.IDLE) {
+            Modifier.pointerInput(state.mode, settings.swipeUpDismissEnabled) {
+                var dragY = 0f
+                detectVerticalDragGestures(
+                    onDragStart = { dragY = 0f },
+                    onVerticalDrag = { _, delta -> dragY += delta },
+                    onDragEnd = {
+                        if (dragY < -44f) {
+                            onRequestHaptic()
+                            when (state.mode) {
+                                IslandMode.EXPANDED, IslandMode.MEDIUM -> app.islandController.collapse()
+                                IslandMode.COMPACT, IslandMode.SPLIT -> {
+                                    val p = state.primaryActivity
+                                    if (p is IslandActivity.NotificationPreview || p is IslandActivity.Alert) {
+                                        app.islandController.dismissActiveNotification()
+                                    } else {
+                                        app.islandController.collapseToIdle()
+                                    }
+                                }
+                                IslandMode.IDLE -> Unit
+                            }
+                        }
+                    }
+                )
+            }
+        } else {
+            Modifier
+        }
 
         Box(
             modifier = Modifier
                 .align(anchorAlign)
-                .offset(x = anchorOffsetX, y = anchorOffsetY),
+                .offset(x = anchorOffsetX, y = anchorOffsetY)
+                .then(swipeUpDismissModifier),
             contentAlignment = anchorAlign
         ) {
             when {
@@ -647,6 +727,12 @@ fun IslandOverlayRoot(
                                     accentColor = accentColor,
                                     isHighlighted = state.isDragOverIsland
                                 )
+                            }
+                            .onSizeChanged { sz ->
+                                val hDp = sz.height / densityPx
+                                if (hDp >= 120f && abs(hDp - measuredExpandedHeightDp) > 2f) {
+                                    measuredExpandedHeightDp = hDp.coerceIn(220f, DeadZoneGeometry.FULL_MAX_HEIGHT_DP)
+                                }
                             }
                     ) {
                         ExpandedIslandCard(
@@ -700,6 +786,12 @@ fun IslandOverlayRoot(
                                     accentColor = accentColor,
                                     isHighlighted = state.isDragOverIsland
                                 )
+                            }
+                            .onSizeChanged { sz ->
+                                val hDp = sz.height / densityPx
+                                if (hDp >= 120f && abs(hDp - measuredMediumHeightDp) > 2f) {
+                                    measuredMediumHeightDp = hDp.coerceIn(DeadZoneGeometry.MEDIUM_MIN_HEIGHT_DP, DeadZoneGeometry.MEDIUM_MAX_HEIGHT_DP)
+                                }
                             }
                     ) {
                         MediumPillView(
@@ -913,6 +1005,128 @@ fun IslandOverlayRoot(
             )
         }
 
+        // Floating Reels/Shorts Shelf Shortcut Pill when user is inside Instagram / TikTok / YouTube
+        AnimatedVisibility(
+            visible = state.mode == IslandMode.IDLE &&
+                settings.reelOverlayEnabled &&
+                settings.vaultEnabled &&
+                state.isReelAppForeground &&
+                !state.isDeviceLocked &&
+                !state.isCalibrationPreview,
+            enter = fadeIn(tween(150)) + scaleIn(initialScale = 0.9f),
+            exit = fadeOut(tween(120)),
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = (cardTopClearanceDp + 10f).dp, end = 12.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .height(36.dp)
+                    .islandGlassChrome(
+                        shape = CircleShape,
+                        pillStyle = effectivePillStyle,
+                        glassDensity = settings.glassDensity,
+                        reduceGlass = settings.reduceGlass,
+                        solidFallback = settings.solidFallback,
+                        accentColor = accentColor,
+                        backdrop = LocalAppBackdrop.current,
+                        crossWindowBlurActive = crossWindowBlurSupported
+                    )
+                    .clickable {
+                        onRequestHaptic()
+                        app.soundManager.playVaultAdd()
+                        MediaProjectionPromptActivity.launchForVaultScreenshot(context)
+                        app.islandController.showTransientBanner("Saving frame to Shelf...")
+                    }
+                    .padding(horizontal = 12.dp)
+                    .testTag("reels_save_shelf_chip")
+            ) {
+                Icon(Icons.Filled.PhotoLibrary, contentDescription = "Save to Shelf", tint = accentColor, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Save to Shelf", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+
+        // Floating Liquid Glass Permission Approval Prompt
+        val approval = state.approvalPrompt
+        AnimatedVisibility(
+            visible = approval != null,
+            enter = fadeIn(tween(160)) + scaleIn(initialScale = 0.94f),
+            exit = fadeOut(tween(120)),
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = (cardTopClearanceDp + 6f).dp, start = 16.dp, end = 16.dp)
+        ) {
+            if (approval != null) {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier
+                        .widthIn(max = fullTargetWidthDp.dp)
+                        .fillMaxWidth()
+                        .islandGlassChrome(
+                            shape = RoundedCornerShape(24.dp),
+                            pillStyle = effectivePillStyle,
+                            glassDensity = settings.glassDensity,
+                            reduceGlass = settings.reduceGlass,
+                            solidFallback = settings.solidFallback,
+                            accentColor = accentColor,
+                            isHighlighted = true,
+                            backdrop = LocalAppBackdrop.current,
+                            crossWindowBlurActive = crossWindowBlurSupported
+                        )
+                        .padding(16.dp)
+                        .testTag("floating_approval_prompt")
+                ) {
+                    Text(approval.title, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text(approval.reason, color = Color.White.copy(alpha = 0.78f), fontSize = 13.sp, lineHeight = 18.sp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp, Alignment.End)
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .height(40.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.12f))
+                                .clickable {
+                                    onRequestHaptic()
+                                    app.islandController.dismissApprovalPrompt()
+                                }
+                                .padding(horizontal = 16.dp)
+                        ) {
+                            Text("Later", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                        }
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .height(40.dp)
+                                .clip(CircleShape)
+                                .background(accentColor)
+                                .clickable {
+                                    onRequestHaptic()
+                                    val intent = when (approval.permissionKey) {
+                                        "overlay" -> Intent(
+                                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                            Uri.parse("package:${context.packageName}")
+                                        )
+                                        "notification_listener" -> Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)
+                                        "accessibility" -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                        else -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${context.packageName}"))
+                                    }.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                    runCatching { context.startActivity(intent) }
+                                    app.islandController.dismissApprovalPrompt()
+                                }
+                                .padding(horizontal = 18.dp)
+                        ) {
+                            Text(approval.actionLabel, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                }
+            }
+        }
+
         AnimatedVisibility(
             visible = state.statusBanner != null,
             enter = fadeIn(tween(140)),
@@ -1044,82 +1258,29 @@ fun IdlePillView(
         return
     }
 
-    val wingWidthDp = when (settings.pillSizePreset) {
-        com.example.system.PillSizePreset.SMALL -> 32.dp
-        com.example.system.PillSizePreset.MEDIUM -> 38.dp
-        com.example.system.PillSizePreset.LARGE -> 46.dp
+    val idleMetrics = remember(holeW, holeH) {
+        DeadZoneGeometry.idleCameraPillMetrics(holeW, holeH)
     }
-    val effectivePillStyle = if (settings.solidFallback) PillStyle.BLACK else settings.pillStyle
-    val pillAccent = if (isLowBatteryWarning) IslandColors.AccentRed else accentColor
     val idleBorder = when {
-        isCalibrationPreview || isLowBatteryWarning -> IslandColors.AccentRed.copy(alpha = 0.85f)
+        isCalibrationPreview || isLowBatteryWarning -> IslandColors.AccentRed.copy(alpha = 0.90f)
         isDragOverIsland -> accentColor
-        else -> pillAccent.copy(alpha = 0.78f)
+        else -> Color.White.copy(alpha = 0.14f)
     }
 
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
+    // Idle CAMERA_ONLY state: compact black pill hugging ONLY the camera punch-hole (never a wide bar)
+    Box(
         modifier = Modifier
-            .height((holeH + 4f).coerceAtLeast(36f).dp)
-            .islandGlassChrome(
-                shape = CircleShape,
-                pillStyle = effectivePillStyle,
-                glassDensity = settings.glassDensity,
-                reduceGlass = settings.reduceGlass,
-                solidFallback = settings.solidFallback,
-                accentColor = pillAccent,
-                isHighlighted = isDragOverIsland || isCalibrationPreview || isLowBatteryWarning,
-                backdrop = LocalAppBackdrop.current
+            .width(idleMetrics.widthDp.dp)
+            .height(idleMetrics.heightDp.dp)
+            .clip(CircleShape)
+            .background(IslandColors.PillBlack)
+            .border(
+                width = if (isDragOverIsland || isCalibrationPreview || isLowBatteryWarning) 1.4.dp else 0.75.dp,
+                color = idleBorder,
+                shape = CircleShape
             )
-            .border(strokeWidth, idleBorder, CircleShape)
-            .padding(horizontal = 10.dp, vertical = 2.dp)
             .testTag("idle_camera_ring")
-    ) {
-        Box(
-            modifier = Modifier.width(wingWidthDp),
-            contentAlignment = Alignment.CenterStart
-        ) {
-            if (isLowBatteryWarning) {
-                Icon(
-                    imageVector = Icons.Filled.BatteryAlert,
-                    contentDescription = "Low battery warning",
-                    tint = IslandColors.AccentRed,
-                    modifier = Modifier.size(14.dp)
-                )
-            } else {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(3.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(5.dp)
-                            .clip(CircleShape)
-                            .background(pillAccent)
-                    )
-                    Box(
-                        modifier = Modifier
-                            .width(10.dp)
-                            .height(2.5.dp)
-                            .clip(CircleShape)
-                            .background(pillAccent.copy(alpha = 0.58f))
-                    )
-                }
-            }
-        }
-        Spacer(modifier = Modifier.width((holeW + 16f).dp))
-        Box(
-            modifier = Modifier.width(wingWidthDp),
-            contentAlignment = Alignment.CenterEnd
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(5.dp)
-                    .clip(CircleShape)
-                    .background(pillAccent.copy(alpha = 0.55f))
-            )
-        }
-    }
+    )
 }
 
 @Composable
@@ -1459,12 +1620,12 @@ fun CompactPillView(
                         )
                     }
                     is IslandActivity.Alert -> {
-                        val alertColor = if (activity.kind == AlertKind.LOW_BATTERY) IslandColors.AccentRed else accentColor
+                        val alertColor = if (activity.kind == AlertKind.LOW_BATTERY) IslandColors.AccentRed else Color.White
                         Text(
                             text = if (hideTextOnLock) "Alert" else activity.title,
                             color = alertColor,
                             fontSize = 11.sp,
-                            fontWeight = if (activity.kind == AlertKind.LOW_BATTERY) FontWeight.Bold else FontWeight.Medium,
+                            fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
@@ -1619,8 +1780,8 @@ private fun SplitSecondaryBubble(
 }
 
 /**
- * Stage 1 Medium Pill Preview: capped widthIn(max = 320.dp), heightIn(96..120.dp), 28dp radius,
- * body strictly below camera clearance (>= 12dp spacer).
+ * Stage 1 Medium Pill Preview: roomy 340..380 x 170..240 dp card anchored below cutout & status bar,
+ * rich Notification / Music / Timer views, and generous touch targets.
  */
 @Composable
 fun MediumPillView(
@@ -1639,10 +1800,18 @@ fun MediumPillView(
     bodyAlphaProvider: () -> Float = { 1f },
     onRequestHaptic: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     val primary = state.primaryActivity
     val holeW = exclusionZone.holeWidthDp.coerceAtLeast(settings.cutoutWidthDp)
     val holeH = exclusionZone.holeHeightDp.coerceAtLeast(settings.cutoutHeightDp)
     val shape = RoundedCornerShape(IslandColors.MediumOuterRadius)
+    val boundedMaxW = remember(exclusionZone.screenWidthPx, exclusionZone.density) {
+        DeadZoneGeometry.boundedCardWidthDp(
+            screenWidthPx = exclusionZone.screenWidthPx,
+            density = exclusionZone.density,
+            desiredMaxDp = DeadZoneGeometry.MEDIUM_MAX_WIDTH_DP
+        )
+    }
 
     val chromeMod = if (drawOwnChrome) {
         Modifier.islandGlassChrome(
@@ -1663,23 +1832,23 @@ fun MediumPillView(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = if (drawOwnChrome) 24.dp else 0.dp)
-            .widthIn(max = DeadZoneGeometry.MEDIUM_MAX_WIDTH_DP.dp)
-            .heightIn(min = 96.dp, max = DeadZoneGeometry.MEDIUM_MAX_HEIGHT_DP.dp)
+            .padding(horizontal = if (drawOwnChrome) 12.dp else 0.dp)
+            .widthIn(min = DeadZoneGeometry.MEDIUM_MIN_WIDTH_DP.coerceAtMost(boundedMaxW).dp, max = boundedMaxW.dp)
+            .heightIn(min = DeadZoneGeometry.MEDIUM_MIN_HEIGHT_DP.dp, max = DeadZoneGeometry.MEDIUM_MAX_HEIGHT_DP.dp)
             .then(chromeMod)
             .clickable {
                 onRequestHaptic()
                 app.islandController.expand()
             }
-            .padding(horizontal = 14.dp, vertical = 7.dp)
+            .padding(horizontal = 16.dp, vertical = 12.dp)
             .testTag("medium_stage1_pill"),
-        verticalArrangement = Arrangement.spacedBy(5.dp)
+        verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        // Top header strictly clears punch-hole camera
+        // Top header strictly clears punch-hole camera exclusion zone even in standalone tests
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height((holeH + 6f).coerceAtLeast(35f).dp)
+                .height((holeH + 6f).coerceAtLeast(36f).dp)
                 .graphicsLayer {
                     val a = headerAlphaProvider()
                     alpha = a
@@ -1692,40 +1861,42 @@ fun MediumPillView(
                 text = when (primary) {
                     is IslandActivity.Music -> mediaState.appLabel.ifBlank { "Now Playing" }
                     is IslandActivity.Timer -> "Timer"
-                    is IslandActivity.Charging -> "Power"
+                    is IslandActivity.Charging -> "Charging"
                     is IslandActivity.NotificationPreview -> primary.appName.ifBlank { "Notification" }
+                    is IslandActivity.Alert -> primary.title
                     else -> state.activeTab.title
                 },
                 color = accentColor,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier
-                    .widthIn(max = 96.dp)
+                    .widthIn(max = 108.dp)
                     .debugCameraDeadZoneGuard(exclusionZone, "medium_header_left")
             )
             Spacer(Modifier.width((holeW + 16f).dp))
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
+                    .height(30.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.08f))
-                    .border(0.6.dp, accentColor.copy(alpha = 0.40f), CircleShape)
+                    .background(Color.White.copy(alpha = 0.12f))
+                    .border(0.75.dp, accentColor.copy(alpha = 0.48f), CircleShape)
                     .clickable {
                         onRequestHaptic()
                         app.islandController.expand()
                     }
-                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                    .padding(horizontal = 10.dp)
                     .debugCameraDeadZoneGuard(exclusionZone, "medium_header_right")
                     .testTag("medium_expand_btn")
             ) {
-                Text("Full", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Open full card", tint = accentColor, modifier = Modifier.size(14.dp))
+                Text("Full", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                Spacer(Modifier.width(2.dp))
+                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Open full card", tint = accentColor, modifier = Modifier.size(15.dp))
             }
         }
 
-        // Body sits strictly >= 4 dp + header clearance below camera
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -1745,7 +1916,7 @@ fun MediumPillView(
                 } else 0f
                 Column(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -1755,37 +1926,52 @@ fun MediumPillView(
                             Image(
                                 bitmap = mediaState.albumArt.asImageBitmap(),
                                 contentDescription = "Album art",
+                                contentScale = ContentScale.Crop,
                                 modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .border(0.75.dp, accentColor.copy(alpha = 0.65f), RoundedCornerShape(8.dp))
+                                    .size(54.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .border(0.9.dp, musicAccent.copy(alpha = 0.70f), RoundedCornerShape(12.dp))
                             )
                         } else {
                             Box(
                                 modifier = Modifier
-                                    .size(38.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .background(Color.White.copy(alpha = 0.10f))
-                                    .border(0.75.dp, accentColor.copy(alpha = 0.55f), RoundedCornerShape(8.dp)),
+                                    .size(54.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(Color.White.copy(alpha = 0.12f))
+                                    .border(0.9.dp, musicAccent.copy(alpha = 0.55f), RoundedCornerShape(12.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(Icons.Filled.MusicNote, contentDescription = null, tint = musicAccent, modifier = Modifier.size(18.dp))
+                                Icon(Icons.Filled.MusicNote, contentDescription = null, tint = musicAccent, modifier = Modifier.size(24.dp))
                             }
                         }
-                        Spacer(Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(mediaState.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                            Text(mediaState.artist, color = IslandColors.TextSecondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = mediaState.title.ifBlank { "No track playing" },
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = mediaState.artist.ifBlank { "Tap to open music" },
+                                color = Color.White.copy(alpha = 0.72f),
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
                         }
-                        IconButton(onClick = { onRequestHaptic(); app.mediaHub.skipPrevious() }, modifier = Modifier.size(30.dp)) {
-                            Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous", tint = Color.White, modifier = Modifier.size(19.dp))
+                        Spacer(Modifier.width(6.dp))
+                        IconButton(onClick = { onRequestHaptic(); app.mediaHub.skipPrevious() }, modifier = Modifier.size(40.dp)) {
+                            Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous", tint = Color.White, modifier = Modifier.size(22.dp))
                         }
                         Box(
                             modifier = Modifier
-                                .size(30.dp)
+                                .size(44.dp)
                                 .clip(CircleShape)
                                 .background(musicAccent)
-                                .border(0.75.dp, Color.White.copy(alpha = 0.45f), CircleShape)
+                                .border(0.9.dp, Color.White.copy(alpha = 0.48f), CircleShape)
                                 .clickable {
                                     onRequestHaptic()
                                     if (mediaState.isPlaying) app.soundManager.playMusicPause() else app.soundManager.playMusicPlay()
@@ -1795,113 +1981,366 @@ fun MediumPillView(
                         ) {
                             Icon(
                                 imageVector = if (mediaState.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                contentDescription = "Play/Pause",
+                                contentDescription = "Play or pause",
                                 tint = Color.White,
-                                modifier = Modifier.size(18.dp)
+                                modifier = Modifier.size(22.dp)
                             )
                         }
-                        IconButton(onClick = { onRequestHaptic(); app.mediaHub.skipNext() }, modifier = Modifier.size(30.dp)) {
-                            Icon(Icons.Filled.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(19.dp))
+                        IconButton(onClick = { onRequestHaptic(); app.mediaHub.skipNext() }, modifier = Modifier.size(40.dp)) {
+                            Icon(Icons.Filled.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(22.dp))
                         }
                     }
 
-                    // Slim glowing accent track progress line matching Liquid Glass mockups
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(3.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.14f))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(trackFraction.coerceAtLeast(0.02f))
-                                .height(3.dp)
-                                .clip(CircleShape)
-                                .background(musicAccent)
+                        Text(
+                            text = TimerEngine.formatDuration(mediaState.positionMs),
+                            style = TextStyle(color = Color.White.copy(alpha = 0.72f), fontSize = 11.sp, fontFeatureSettings = "tnum")
                         )
+                        WavyProgressBar(
+                            progress = trackFraction,
+                            isActiveWave = mediaState.isPlaying,
+                            accentColor = musicAccent,
+                            height = 16.dp,
+                            interactive = mediaState.durationMs > 0L,
+                            onSeekFraction = { frac ->
+                                if (mediaState.durationMs > 0L) app.mediaHub.seekTo((mediaState.durationMs * frac).toLong())
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = TimerEngine.formatDuration(mediaState.durationMs),
+                            style = TextStyle(color = Color.White.copy(alpha = 0.72f), fontSize = 11.sp, fontFeatureSettings = "tnum")
+                        )
+                    }
+                }
+            }
+
+            is IslandActivity.NotificationPreview -> {
+                val hideTextOnLock = state.isDeviceLocked && settings.lockScreenPreset == LockScreenPreset.PRIVACY_HIDE_TEXT
+                val appIconBmp = remember(primary.packageName) {
+                    runCatching { context.packageManager.getApplicationIcon(primary.packageName).toBitmap(64, 64) }.getOrNull()
+                }
+                val richBitmap = remember(primary.id, primary.hasPicture) {
+                    if (primary.hasPicture) NotificationMediaCache.getPicture(primary.id)?.takeIf { !it.isRecycled } else null
+                }
+                val otpMatch = remember(primary.text, hideTextOnLock) {
+                    if (hideTextOnLock) null
+                    else Regex("\\b\\d{4,8}\\b").find(primary.text)?.value
+                }
+
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Top,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        if (appIconBmp != null) {
+                            Image(
+                                bitmap = appIconBmp.asImageBitmap(),
+                                contentDescription = primary.appName,
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .border(0.75.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(12.dp))
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(accentColor.copy(alpha = 0.22f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Filled.Notifications, contentDescription = null, tint = accentColor, modifier = Modifier.size(22.dp))
+                            }
+                        }
+
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(
+                                text = if (hideTextOnLock) primary.appName else primary.title.ifBlank { primary.appName },
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = if (hideTextOnLock) "Content hidden on lock screen" else primary.text.ifBlank { "New notification" },
+                                color = Color.White.copy(alpha = 0.78f),
+                                fontSize = 13.sp,
+                                lineHeight = 17.sp,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        if (richBitmap != null && !hideTextOnLock) {
+                            Image(
+                                bitmap = richBitmap.asImageBitmap(),
+                                contentDescription = "Notification preview image",
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier
+                                    .size(56.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .border(0.75.dp, Color.White.copy(alpha = 0.24f), RoundedCornerShape(10.dp))
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (otpMatch != null) {
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .height(34.dp)
+                                    .clip(CircleShape)
+                                    .background(accentColor)
+                                    .clickable {
+                                        onRequestHaptic()
+                                        app.clipboardMonitor.copyToClipboard(otpMatch)
+                                        app.islandController.showTransientBanner("Copied $otpMatch")
+                                    }
+                                    .padding(horizontal = 12.dp)
+                            ) {
+                                Text("Copy $otpMatch", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                        if (!hideTextOnLock) {
+                            primary.actions.take(2).forEach { act ->
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .height(34.dp)
+                                        .clip(CircleShape)
+                                        .background(Color.White.copy(alpha = 0.14f))
+                                        .clickable {
+                                            onRequestHaptic()
+                                            runCatching { act.pendingIntent?.send() }
+                                            app.islandController.collapse()
+                                        }
+                                        .padding(horizontal = 12.dp)
+                                ) {
+                                    Text(act.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.weight(1f))
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .height(34.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.12f))
+                                .clickable {
+                                    onRequestHaptic()
+                                    app.islandController.dismissNotificationById(primary.id)
+                                }
+                                .padding(horizontal = 12.dp)
+                        ) {
+                            Text("Clear", color = Color.White.copy(alpha = 0.90f), fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                        }
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .height(34.dp)
+                                .clip(CircleShape)
+                                .background(accentColor.copy(alpha = 0.28f))
+                                .border(0.75.dp, accentColor.copy(alpha = 0.6f), CircleShape)
+                                .clickable {
+                                    onRequestHaptic()
+                                    val pi = NotificationMediaCache.getContentIntent(primary.id)
+                                    if (pi != null) {
+                                        runCatching { pi.send() }
+                                    } else {
+                                        runCatching {
+                                            context.packageManager.getLaunchIntentForPackage(primary.packageName)?.let {
+                                                it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                                context.startActivity(it)
+                                            }
+                                        }
+                                    }
+                                    app.islandController.collapse()
+                                }
+                                .padding(horizontal = 14.dp)
+                        ) {
+                            Text("Open", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
             }
 
             is IslandActivity.Timer -> {
-                Row(
+                val frac = if (timerState.totalMs > 0L) {
+                    (timerState.remainingMs.toFloat() / timerState.totalMs.toFloat()).coerceIn(0f, 1f)
+                } else 0f
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Text(
-                        text = TimerEngine.formatDuration(timerState.remainingMs),
-                        style = TextStyle(color = accentColor, fontSize = 22.sp, fontWeight = FontWeight.Light, fontFeatureSettings = "tnum")
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        IconButton(
-                            onClick = {
-                                onRequestHaptic()
-                                if (timerState.isRunning) app.timerEngine.pauseTimer() else app.timerEngine.resumeTimer()
-                            },
-                            modifier = Modifier.size(34.dp).clip(CircleShape).background(accentColor)
-                        ) {
-                            Icon(
-                                imageVector = if (timerState.isRunning) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                                contentDescription = "Toggle timer",
-                                tint = Color.White
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Text(
+                                text = primary.label.ifBlank { "Countdown" },
+                                color = Color.White.copy(alpha = 0.72f),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium
+                            )
+                            Text(
+                                text = TimerEngine.formatDuration(timerState.remainingMs),
+                                style = TextStyle(color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Light, fontFeatureSettings = "tnum")
                             )
                         }
-                        IconButton(
-                            onClick = { onRequestHaptic(); app.timerEngine.cancelTimer() },
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xFF1A1417))
-                                .border(0.75.dp, Color.White.copy(alpha = 0.20f), CircleShape)
-                        ) {
-                            Icon(Icons.Filled.Close, contentDescription = "Cancel timer", tint = Color.White)
+                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            IconButton(
+                                onClick = {
+                                    onRequestHaptic()
+                                    if (timerState.isRunning) app.timerEngine.pauseTimer() else app.timerEngine.resumeTimer()
+                                },
+                                modifier = Modifier.size(44.dp).clip(CircleShape).background(accentColor)
+                            ) {
+                                Icon(
+                                    imageVector = if (timerState.isRunning) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                    contentDescription = "Toggle timer",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                            IconButton(
+                                onClick = { onRequestHaptic(); app.timerEngine.cancelTimer() },
+                                modifier = Modifier
+                                    .size(44.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.14f))
+                                    .border(0.75.dp, Color.White.copy(alpha = 0.24f), CircleShape)
+                            ) {
+                                Icon(Icons.Filled.Close, contentDescription = "Cancel timer", tint = Color.White, modifier = Modifier.size(20.dp))
+                            }
                         }
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(5.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.14f))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(frac.coerceAtLeast(0.03f))
+                                .height(5.dp)
+                                .clip(CircleShape)
+                                .background(accentColor)
+                        )
                     }
                 }
             }
 
             is IslandActivity.Charging -> {
-                Row(
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.BatteryChargingFull, contentDescription = null, tint = IslandColors.AccentGreen)
-                        Spacer(Modifier.width(6.dp))
-                        Text(
-                            text = "${primary.levelPercent}% · ${primary.pluggedLabel}",
-                            color = IslandColors.AccentGreen,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.BatteryChargingFull, contentDescription = null, tint = IslandColors.AccentGreen, modifier = Modifier.size(28.dp))
+                            Spacer(Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "${primary.levelPercent}% · ${primary.pluggedLabel}",
+                                    color = Color.White,
+                                    fontSize = 16.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                                Text(
+                                    text = if (primary.isFull) "Battery full" else "Power connected",
+                                    color = Color.White.copy(alpha = 0.72f),
+                                    fontSize = 13.sp
+                                )
+                            }
+                        }
+                        if (primary.wattageWatts != null && primary.wattageWatts > 0.5f) {
+                            Text("${primary.wattageWatts.roundToInt()} W", color = IslandColors.AccentGreen, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
-                    if (primary.wattageWatts != null && primary.wattageWatts > 0.5f) {
-                        Text("${primary.wattageWatts.roundToInt()} W", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.14f))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth((primary.levelPercent / 100f).coerceIn(0.04f, 1f))
+                                .height(6.dp)
+                                .clip(CircleShape)
+                                .background(IslandColors.AccentGreen)
+                        )
                     }
                 }
             }
 
             else -> {
-                Row(
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceEvenly
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    settings.enabledTabs.filter { settings.isTabMasterEnabled(it) }.take(5).forEach { tab ->
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(CircleShape)
-                                .background(if (tab == state.activeTab) accentColor.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.08f))
-                                .clickable {
-                                    onRequestHaptic()
-                                    app.islandController.expand(tab)
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(tabIcon(tab), contentDescription = tab.title, tint = if (tab == state.activeTab) accentColor else Color.White, modifier = Modifier.size(18.dp))
+                    Text(
+                        text = (primary as? IslandActivity.Alert)?.subtitle?.ifBlank { "Tap a module or Full for controls" }
+                            ?: "Quick Modules",
+                        color = Color.White.copy(alpha = 0.78f),
+                        fontSize = 13.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceEvenly
+                    ) {
+                        settings.enabledTabs.filter { settings.isTabMasterEnabled(it) }.take(5).forEach { tab ->
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.spacedBy(4.dp),
+                                modifier = Modifier
+                                    .widthIn(min = 52.dp)
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable {
+                                        onRequestHaptic()
+                                        app.islandController.expand(tab)
+                                    }
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .clip(CircleShape)
+                                        .background(if (tab == state.activeTab) accentColor.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.10f)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(tabIcon(tab), contentDescription = tab.title, tint = if (tab == state.activeTab) accentColor else Color.White, modifier = Modifier.size(20.dp))
+                                }
+                                Text(tab.title, color = Color.White.copy(alpha = 0.80f), fontSize = 11.sp, maxLines = 1)
+                            }
                         }
                     }
                 }
@@ -1911,7 +2350,7 @@ fun MediumPillView(
     }
 }
 
-private fun maxPanelHeightForTab(@Suppress("UNUSED_PARAMETER") tab: IslandTab) = 78.dp
+private fun maxPanelHeightForTab(@Suppress("UNUSED_PARAMETER") tab: IslandTab) = 234.dp
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1942,6 +2381,13 @@ fun ExpandedIslandCard(
     val holeH = exclusionZone.holeHeightDp.coerceAtLeast(settings.cutoutHeightDp)
     val outerShape = RoundedCornerShape(IslandColors.ExpandedOuterRadius)
     val useGlass = effectivePillStyle != PillStyle.BLACK
+    val boundedMaxW = remember(exclusionZone.screenWidthPx, exclusionZone.density) {
+        DeadZoneGeometry.boundedCardWidthDp(
+            screenWidthPx = exclusionZone.screenWidthPx,
+            density = exclusionZone.density,
+            desiredMaxDp = DeadZoneGeometry.FULL_MAX_WIDTH_DP
+        )
+    }
 
     val chromeMod = if (drawOwnChrome) {
         Modifier.islandGlassChrome(
@@ -1962,8 +2408,8 @@ fun ExpandedIslandCard(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = if (drawOwnChrome) IslandColors.ScreenHorizontalMargin else 0.dp)
-            .widthIn(max = DeadZoneGeometry.FULL_MAX_WIDTH_DP.dp)
+            .padding(horizontal = if (drawOwnChrome) 12.dp else 0.dp)
+            .widthIn(max = boundedMaxW.dp)
             .heightIn(max = DeadZoneGeometry.FULL_MAX_HEIGHT_DP.dp)
             .then(chromeMod)
             .combinedClickable(
@@ -2385,22 +2831,22 @@ fun BottomChooserBar(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(max = 36.dp)
-            .padding(horizontal = 10.dp)
+            .heightIn(min = 42.dp, max = 48.dp)
+            .padding(horizontal = 12.dp)
             .clip(RoundedCornerShape(IslandColors.ExpandedInnerSheetRadius))
             .background(chooserBg)
             .border(
-                width = 0.8.dp,
-                brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
+                width = 0.85.dp,
+                brush = Brush.horizontalGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = 0.24f),
+                        Color.White.copy(alpha = 0.28f),
                         accentColor.copy(alpha = 0.55f),
-                        Color.White.copy(alpha = 0.18f)
+                        Color.White.copy(alpha = 0.20f)
                     )
                 ),
                 shape = RoundedCornerShape(IslandColors.ExpandedInnerSheetRadius)
             )
-            .padding(horizontal = 4.dp, vertical = 2.dp)
+            .padding(horizontal = 4.dp, vertical = 3.dp)
     ) {
         val showMore = isMoreOpen && moreTabs.isNotEmpty()
         AnimatedContent(
@@ -2431,7 +2877,7 @@ fun BottomChooserBar(
                         verticalArrangement = Arrangement.Center,
                         modifier = Modifier
                             .widthIn(min = 44.dp)
-                            .heightIn(min = 30.dp)
+                            .heightIn(min = 36.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .background(if (morePage) accentColor.copy(alpha = 0.22f) else Color.Transparent)
                             .clickable(onClick = onToggleMore)
@@ -2442,12 +2888,12 @@ fun BottomChooserBar(
                             imageVector = Icons.Filled.MoreHoriz,
                             contentDescription = if (morePage) "Main tabs" else "More tabs",
                             tint = if (morePage) accentColor else IslandColors.TextSecondary,
-                            modifier = Modifier.size(14.dp)
+                            modifier = Modifier.size(16.dp)
                         )
                         Text(
                             text = if (morePage) "Back" else "More",
-                            fontSize = 9.sp,
-                            lineHeight = 10.sp,
+                            fontSize = 10.sp,
+                            lineHeight = 11.sp,
                             color = if (morePage) accentColor else IslandColors.TextSecondary
                         )
                     }
@@ -2480,14 +2926,14 @@ private fun ChooserChip(
         verticalArrangement = Arrangement.Center,
         modifier = Modifier
             .widthIn(min = 44.dp)
-            .heightIn(min = 30.dp)
+            .heightIn(min = 36.dp)
             .graphicsLayer {
                 val s = scaleState.value
                 scaleX = s
                 scaleY = s
             }
             .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) accentColor.copy(alpha = 0.24f) else Color.Transparent)
+            .background(if (selected) accentColor.copy(alpha = 0.26f) else Color.Transparent)
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -2500,12 +2946,12 @@ private fun ChooserChip(
             imageVector = tabIcon(tab),
             contentDescription = tab.title,
             tint = if (selected) accentColor else IslandColors.TextSecondary,
-            modifier = Modifier.size(14.dp)
+            modifier = Modifier.size(16.dp)
         )
         Text(
             text = tab.title,
-            fontSize = 9.sp,
-            lineHeight = 10.sp,
+            fontSize = 10.sp,
+            lineHeight = 11.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             color = if (selected) accentColor else IslandColors.TextSecondary,
             maxLines = 1

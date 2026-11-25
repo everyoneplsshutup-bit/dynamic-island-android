@@ -99,19 +99,28 @@ object TierAAccessibilityReader {
 
             val text = node.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
             val className = node.className?.toString().orEmpty()
-            val isImageWidget = className.endsWith("ImageView") ||
+            val isTextWidget = className.endsWith("TextView") ||
+                className.endsWith("EditText") ||
+                className.endsWith("Button")
+            val isImageOrVideoWidget = className.endsWith("ImageView") ||
                 className.endsWith("ImageButton") ||
                 className == "android.widget.Image" ||
-                className.contains("PhotoView", ignoreCase = true)
+                className.contains("PhotoView", ignoreCase = true) ||
+                className.contains("SurfaceView", ignoreCase = true) ||
+                className.contains("TextureView", ignoreCase = true) ||
+                className.contains("PlayerView", ignoreCase = true) ||
+                className.contains("Video", ignoreCase = true)
+            val isHugeContainer = !isTextWidget && (rect.width() > 760 || rect.height() > 780)
+            val isLargeNonTextDesc = text == null && !isTextWidget && (rect.height() > 280 || rect.width() > 700)
 
-            // Do not let alt/accessibility labels on pure images shadow burned-in photo text (handled by Tier B)
-            val desc = if (isImageWidget && text == null) {
+            // Do not let alt/accessibility labels on pure images or full-screen video/Reel containers shadow burned-in text (handled by Tier B ML Kit)
+            val desc = if ((isImageOrVideoWidget && text == null) || isHugeContainer || isLargeNonTextDesc) {
                 null
             } else {
                 node.contentDescription?.toString()?.trim()?.takeIf { it.isNotEmpty() }
             }
 
-            if (text != null || desc != null) {
+            if (!isHugeContainer && (text != null || desc != null)) {
                 candidates.add(CandidateNode(node, text, desc, Rect(rect), area, depth))
             }
 
@@ -201,7 +210,7 @@ object TierAAccessibilityReader {
         } else {
             val rawLines = text.split('\n')
             val lineCount = rawLines.size.coerceAtLeast(1)
-            val lineHeight = (safeBounds.height().toFloat() / lineCount).coerceAtLeast(28f)
+            val lineHeight = (safeBounds.height().toFloat() / lineCount).coerceIn(24f, 84f)
             val width = safeBounds.width().coerceAtLeast(40)
 
             // Map char index -> (lineIndex, offsetInLine, lineLength)

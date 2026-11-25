@@ -116,14 +116,14 @@ object IslandColors {
         }
         return when (pillStyle) {
             PillStyle.APPLE_GLASS -> {
-                val top = (0.44f + d * 0.28f).coerceIn(0.40f, 0.76f)
-                val bot = (top + 0.10f).coerceAtMost(0.84f)
+                val top = (0.48f + d * 0.28f).coerceIn(0.42f, 0.78f)
+                val bot = (top + 0.10f).coerceAtMost(0.86f)
                 top to bot
             }
             PillStyle.LIQUID_GLASS -> {
-                // Real translucent Liquid Glass: lets background wallpaper & icons show clearly through it
-                val top = (0.14f + d * 0.20f).coerceIn(0.14f, 0.36f)
-                val bot = (top + 0.08f).coerceAtMost(0.44f)
+                // Optical crystal Liquid Glass: crisp translucent body + luminous edge refraction
+                val top = (0.12f + d * 0.16f).coerceIn(0.10f, 0.30f)
+                val bot = (top + 0.06f).coerceAtMost(0.36f)
                 top to bot
             }
             PillStyle.BLACK -> 1f to 1f
@@ -140,10 +140,10 @@ object IslandColors {
             return Brush.verticalGradient(colors = listOf(Color(0xFA060608), PillBlack))
         }
         val (alphaTop, alphaBot) = glassAlphaRange(pillStyle, density, reduceGlass)
-        val tintStrengthTop = if (pillStyle == PillStyle.LIQUID_GLASS) 0.26f else 0.12f
-        val tintStrengthBot = if (pillStyle == PillStyle.LIQUID_GLASS) 0.12f else 0.05f
-        val baseTopArgb = if (pillStyle == PillStyle.LIQUID_GLASS) 0xFF0E1522.toInt() else 0xFF14151C.toInt()
-        val baseBotArgb = if (pillStyle == PillStyle.LIQUID_GLASS) 0xFF070A12.toInt() else 0xFF090A0F.toInt()
+        val tintStrengthTop = if (pillStyle == PillStyle.LIQUID_GLASS) 0.18f else 0.10f
+        val tintStrengthBot = if (pillStyle == PillStyle.LIQUID_GLASS) 0.08f else 0.04f
+        val baseTopArgb = if (pillStyle == PillStyle.LIQUID_GLASS) 0xFF0E1624.toInt() else 0xFF14151C.toInt()
+        val baseBotArgb = if (pillStyle == PillStyle.LIQUID_GLASS) 0xFF060912.toInt() else 0xFF090A0F.toInt()
         val tintedTop = Color(
             ColorUtils.blendARGB(baseTopArgb, materialYouColor.toArgb(), tintStrengthTop)
         ).copy(alpha = alphaTop)
@@ -167,22 +167,23 @@ object IslandColors {
     ): Brush {
         return when {
             isHighlighted -> Brush.linearGradient(
-                colors = listOf(accentColor, Color.White.copy(alpha = 0.85f), accentColor)
+                colors = listOf(accentColor, Color.White.copy(alpha = 0.90f), accentColor)
             )
             useGlass && isLiquidStyle -> Brush.linearGradient(
                 colors = listOf(
-                    Color.White.copy(alpha = 0.62f),
-                    accentColor.copy(alpha = 0.85f),
-                    Color.White.copy(alpha = 0.30f),
-                    accentColor.copy(alpha = 0.56f)
+                    Color.White.copy(alpha = 0.78f),
+                    accentColor.copy(alpha = 0.88f),
+                    Color(0x889CEBFF),
+                    Color.White.copy(alpha = 0.34f),
+                    accentColor.copy(alpha = 0.62f)
                 ),
                 start = Offset(0f, 0f),
-                end = Offset(420f, 480f)
+                end = Offset(440f, 480f)
             )
             useGlass -> Brush.linearGradient(
                 colors = listOf(
                     GlassSpecularTop,
-                    accentColor.copy(alpha = 0.34f),
+                    accentColor.copy(alpha = 0.32f),
                     Color.White.copy(alpha = 0.16f)
                 ),
                 start = Offset(0f, 0f),

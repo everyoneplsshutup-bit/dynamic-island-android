@@ -211,7 +211,7 @@ class VaultManager(
                     subtitle = "$displayName · expires in 10:00"
                 ),
                 autoShowCompact = true,
-                autoDismissMs = 3400L,
+                autoDismissMs = 2000L,
                 autoExpandToFull = vaultCfg?.autoExpand == true
             )
         }
@@ -272,7 +272,7 @@ class VaultManager(
                     subtitle = "Open Shelf Trash to restore (24h window)"
                 ),
                 autoShowCompact = true,
-                autoDismissMs = 5000L
+                autoDismissMs = 2000L
             )
         }
 

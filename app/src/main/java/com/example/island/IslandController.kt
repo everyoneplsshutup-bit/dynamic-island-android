@@ -253,6 +253,7 @@ class IslandController(
             current.copy(
                 mode = IslandMode.MEDIUM,
                 activeTab = resolvedTab,
+                isMoreRowOpen = !resolvedTab.isMainRow,
                 pullDownProgress = 0f
             )
         }
@@ -491,6 +492,7 @@ class IslandController(
             current.copy(
                 mode = IslandMode.EXPANDED,
                 activeTab = tab,
+                isMoreRowOpen = !tab.isMainRow,
                 needsKeyboardFocus = (tab == IslandTab.SEARCH || tab == IslandTab.NOTES)
             )
         }
@@ -622,6 +624,62 @@ class IslandController(
         bannerClearJob = scope.launch {
             delay(durationMs)
             _state.update { it.copy(statusBanner = null) }
+        }
+    }
+
+    fun setForegroundPackage(packageName: String?) {
+        _state.update { current ->
+            if (current.currentForegroundPackage == packageName) current
+            else current.copy(currentForegroundPackage = packageName)
+        }
+    }
+
+    fun showApprovalPrompt(prompt: ApprovalPromptState) {
+        _state.update { it.copy(approvalPrompt = prompt) }
+        onSoundEvent(IslandSoundEvent.EXPAND)
+    }
+
+    fun dismissApprovalPrompt() {
+        _state.update { it.copy(approvalPrompt = null) }
+    }
+
+    fun updateEarbudsBattery(deviceName: String?, percent: Int?) {
+        _state.update { current ->
+            current.copy(
+                earbudsName = deviceName,
+                earbudsBatteryPercent = percent
+            )
+        }
+    }
+
+    fun recordNotificationDiagnostic(appName: String, title: String, timeMs: Long, suppressionReason: String = "None") {
+        _state.update { current ->
+            current.copy(
+                diagnostics = current.diagnostics.copy(
+                    lastNotificationApp = appName,
+                    lastNotificationTitle = title,
+                    lastNotificationTimeMs = timeMs,
+                    lastSuppressionReason = suppressionReason
+                )
+            )
+        }
+    }
+
+    fun recordSuppressionReason(reason: String) {
+        _state.update { current ->
+            current.copy(
+                diagnostics = current.diagnostics.copy(lastSuppressionReason = reason)
+            )
+        }
+    }
+
+    fun recordDeadZoneCollision() {
+        _state.update { current ->
+            current.copy(
+                diagnostics = current.diagnostics.copy(
+                    deadZoneCollisionCount = current.diagnostics.deadZoneCollisionCount + 1
+                )
+            )
         }
     }
 

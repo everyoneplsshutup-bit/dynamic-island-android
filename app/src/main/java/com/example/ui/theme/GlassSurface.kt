@@ -1,5 +1,8 @@
 package com.example.ui.theme
 
+import android.graphics.RenderEffect as AndroidRenderEffect
+import android.graphics.RuntimeShader
+import android.os.Build
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -23,23 +26,64 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.system.PillStyle
 import com.kyant.backdrop.backdrops.LayerBackdrop
+import com.kyant.backdrop.drawBackdrop
+import com.kyant.backdrop.effects.blur as backdropBlur
+import com.kyant.backdrop.effects.lens
 import kotlin.math.PI
 import kotlin.math.sin
 
 val LocalAppBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
 
+private const val LIQUID_EDGE_AGSL = """
+    uniform shader content;
+    uniform float2 iResolution;
+    uniform float2 iLightPos;
+    uniform float iRefractStrength;
+
+    float sdSuperellipse(float2 p, float2 b) {
+        float2 d = abs(p) / max(b, float2(1.0));
+        float k = pow(pow(d.x, 3.0) + pow(d.y, 3.0), 1.0 / 3.0);
+        return (k - 1.0) * min(b.x, b.y);
+    }
+
+    half4 main(float2 fragCoord) {
+        float2 center = iResolution * 0.5;
+        float2 p = fragCoord - center;
+        float dist = sdSuperellipse(p, center * 0.96);
+        float edgeMask = smoothstep(-22.0, 0.0, dist);
+        float2 dir = normalize(p + float2(0.001));
+        float2 disp = dir * edgeMask * iRefractStrength;
+
+        // Subtle RGB dispersion along curved glass boundary
+        half4 baseCol = content.eval(fragCoord - disp);
+        half4 redCol = content.eval(fragCoord - disp * 1.18);
+        half4 blueCol = content.eval(fragCoord - disp * 0.82);
+        half3 refracted = half3(redCol.r, baseCol.g, blueCol.b);
+
+        // Soft specular caustic rim oriented toward light position
+        float2 lightDir = normalize(iLightPos - center + float2(0.001));
+        float rimDot = clamp(dot(dir, lightDir) * 0.5 + 0.5, 0.0, 1.0);
+        float fresnel = smoothstep(-14.0, -1.0, dist) * (0.14 + 0.24 * rimDot);
+
+        return half4(clamp(refracted + half3(fresnel), 0.0, 1.0), baseCol.a);
+    }
+"""
+
 /**
- * Unified crash-free glass chrome modifier.
- * Avoids cyclic LayerBackdrop self-recording crashes on Android 13 / MIUI 14 while
- * rendering Dark, Apple Glass, and Liquid Glass with multi-stop gradients, inner refractive
- * sheen, and specular top/bottom edge rims.
+ * Optical Liquid Glass chrome modifier:
+ * - When a sibling [LayerBackdrop] is provided (inside ObsidianCrimsonBackground), applies real
+ *   Kyant backdrop blur + optical lens distortion over live background graphics.
+ * - On Android 13+ (API 33), chains a superellipse SDF AGSL RuntimeShader for curved edge refraction,
+ *   dispersion, and specular Fresnel highlights, with zero-crash fallbacks on older devices/Robolectric.
  */
 fun Modifier.islandGlassChrome(
     shape: Shape,
@@ -81,60 +125,104 @@ fun Modifier.islandGlassChrome(
         isLiquidStyle = isLiquid
     )
 
+    val kyantBackdropMod = if (backdrop != null && !reduceGlass && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        Modifier.drawBackdrop(
+            backdrop = backdrop,
+            shape = { shape },
+            effects = {
+                backdropBlur(radius = if (isLiquid) 12.dp.toPx() else 22.dp.toPx())
+                if (isLiquid) {
+                    lens(
+                        refractionHeight = 18.dp.toPx(),
+                        refractionAmount = 32.dp.toPx(),
+                        depthEffect = true
+                    )
+                }
+            }
+        )
+    } else {
+        Modifier
+    }
+
+    val agslRefractMod = if (isLiquid && !reduceGlass && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        val shader = runCatching { RuntimeShader(LIQUID_EDGE_AGSL) }.getOrNull()
+        if (shader != null) {
+            Modifier.graphicsLayer {
+                if (size.width >= 8f && size.height >= 8f) {
+                    runCatching {
+                        shader.setFloatUniform("iResolution", size.width, size.height)
+                        shader.setFloatUniform("iLightPos", size.width * 0.25f, size.height * 0.12f)
+                        shader.setFloatUniform("iRefractStrength", 5.5f)
+                        renderEffect = AndroidRenderEffect
+                            .createRuntimeShaderEffect(shader, "content")
+                            .asComposeRenderEffect()
+                    }
+                }
+            }
+        } else {
+            Modifier
+        }
+    } else {
+        Modifier
+    }
+
     return this
         .clip(shape)
+        .then(kyantBackdropMod)
         .background(glassBrush)
+        .then(agslRefractMod)
         .drawWithContent {
             drawContent()
             if (isLiquid && !reduceGlass) {
-                // Soft inner liquid refractive sheen + subtle edge halo
+                // Curved internal dome caustic + opposite chromatic shimmer
                 drawRect(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            Color.White.copy(alpha = 0.10f),
-                            accentColor.copy(alpha = 0.16f),
+                            Color.White.copy(alpha = if (crossWindowBlurActive) 0.18f else 0.14f),
+                            accentColor.copy(alpha = 0.15f),
                             Color.Transparent
                         ),
-                        center = Offset(size.width * 0.26f, size.height * 0.16f),
-                        radius = (maxOf(size.width, size.height) * 0.90f).coerceAtLeast(1f)
+                        center = Offset(size.width * 0.22f, size.height * 0.14f),
+                        radius = (maxOf(size.width, size.height) * 0.88f).coerceAtLeast(1f)
                     )
                 )
                 drawRect(
                     brush = Brush.radialGradient(
                         colors = listOf(
-                            accentColor.copy(alpha = 0.14f),
+                            Color(0x2890E0FF),
+                            accentColor.copy(alpha = 0.12f),
                             Color.Transparent
                         ),
-                        center = Offset(size.width * 0.78f, size.height * 0.88f),
+                        center = Offset(size.width * 0.82f, size.height * 0.86f),
                         radius = (maxOf(size.width, size.height) * 0.72f).coerceAtLeast(1f)
                     )
                 )
             }
-            val topAlpha = if (isLiquid) 0.58f else 0.30f
-            val botAlpha = if (isLiquid) 0.28f else 0.12f
+            val topAlpha = if (isLiquid) 0.74f else 0.34f
+            val botAlpha = if (isLiquid) 0.38f else 0.14f
             drawLine(
                 brush = Brush.horizontalGradient(
                     colors = listOf(Color.Transparent, Color.White.copy(alpha = topAlpha), Color.Transparent)
                 ),
-                start = Offset(size.width * 0.08f, 1.dp.toPx()),
-                end = Offset(size.width * 0.92f, 1.dp.toPx()),
-                strokeWidth = 1.2.dp.toPx(),
+                start = Offset(size.width * 0.06f, 1.dp.toPx()),
+                end = Offset(size.width * 0.94f, 1.dp.toPx()),
+                strokeWidth = (if (isLiquid) 1.5 else 1.1).dp.toPx(),
                 cap = StrokeCap.Round
             )
             drawLine(
                 brush = Brush.horizontalGradient(
                     colors = listOf(Color.Transparent, Color.White.copy(alpha = botAlpha), Color.Transparent)
                 ),
-                start = Offset(size.width * 0.14f, size.height - 1.dp.toPx()),
-                end = Offset(size.width * 0.86f, size.height - 1.dp.toPx()),
-                strokeWidth = 0.9.dp.toPx(),
+                start = Offset(size.width * 0.12f, size.height - 1.dp.toPx()),
+                end = Offset(size.width * 0.88f, size.height - 1.dp.toPx()),
+                strokeWidth = 1.dp.toPx(),
                 cap = StrokeCap.Round
             )
         }
         .border(
             width = when {
-                isHighlighted -> 1.5.dp
-                isLiquid -> 1.2.dp
+                isHighlighted -> 1.6.dp
+                isLiquid -> 1.3.dp
                 else -> 0.9.dp
             },
             brush = borderBrush,

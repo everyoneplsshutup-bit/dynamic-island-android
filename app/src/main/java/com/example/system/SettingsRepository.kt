@@ -26,8 +26,8 @@ enum class PillStyle(val label: String) {
 
 enum class PillSizePreset(val label: String, val slotWidthDp: Float) {
     SMALL("Small", 72f),
-    MEDIUM("Medium", 88f),
-    LARGE("Large", 104f)
+    MEDIUM("Medium", 80f),
+    LARGE("Large", 96f)
 }
 
 enum class WhenIdleMode(val label: String, val subtitle: String) {
@@ -208,7 +208,10 @@ data class IslandSettings(
     val idleLeftWidget: IdleWidgetType = IdleWidgetType.TIME,
     val idleRightWidget: IdleWidgetType = IdleWidgetType.BATTERY,
     val lockScreenPreset: LockScreenPreset = LockScreenPreset.MINIMAL,
-    val alertsDwellMs: Long = 6000L,
+    val alertsDwellMs: Long = 2000L,
+    val reelOverlayEnabled: Boolean = true,
+    val swipeUpDismissEnabled: Boolean = true,
+    val hideNotifInForegroundApp: Boolean = true,
 
     // 4. Features (Hard cap: max 8 enabled on island)
     val enabledTabs: List<IslandTab> = listOf(
@@ -340,6 +343,9 @@ class SettingsRepository(private val context: Context) {
         val IDLE_RIGHT_WIDGET = stringPreferencesKey("idle_right_widget")
         val LOCK_SCREEN_PRESET = stringPreferencesKey("lock_screen_preset")
         val ALERTS_DWELL_MS = longPreferencesKey("alerts_dwell_ms")
+        val REEL_OVERLAY_ENABLED = booleanPreferencesKey("reel_overlay_enabled")
+        val SWIPE_UP_DISMISS_ENABLED = booleanPreferencesKey("swipe_up_dismiss_enabled")
+        val HIDE_NOTIF_IN_FG = booleanPreferencesKey("hide_notif_in_fg")
         val PER_EVENT_CONFIG = stringPreferencesKey("per_event_config_json")
 
         val ENABLED_TABS = stringPreferencesKey("enabled_tabs_json")
@@ -425,7 +431,10 @@ class SettingsRepository(private val context: Context) {
             idleLeftWidget = prefs[Keys.IDLE_LEFT_WIDGET]?.let { runCatching { IdleWidgetType.valueOf(it) }.getOrNull() } ?: default.idleLeftWidget,
             idleRightWidget = prefs[Keys.IDLE_RIGHT_WIDGET]?.let { runCatching { IdleWidgetType.valueOf(it) }.getOrNull() } ?: default.idleRightWidget,
             lockScreenPreset = prefs[Keys.LOCK_SCREEN_PRESET]?.let { runCatching { LockScreenPreset.valueOf(it) }.getOrNull() } ?: default.lockScreenPreset,
-            alertsDwellMs = (prefs[Keys.ALERTS_DWELL_MS] ?: default.alertsDwellMs).coerceIn(4000L, 10000L),
+            alertsDwellMs = (prefs[Keys.ALERTS_DWELL_MS] ?: default.alertsDwellMs).coerceIn(1500L, 10000L),
+            reelOverlayEnabled = prefs[Keys.REEL_OVERLAY_ENABLED] ?: default.reelOverlayEnabled,
+            swipeUpDismissEnabled = prefs[Keys.SWIPE_UP_DISMISS_ENABLED] ?: default.swipeUpDismissEnabled,
+            hideNotifInForegroundApp = prefs[Keys.HIDE_NOTIF_IN_FG] ?: default.hideNotifInForegroundApp,
 
             enabledTabs = prefs[Keys.ENABLED_TABS]?.let { raw ->
                 runCatching {
@@ -529,7 +538,10 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.IDLE_LEFT_WIDGET] = s.idleLeftWidget.name
             prefs[Keys.IDLE_RIGHT_WIDGET] = s.idleRightWidget.name
             prefs[Keys.LOCK_SCREEN_PRESET] = s.lockScreenPreset.name
-            prefs[Keys.ALERTS_DWELL_MS] = s.alertsDwellMs.coerceIn(4000L, 10000L)
+            prefs[Keys.ALERTS_DWELL_MS] = s.alertsDwellMs.coerceIn(1500L, 10000L)
+            prefs[Keys.REEL_OVERLAY_ENABLED] = s.reelOverlayEnabled
+            prefs[Keys.SWIPE_UP_DISMISS_ENABLED] = s.swipeUpDismissEnabled
+            prefs[Keys.HIDE_NOTIF_IN_FG] = s.hideNotifInForegroundApp
             prefs[Keys.PER_EVENT_CONFIG] = json.encodeToString(s.perEventConfig)
 
             prefs[Keys.ENABLED_TABS] = json.encodeToString(s.enabledTabs.take(IslandSettings.MAX_ISLAND_FEATURES))
