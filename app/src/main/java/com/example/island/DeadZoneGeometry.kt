@@ -113,12 +113,13 @@ object DeadZoneGeometry {
     fun compactSlotMetrics(
         holeWidthDp: Float,
         holeHeightDp: Float,
-        isLandscape: Boolean = false
+        isLandscape: Boolean = false,
+        slotWidthDp: Float = DEFAULT_SLOT_WIDTH_DP
     ): CompactSlotMetrics {
         val safeHoleW = holeWidthDp.coerceAtLeast(14f)
         val safeHoleH = holeHeightDp.coerceAtLeast(14f)
         return if (!isLandscape) {
-            val slot = DEFAULT_SLOT_WIDTH_DP
+            val slot = slotWidthDp.coerceIn(64f, 120f)
             val spacer = safeHoleW + REQUIRED_MARGIN_DP * 2f
             val totalW = slot + spacer + slot + OUTER_PAD_DP * 2f
             val pillH = (safeHoleH + 4f).coerceAtLeast(COMPACT_PILL_MIN_HEIGHT_DP)
@@ -239,19 +240,27 @@ object DeadZoneGeometry {
         var rotation = Surface.ROTATION_0
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && wm != null) {
-            val metrics = wm.currentWindowMetrics
-            screenW = metrics.bounds.width().coerceAtLeast(dm.widthPixels)
-            screenH = metrics.bounds.height().coerceAtLeast(dm.heightPixels)
-            cutout = metrics.windowInsets.displayCutout
-            val statusBarInsets = metrics.windowInsets.getInsets(android.view.WindowInsets.Type.statusBars())
-            statusTopPx = statusBarInsets.top
-            @Suppress("DEPRECATION")
-            rotation = context.display?.rotation ?: wm.defaultDisplay?.rotation ?: Surface.ROTATION_0
+            runCatching {
+                val metrics = wm.currentWindowMetrics
+                screenW = metrics.bounds.width().coerceAtLeast(dm.widthPixels)
+                screenH = metrics.bounds.height().coerceAtLeast(dm.heightPixels)
+                cutout = metrics.windowInsets.displayCutout
+                val statusBarInsets = metrics.windowInsets.getInsets(android.view.WindowInsets.Type.statusBars())
+                statusTopPx = statusBarInsets.top
+            }
+            val dispMgr = context.getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
+            rotation = runCatching { context.display.rotation }.getOrNull()
+                ?: runCatching { dispMgr?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.rotation }.getOrNull()
+                ?: @Suppress("DEPRECATION") runCatching { wm.defaultDisplay?.rotation }.getOrNull()
+                ?: Surface.ROTATION_0
+            if (cutout == null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                cutout = runCatching { dispMgr?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.cutout }.getOrNull()
+            }
         } else {
             val resId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
             if (resId > 0) statusTopPx = context.resources.getDimensionPixelSize(resId)
             @Suppress("DEPRECATION")
-            cutout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) wm?.defaultDisplay?.cutout else null
+            cutout = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) runCatching { wm?.defaultDisplay?.cutout }.getOrNull() else null
         }
 
         val isLandscape = context.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE ||
@@ -268,7 +277,7 @@ object DeadZoneGeometry {
         val cutoutPx: Rect = if (bounding != null) {
             // Apply tiny user fine-tuning calibration offset while preserving real measured dimensions
             val userDx = (settings.cutoutXOffsetDp * density).toInt()
-            val userDy = if (!isLandscape) ((settings.cutoutYOffsetDp - 6f) * density).toInt() else 0
+            val userDy = if (!isLandscape) (settings.cutoutYOffsetDp * density).toInt() else 0
             Rect(
                 bounding.left + userDx,
                 bounding.top + userDy,

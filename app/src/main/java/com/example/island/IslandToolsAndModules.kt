@@ -12,15 +12,7 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -69,6 +61,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bluetooth
@@ -77,6 +70,7 @@ import androidx.compose.material.icons.filled.CameraAlt
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Crop
+import androidx.compose.material.icons.filled.CropFree
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoNotDisturbOn
 import androidx.compose.material.icons.filled.Download
@@ -273,15 +267,21 @@ fun SearchIslandPanel(
             .heightIn(max = 78.dp)
             .padding(horizontal = 12.dp, vertical = 1.dp)
     ) {
-        // Slim 24dp search pill (with inline math copy badge) so pinned section + list always fit cleanly
+        // Slim 24dp Liquid Glass search pill (with inline math copy badge) so pinned section + list always fit cleanly
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(24.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .background(Color.White.copy(alpha = 0.08f))
-                .border(0.75.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(12.dp))
+                .background(Color.White.copy(alpha = 0.09f))
+                .border(
+                    width = 0.8.dp,
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(Color.White.copy(alpha = 0.30f), accentColor.copy(alpha = 0.52f))
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                )
                 .padding(horizontal = 8.dp)
         ) {
             Icon(Icons.Filled.Search, contentDescription = "Search", tint = accentColor, modifier = Modifier.size(13.dp))
@@ -352,27 +352,27 @@ fun SearchIslandPanel(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(20.dp)
+                    .height(22.dp)
                     .horizontalScroll(rememberScrollState())
                     .testTag("search_pinned_section")
             ) {
                 Text(
-                    text = "PINNED APPS",
-                    color = accentColor,
+                    text = "Pinned · ${pinnedApps.size}",
+                    color = IslandColors.TextPrimary.copy(alpha = 0.88f),
                     fontSize = 8.sp,
                     lineHeight = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    letterSpacing = 0.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.4.sp,
                     modifier = Modifier.padding(start = 2.dp)
                 )
                 pinnedApps.forEach { pinned ->
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .height(18.dp)
+                            .height(20.dp)
                             .clip(CircleShape)
-                            .background(accentColor.copy(alpha = 0.16f))
-                            .border(0.75.dp, accentColor.copy(alpha = 0.45f), CircleShape)
+                            .background(Color.White.copy(alpha = 0.11f))
+                            .border(0.75.dp, accentColor.copy(alpha = 0.55f), CircleShape)
                             .combinedClickable(
                                 onClick = {
                                     app.soundManager.playTap()
@@ -385,14 +385,42 @@ fun SearchIslandPanel(
                                     onCollapse()
                                 }
                             )
-                            .padding(horizontal = 6.dp)
+                            .padding(horizontal = 5.dp)
                             .testTag("search_pinned_chip_${pinned.packageName}")
                     ) {
-                        val bmp = pinned.iconBitmap
-                        if (bmp != null) {
-                            Image(bitmap = bmp, contentDescription = pinned.label, modifier = Modifier.size(11.dp).clip(CircleShape))
-                            Spacer(Modifier.width(3.dp))
+                        Box(modifier = Modifier.size(15.dp), contentAlignment = Alignment.Center) {
+                            val bmp = pinned.iconBitmap
+                            if (bmp != null) {
+                                Image(
+                                    bitmap = bmp,
+                                    contentDescription = pinned.label,
+                                    modifier = Modifier.size(13.dp).clip(RoundedCornerShape(4.dp))
+                                )
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .size(13.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(Color.White.copy(alpha = 0.14f))
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(accentColor),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.PushPin,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(5.dp)
+                                )
+                            }
                         }
+                        Spacer(Modifier.width(4.dp))
                         Text(
                             text = pinned.label,
                             color = IslandColors.TextPrimary,
@@ -544,13 +572,19 @@ fun SearchIslandPanel(
                                     contentDescription = "Open ${launchApp.label} in floating window",
                                     tint = IslandColors.TextSecondary.copy(alpha = 0.7f),
                                     modifier = Modifier
-                                        .size(22.dp)
+                                        .size(20.dp)
                                         .clickable {
                                             app.soundManager.playExpand()
                                             app.floatingWindowManager.launchAppInFloatingWindow(launchApp.packageName)
                                             onCollapse()
                                         }
-                                        .padding(4.dp)
+                                        .padding(3.dp)
+                                )
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                    contentDescription = null,
+                                    tint = IslandColors.TextSecondary.copy(alpha = 0.65f),
+                                    modifier = Modifier.size(14.dp)
                                 )
                             }
                         }
@@ -605,7 +639,8 @@ fun SearchIslandPanel(
                         .width(18.dp)
                         .fillMaxHeight()
                         .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.06f))
+                        .background(accentColor.copy(alpha = 0.14f))
+                        .border(0.6.dp, accentColor.copy(alpha = 0.35f), CircleShape)
                         .onSizeChanged { stripHeightPx = it.height.toFloat().coerceAtLeast(1f) }
                         .pointerInput(availableLetters) {
                             detectVerticalDragGestures(
@@ -634,7 +669,7 @@ fun SearchIslandPanel(
                             text = letter.toString(),
                             fontSize = 7.sp,
                             fontWeight = if (activeScrubLetter == letter) FontWeight.Bold else FontWeight.Medium,
-                            color = if (activeScrubLetter == letter) accentColor else IslandColors.TextSecondary,
+                            color = if (activeScrubLetter == letter) Color.White else accentColor,
                             lineHeight = 8.sp
                         )
                     }
@@ -652,7 +687,7 @@ fun SearchIslandPanel(
                 ) {
                     Text(
                         text = activeScrubLetter.toString(),
-                        color = Color.Black,
+                        color = Color.White,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Bold
                     )
@@ -752,7 +787,7 @@ fun ToolsIslandPanel(
                     ) {
                         onHaptic()
                         if (!settings.screenReadingEnabled) {
-                            app.soundManager.playToggle(isOn = false)
+                            app.soundManager.playError()
                             app.islandController.showTransientBanner("Enable Screen Reading in Settings → Privacy first")
                         } else {
                             app.soundManager.playToggle(isOn = true)
@@ -881,7 +916,7 @@ fun ToolsIslandPanel(
                         .clickable {
                             onHaptic()
                             if (!settings.screenReadingEnabled) {
-                                app.soundManager.playToggle(isOn = false)
+                                app.soundManager.playError()
                                 app.islandController.showTransientBanner("Turn ON Screen Reading in Settings → Privacy")
                             } else {
                                 app.soundManager.playToggle(isOn = true)
@@ -908,13 +943,7 @@ fun FlashlightBeamOverlayCard(
     val toggleState by app.quickTogglesManager.state.collectAsState()
     var dragAccum by remember { mutableFloatStateOf(0f) }
 
-    val infinite = rememberInfiniteTransition(label = "beam_pulse")
-    val beamGlow by infinite.animateFloat(
-        initialValue = 0.72f,
-        targetValue = 1.0f,
-        animationSpec = infiniteRepeatable(tween(1100, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-        label = "beam_alpha"
-    )
+    val beamGlow = if (toggleState.isTorchOn) 1.0f else 0.35f
 
     val strengthFraction = if (toggleState.maxTorchStrength > 1) {
         (toggleState.torchStrength.toFloat() / toggleState.maxTorchStrength.toFloat()).coerceIn(0.2f, 1f)
@@ -1049,31 +1078,48 @@ private fun ToggleTile(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) MotionTokens.BUTTON_PRESS_SCALE else 1.0f,
-        animationSpec = spring(dampingRatio = 0.65f, stiffness = 700f),
+    val scaleState = animateFloatAsState(
+        targetValue = if (pressed) MotionTokens.TAP_SQUISH_SCALE else 1.0f,
+        animationSpec = MotionTokens.spatialFast(),
         label = "toggle_tile_scale"
     )
-    val radiusDp by animateDpAsState(
-        targetValue = MotionTokens.pressRadiusDp(pressed, baseDp = 12f, squishedDp = 18f).dp,
-        animationSpec = spring(dampingRatio = 0.7f, stiffness = 700f),
-        label = "toggle_tile_radius"
-    )
-    val tileShape = RoundedCornerShape(radiusDp)
+    val tileShape = RoundedCornerShape(12.dp)
+    val tileBackground = if (isActive) {
+        Brush.radialGradient(
+            colors = listOf(
+                accentColor.copy(alpha = 0.44f),
+                accentColor.copy(alpha = 0.16f)
+            )
+        )
+    } else {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color.White.copy(alpha = 0.12f),
+                Color.White.copy(alpha = 0.05f)
+            )
+        )
+    }
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
         modifier = Modifier
             .width(56.dp)
             .height(30.dp)
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                scaleX = scaleState.value
+                scaleY = scaleState.value
             }
             .clip(tileShape)
-            .background(if (isActive) accentColor.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.09f))
+            .background(tileBackground)
             .border(
-                width = 0.75.dp,
-                color = if (isActive) accentColor.copy(alpha = 0.55f) else Color.White.copy(alpha = 0.10f),
+                width = 0.85.dp,
+                brush = Brush.linearGradient(
+                    colors = if (isActive) {
+                        listOf(Color.White.copy(alpha = 0.55f), accentColor.copy(alpha = 0.85f))
+                    } else {
+                        listOf(Color.White.copy(alpha = 0.24f), Color.White.copy(alpha = 0.08f))
+                    }
+                ),
                 shape = tileShape
             )
             .clickable(
@@ -1086,7 +1132,7 @@ private fun ToggleTile(
         Icon(
             imageVector = icon,
             contentDescription = label,
-            tint = if (isActive) accentColor else IslandColors.TextPrimary,
+            tint = if (isActive) Color.White else accentColor,
             modifier = Modifier.size(13.dp)
         )
         Text(label, color = IslandColors.TextPrimary, fontSize = 8.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1128,7 +1174,13 @@ fun VaultIslandPanel(
     val photoPicker = if (activityResultOwner != null) {
         rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
             if (uri != null) {
-                scope.launch { app.vaultManager.saveFromUri(uri, sourceType = "PICKED") }
+                scope.launch {
+                    val saved = app.vaultManager.saveFromUri(uri, sourceType = "PICKED")
+                    if (saved == null) {
+                        app.soundManager.playError()
+                        app.islandController.showTransientBanner("Could not add image to Shelf")
+                    }
+                }
             }
         }
     } else null
@@ -1346,13 +1398,16 @@ fun VaultIslandPanel(
                                         app.soundManager.playVaultAdd()
                                         detailItem = updated
                                         app.islandController.showTransientBanner("Cropped photo saved")
+                                    } else {
+                                        app.soundManager.playError()
+                                        app.islandController.showTransientBanner("Could not crop image")
                                     }
                                     croppingItem = null
                                 }
                             }
                             .testTag("shelf_crop_apply_btn")
                     ) {
-                        Text("Apply", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                        Text("Apply", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                     }
                     Box(
                         contentAlignment = Alignment.Center,
@@ -1457,9 +1512,9 @@ fun VaultIslandPanel(
                                         onCollapse()
                                     }
                             ) {
-                                Icon(Icons.Filled.ContentCopy, contentDescription = null, tint = Color.Black, modifier = Modifier.size(11.dp))
+                                Icon(Icons.Filled.ContentCopy, contentDescription = null, tint = Color.White, modifier = Modifier.size(11.dp))
                                 Spacer(Modifier.width(3.dp))
-                                Text("Attach", color = Color.Black, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("Attach", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                         Row(
@@ -1506,6 +1561,7 @@ fun VaultIslandPanel(
                                     app.soundManager.playTap()
                                     scope.launch {
                                         val saved = app.vaultManager.saveItemToGallery(inspectTarget)
+                                        if (!saved) app.soundManager.playError()
                                         app.islandController.showTransientBanner(
                                             if (saved) "Saved to Pictures/DynamicIsland" else "Could not save image"
                                         )
@@ -1654,6 +1710,7 @@ fun VaultIslandPanel(
                         val remainingMs = (item.expiresAt - nowMs).coerceAtLeast(0L)
                         val fraction = (remainingMs.toFloat() / VaultConstants.EXPIRY_MILLIS.toFloat()).coerceIn(0f, 1f)
                         val isSelected = selectedItemId == item.id
+                        val isFocusedTile = isSelected || (selectedItemId == null && filteredItems.firstOrNull()?.id == item.id)
                         val isExpiredFade = !item.isTrashed && remainingMs == 0L
                         val ringColor = when {
                             item.isTrashed -> IslandColors.AccentRed
@@ -1661,18 +1718,18 @@ fun VaultIslandPanel(
                             remainingMs < 120_000L -> IslandColors.AccentAmber
                             else -> IslandColors.AccentLime
                         }
-                        val tileScale by animateFloatAsState(
+                        val tileScaleState = animateFloatAsState(
                             targetValue = when {
                                 isExpiredFade -> 0.72f
-                                isSelected -> 1.05f
+                                isSelected -> 1.04f
                                 else -> 1.0f
                             },
-                            animationSpec = spring(dampingRatio = 0.72f, stiffness = 540f),
+                            animationSpec = MotionTokens.spatialFast(),
                             label = "shelf_tile_scale"
                         )
-                        val tileAlpha by animateFloatAsState(
+                        val tileAlphaState = animateFloatAsState(
                             targetValue = if (isExpiredFade) 0f else 1f,
-                            animationSpec = tween(220),
+                            animationSpec = MotionTokens.effectsDefault(),
                             label = "shelf_tile_alpha"
                         )
                         var swipeY by remember(item.id) { mutableFloatStateOf(0f) }
@@ -1704,20 +1761,20 @@ fun VaultIslandPanel(
                         Column(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             modifier = Modifier
-                                .width(56.dp)
+                                .width(92.dp)
                                 .graphicsLayer {
                                     translationY = swipeY
-                                    scaleX = tileScale
-                                    scaleY = tileScale
-                                    alpha = tileAlpha
+                                    scaleX = tileScaleState.value
+                                    scaleY = tileScaleState.value
+                                    alpha = tileAlphaState.value
                                 }
                         ) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(38.dp)
+                                    .height(40.dp)
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(Color.White.copy(alpha = 0.08f))
+                                    .background(Color(0xFF140E11))
                                     .combinedClickable(
                                         onClick = {
                                             app.soundManager.playTap()
@@ -1735,22 +1792,26 @@ fun VaultIslandPanel(
                                     painter = rememberAsyncImagePainter(File(item.filePath)),
                                     contentDescription = item.displayName,
                                     contentScale = ContentScale.Crop,
-                                    modifier = Modifier.fillMaxSize().padding(2.dp).clip(RoundedCornerShape(8.dp))
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(if (isFocusedTile) 2.dp else 1.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .then(dragGripMod)
                                 )
 
                                 Canvas(modifier = Modifier.fillMaxSize()) {
-                                    val strokePx = 1.5.dp.toPx()
+                                    val strokePx = if (isFocusedTile) 2.dp.toPx() else 1.dp.toPx()
                                     val inset = strokePx / 2f
                                     val r = 10.dp.toPx()
                                     drawRoundRect(
-                                        color = Color.White.copy(alpha = 0.14f),
+                                        color = if (isFocusedTile) accentColor else Color.White.copy(alpha = 0.14f),
                                         topLeft = Offset(inset, inset),
                                         size = Size(size.width - strokePx, size.height - strokePx),
                                         cornerRadius = CornerRadius(r, r),
                                         style = Stroke(width = strokePx)
                                     )
                                     val topBarLen = (size.width - strokePx) * fraction
-                                    if (topBarLen > 2f) {
+                                    if (topBarLen > 2f && !isFocusedTile) {
                                         drawLine(
                                             color = ringColor,
                                             start = Offset(r * 0.4f, inset),
@@ -1761,22 +1822,43 @@ fun VaultIslandPanel(
                                     }
                                 }
 
-                                if (!item.isTrashed) {
+                                if (!item.isTrashed && isFocusedTile) {
                                     Box(
                                         modifier = Modifier
                                             .align(Alignment.BottomEnd)
-                                            .padding(2.dp)
-                                            .size(14.dp)
+                                            .padding(4.dp)
+                                            .size(16.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Color.Black.copy(alpha = 0.65f))
+                                            .clickable {
+                                                app.soundManager.playTap()
+                                                cropLeft = 0.10f; cropTop = 0.10f; cropRight = 0.90f; cropBottom = 0.90f
+                                                croppingItem = item
+                                            },
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Filled.CropFree,
+                                            contentDescription = "Quick crop ${item.displayName}",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(12.dp)
+                                        )
+                                    }
+                                } else if (!item.isTrashed) {
+                                    Box(
+                                        modifier = Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .padding(3.dp)
+                                            .size(13.dp)
                                             .clip(CircleShape)
-                                            .background(Color.Black.copy(alpha = 0.58f))
-                                            .then(dragGripMod),
+                                            .background(Color.Black.copy(alpha = 0.58f)),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Icon(
                                             imageVector = Icons.Filled.DragIndicator,
                                             contentDescription = "Drag to attach",
                                             tint = Color.White,
-                                            modifier = Modifier.size(11.dp)
+                                            modifier = Modifier.size(10.dp)
                                         )
                                     }
                                 }
@@ -1785,7 +1867,7 @@ fun VaultIslandPanel(
                                     Box(
                                         modifier = Modifier
                                             .align(Alignment.TopEnd)
-                                            .padding(2.dp)
+                                            .padding(3.dp)
                                             .size(16.dp)
                                             .clip(CircleShape)
                                             .background(IslandColors.AccentRed)
@@ -1808,7 +1890,7 @@ fun VaultIslandPanel(
                                 text = if (item.isTrashed) "Trash" else TimerEngine.formatDuration(remainingMs),
                                 style = TextStyle(
                                     color = if (item.isTrashed || remainingMs < 60_000L) IslandColors.AccentRed else IslandColors.TextSecondary,
-                                    fontSize = 9.sp,
+                                    fontSize = 8.sp,
                                     fontWeight = FontWeight.Medium,
                                     fontFeatureSettings = "tnum"
                                 ),
@@ -1863,7 +1945,7 @@ fun ClipsIslandPanel(
                 itemsIndexed(clips, key = { _, c -> c.id }) { idx, clip ->
                     var visible by remember(clip.id) { mutableStateOf(false) }
                     LaunchedEffect(clip.id) {
-                        delay((idx * MotionTokens.STAGGER_STEP_MS).toLong().coerceAtMost(240L))
+                        delay((idx * (MotionTokens.CONTENT_STAGGER_MS / 4)).toLong().coerceAtMost(MotionTokens.CONTENT_STAGGER_MS.toLong()))
                         visible = true
                     }
                     AnimatedVisibility(
@@ -2159,11 +2241,15 @@ fun MemoIslandPanel(
                 .clip(RoundedCornerShape(12.dp))
                 .background(if (ui.isRecording) IslandColors.AccentRed.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.08f))
                 .clickable {
-                    app.soundManager.playTap()
                     if (ui.isRecording) {
+                        app.soundManager.playTap()
                         app.voiceMemoManager.stopRecording()
                     } else if (!app.voiceMemoManager.startRecording()) {
+                        app.soundManager.playError()
+                        app.islandController.showTransientBanner("Grant Microphone permission in Setup Wizard")
                         Toast.makeText(context, "Grant Microphone permission in Setup Wizard", Toast.LENGTH_SHORT).show()
+                    } else {
+                        app.soundManager.playTap()
                     }
                 }
                 .padding(horizontal = 10.dp),

@@ -1,11 +1,7 @@
 package com.example.system
 
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -13,6 +9,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.snapping.rememberSnapFlingBehavior
@@ -101,7 +98,7 @@ fun TimerStopwatchPanel(
     onStartSleepTimer: (Long) -> Unit = {}
 ) {
     var modeIndex by remember { mutableIntStateOf(0) } // 0 = Timer, 1 = Stopwatch, 2 = Sleep
-    val orangeAccent = IslandColors.AccentOrange
+    val crimsonAccent = accentColor
 
     Column(
         modifier = Modifier
@@ -127,7 +124,7 @@ fun TimerStopwatchPanel(
                         .weight(1f)
                         .height(18.dp)
                         .clip(CircleShape)
-                        .background(if (selected) orangeAccent.copy(alpha = 0.28f) else Color.Transparent)
+                        .background(if (selected) crimsonAccent.copy(alpha = 0.28f) else Color.Transparent)
                         .clickable { onHaptic(); onTimerSetSound(); modeIndex = idx }
                         .testTag("timer_mode_${label.lowercase()}"),
                     contentAlignment = Alignment.Center
@@ -136,7 +133,7 @@ fun TimerStopwatchPanel(
                         text = label,
                         fontSize = 10.sp,
                         fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
-                        color = if (selected) orangeAccent else IslandColors.TextSecondary,
+                        color = if (selected) crimsonAccent else IslandColors.TextSecondary,
                         maxLines = 1
                     )
                 }
@@ -148,7 +145,7 @@ fun TimerStopwatchPanel(
                 if (state.isActive) {
                     ActiveTimerRingView(
                         state = state,
-                        accentColor = orangeAccent,
+                        accentColor = crimsonAccent,
                         onPause = { onHaptic(); onTimerSetSound(); onPauseTimer() },
                         onResume = { onHaptic(); onTimerSetSound(); onResumeTimer() },
                         onCancel = { onHaptic(); onCancelTimer() }
@@ -156,7 +153,7 @@ fun TimerStopwatchPanel(
                 } else {
                     WheelTimerPickerView(
                         state = state,
-                        accentColor = orangeAccent,
+                        accentColor = crimsonAccent,
                         onPickerChanged = { h, m, s ->
                             onHaptic()
                             onPickerChanged(h, m, s)
@@ -173,7 +170,7 @@ fun TimerStopwatchPanel(
             1 -> {
                 StopwatchView(
                     state = state,
-                    accentColor = orangeAccent,
+                    accentColor = crimsonAccent,
                     onStart = { onHaptic(); onTimerSetSound(); onStartStopwatch() },
                     onPause = { onHaptic(); onTimerSetSound(); onPauseStopwatch() },
                     onReset = { onHaptic(); onResetStopwatch() },
@@ -378,18 +375,11 @@ private fun ActiveTimerRingView(
         (state.remainingMs.toFloat() / state.totalMs.toFloat()).coerceIn(0f, 1f)
     } else 0f
     val isUrgent = state.isRunning && state.remainingMs in 1L..5_000L
-    val urgentPulse = if (isUrgent) {
-        val infinite = rememberInfiniteTransition(label = "urgent_timer")
-        val p by infinite.animateFloat(
-            initialValue = 1.0f,
-            targetValue = 1.055f,
-            animationSpec = infiniteRepeatable(tween(420, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-            label = "urgent_scale"
-        )
-        p
-    } else {
-        1.0f
-    }
+    val urgentPulseState = animateFloatAsState(
+        targetValue = if (isUrgent) 1.05f else 1.0f,
+        animationSpec = MotionTokens.spatialFast(),
+        label = "urgent_scale"
+    )
     val formattedText = TimerEngine.formatDuration(state.remainingMs)
     val ringColor = if (isUrgent) IslandColors.AccentRed else accentColor
 
@@ -398,22 +388,23 @@ private fun ActiveTimerRingView(
             .fillMaxWidth()
             .height(50.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.SpaceEvenly
     ) {
+        // Left: Crimson circular progress ring with centered bold tabular countdown (Mockup 4)
         Box(
             modifier = Modifier
-                .size(44.dp)
+                .size(48.dp)
                 .graphicsLayer {
-                    scaleX = urgentPulse
-                    scaleY = urgentPulse
+                    scaleX = urgentPulseState.value
+                    scaleY = urgentPulseState.value
                 },
             contentAlignment = Alignment.Center
         ) {
-            Canvas(modifier = Modifier.size(42.dp)) {
-                val strokeW = 4.dp.toPx()
+            Canvas(modifier = Modifier.size(46.dp)) {
+                val strokeW = 3.5.dp.toPx()
                 val stroke = Stroke(width = strokeW, cap = StrokeCap.Round)
                 drawArc(
-                    color = Color.White.copy(alpha = 0.14f),
+                    color = Color.White.copy(alpha = 0.12f),
                     startAngle = -90f,
                     sweepAngle = 360f,
                     useCenter = false,
@@ -428,75 +419,62 @@ private fun ActiveTimerRingView(
                     style = stroke
                 )
             }
+            AnimatedContent(
+                targetState = formattedText,
+                transitionSpec = {
+                    fadeIn(tween(MotionTokens.TIMER_TICK_CROSSFADE_MS)) togetherWith
+                        fadeOut(tween(MotionTokens.TIMER_TICK_CROSSFADE_MS))
+                },
+                label = "timer_tick_crossfade"
+            ) { textVal ->
+                Text(
+                    text = textVal,
+                    style = TextStyle(
+                        color = if (isUrgent) IslandColors.AccentRed else IslandColors.TextPrimary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        fontFeatureSettings = "tnum"
+                    ),
+                    maxLines = 1,
+                    modifier = Modifier.testTag("timer_remaining_text")
+                )
+            }
+        }
+
+        if (state.mirroredClockLabel != null && state.mirroredRemainingMs != null) {
             Text(
-                text = "${(progress * 100).roundToInt()}%",
+                text = "${state.mirroredClockLabel} ${TimerEngine.formatDuration(state.mirroredRemainingMs)}",
                 color = ringColor,
                 fontSize = 10.sp,
-                fontWeight = FontWeight.Bold
+                fontWeight = FontWeight.Medium,
+                maxLines = 1
             )
         }
 
-        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
-                AnimatedContent(
-                    targetState = formattedText,
-                    transitionSpec = {
-                        fadeIn(tween(MotionTokens.TIMER_TICK_CROSSFADE_MS)) togetherWith
-                            fadeOut(tween(MotionTokens.TIMER_TICK_CROSSFADE_MS))
-                    },
-                    label = "timer_tick_crossfade"
-                ) { textVal ->
-                    Text(
-                        text = textVal,
-                        style = TextStyle(
-                            color = if (isUrgent) IslandColors.AccentRed else IslandColors.TextPrimary,
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            fontFeatureSettings = "tnum"
-                        ),
-                        modifier = Modifier.testTag("timer_remaining_text")
-                    )
-                }
-                if (state.mirroredClockLabel != null && state.mirroredRemainingMs != null) {
-                    Text(
-                        text = "${state.mirroredClockLabel} ${TimerEngine.formatDuration(state.mirroredRemainingMs)}",
-                        color = accentColor,
-                        fontSize = 9.sp,
-                        maxLines = 1
-                    )
-                }
-            }
-            WavyProgressBar(
-                progress = progress,
-                isActiveWave = state.isRunning,
-                accentColor = ringColor,
-                height = 8.dp
-            )
-        }
+        // Subtle vertical separator matching Mockup 4
+        Box(
+            modifier = Modifier
+                .width(1.dp)
+                .height(32.dp)
+                .background(Color.White.copy(alpha = 0.14f))
+        )
 
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                modifier = Modifier
-                    .minimumInteractiveComponentSize()
-                    .size(34.dp)
-                    .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.14f))
-                    .clickable(onClick = onCancel)
-                    .testTag("timer_cancel_button"),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(Icons.Filled.Close, contentDescription = "Cancel timer", tint = IslandColors.TextPrimary, modifier = Modifier.size(16.dp))
-            }
-
+        // Right: Glowing Crimson Play/Pause + Obsidian Cancel/Reset circles
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             Box(
                 modifier = Modifier
                     .minimumInteractiveComponentSize()
                     .size(38.dp)
                     .clip(CircleShape)
-                    .background(accentColor)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(ringColor, ringColor.copy(alpha = 0.72f))
+                        )
+                    )
+                    .border(1.dp, Color.White.copy(alpha = 0.45f), CircleShape)
                     .clickable(onClick = if (state.isRunning) onPause else onResume)
                     .testTag("timer_pause_resume_button"),
                 contentAlignment = Alignment.Center
@@ -504,9 +482,23 @@ private fun ActiveTimerRingView(
                 Icon(
                     imageVector = if (state.isRunning) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                     contentDescription = if (state.isRunning) "Pause timer" else "Resume timer",
-                    tint = Color.Black,
+                    tint = Color.White,
                     modifier = Modifier.size(20.dp)
                 )
+            }
+
+            Box(
+                modifier = Modifier
+                    .minimumInteractiveComponentSize()
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.10f))
+                    .border(0.9.dp, Color.White.copy(alpha = 0.24f), CircleShape)
+                    .clickable(onClick = onCancel)
+                    .testTag("timer_cancel_button"),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(Icons.Filled.Refresh, contentDescription = "Cancel timer", tint = Color.White, modifier = Modifier.size(17.dp))
             }
         }
     }
@@ -566,7 +558,7 @@ private fun WheelTimerPickerView(
             enabled = (state.selectedHours + state.selectedMinutes + state.selectedSeconds) > 0,
             colors = ButtonDefaults.buttonColors(
                 containerColor = accentColor,
-                contentColor = Color.Black
+                contentColor = Color.White
             ),
             shape = CircleShape,
             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 4.dp),
@@ -699,7 +691,8 @@ private fun StopwatchView(
                     .minimumInteractiveComponentSize()
                     .size(34.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.14f))
+                    .background(Color.White.copy(alpha = 0.10f))
+                    .border(0.9.dp, Color.White.copy(alpha = 0.24f), CircleShape)
                     .clickable(onClick = if (state.isStopwatchRunning) onLap else onReset)
                     .testTag("stopwatch_lap_reset_button"),
                 contentAlignment = Alignment.Center
@@ -717,7 +710,12 @@ private fun StopwatchView(
                     .minimumInteractiveComponentSize()
                     .size(38.dp)
                     .clip(CircleShape)
-                    .background(accentColor)
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(accentColor, accentColor.copy(alpha = 0.72f))
+                        )
+                    )
+                    .border(1.dp, Color.White.copy(alpha = 0.45f), CircleShape)
                     .clickable(onClick = if (state.isStopwatchRunning) onPause else onStart)
                     .testTag("stopwatch_start_pause_button"),
                 contentAlignment = Alignment.Center
@@ -725,7 +723,7 @@ private fun StopwatchView(
                 Icon(
                     imageVector = if (state.isStopwatchRunning) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                     contentDescription = if (state.isStopwatchRunning) "Pause stopwatch" else "Start stopwatch",
-                    tint = Color.Black,
+                    tint = Color.White,
                     modifier = Modifier.size(20.dp)
                 )
             }

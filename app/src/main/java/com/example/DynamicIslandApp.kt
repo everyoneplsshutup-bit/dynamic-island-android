@@ -72,7 +72,7 @@ class DynamicIslandApp : Application() {
         settingsRepository = SettingsRepository(this)
         soundManager = IslandSoundManager(this, settingsRepository)
         database = AppDatabase.getInstance(this)
-        islandController = IslandController(onSoundEvent = { event -> soundManager.play(event) })
+        islandController = IslandController(onSoundEvent = { event -> soundManager.playWithHaptic(event) })
         timerEngine = TimerEngine(this, islandController, settingsRepository, onTimerCompletedSound = { soundManager.playTimerDone() })
         batteryMonitor = BatteryMonitor(this, islandController, settingsRepository)
         quickTogglesManager = QuickTogglesManager(this)

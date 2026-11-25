@@ -14,37 +14,48 @@ import android.provider.DocumentsContract
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.filled.AccessibilityNew
+import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.DoNotDisturbOn
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -53,20 +64,38 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.DynamicIslandApp
 import com.example.island.IslandService
+import com.example.keepalive.IslandKeepAliveService
 import com.example.system.IslandSettings
+import com.example.ui.theme.CrimsonPillButton
+import com.example.ui.theme.CrimsonSquircleIcon
 import com.example.ui.theme.IslandColors
+import com.example.ui.theme.MockupScreenHeader
+import com.example.ui.theme.ObsidianCrimsonBackground
+import com.example.ui.theme.ObsidianGlassCard
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class PermissionStatusSnapshot(
     val accessibilityGranted: Boolean,
     val notificationListenerGranted: Boolean,
+    val overlayGranted: Boolean,
     val postNotificationsGranted: Boolean,
     val dndPolicyGranted: Boolean,
     val microphoneGranted: Boolean,
@@ -85,6 +114,7 @@ fun readPermissionStatus(context: Context): PermissionStatusSnapshot {
         )
     val nlEnabled = Settings.Secure.getString(context.contentResolver, "enabled_notification_listeners")
         ?.contains(context.packageName) == true
+    val overlayOk = runCatching { Settings.canDrawOverlays(context) }.getOrDefault(false)
 
     val postNotif = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
@@ -100,6 +130,7 @@ fun readPermissionStatus(context: Context): PermissionStatusSnapshot {
     return PermissionStatusSnapshot(
         accessibilityGranted = accEnabled,
         notificationListenerGranted = nlEnabled,
+        overlayGranted = overlayOk,
         postNotificationsGranted = postNotif,
         dndPolicyGranted = dnd,
         microphoneGranted = mic,
@@ -108,18 +139,32 @@ fun readPermissionStatus(context: Context): PermissionStatusSnapshot {
     )
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SetupWizardScreen(
     app: DynamicIslandApp,
     onDone: () -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scope = rememberCoroutineScope()
     var refreshTick by remember { mutableIntStateOf(0) }
     val accessibilityLive by IslandService.isRunning.collectAsState()
     val settings by app.settingsRepository.settingsFlow.collectAsState(initial = IslandSettings())
     val status = remember(refreshTick, accessibilityLive) { readPermissionStatus(context) }
+
+    DisposableEffect(lifecycleOwner, settings.islandEnabled) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshTick++
+                val snap = readPermissionStatus(context)
+                if (settings.islandEnabled && (snap.accessibilityGranted || snap.overlayGranted)) {
+                    IslandKeepAliveService.start(context)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     val notifPermLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) {
         refreshTick++
@@ -141,229 +186,295 @@ fun SetupWizardScreen(
         }
     }
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = { Text("Setup Wizard & MIUI Checklist") },
-                navigationIcon = {
-                    IconButton(onClick = onDone, modifier = Modifier.testTag("wizard_back")) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                }
-            )
-        }
-    ) { innerPadding ->
+    ObsidianCrimsonBackground {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .verticalScroll(rememberScrollState())
-                .padding(16.dp)
-                .widthIn(max = 600.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .widthIn(max = 600.dp)
+                .align(Alignment.TopCenter)
         ) {
-            // Android 13 Sideload Flow & Play Protect Note
-            Surface(
-                shape = RoundedCornerShape(18.dp),
-                color = IslandColors.AccentOrange.copy(alpha = 0.14f),
-                modifier = Modifier.fillMaxWidth()
+            MockupScreenHeader(
+                title = "Setup Wizard",
+                subtitle = "Grant overlay & MIUI permissions",
+                icon = Icons.Filled.Layers,
+                onBack = onDone,
+                backTestTag = "wizard_back"
+            )
+
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .navigationBarsPadding()
+                    .padding(horizontal = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                // Hero glowing crimson emblem with capsule pill matching everyoneplsshutup-setup-wizard.png
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .padding(top = 6.dp)
+                        .size(86.dp)
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(
+                                    IslandColors.CrimsonBright.copy(alpha = 0.42f),
+                                    Color(0xFF2B070C),
+                                    Color(0xFF100407)
+                                )
+                            )
+                        )
+                        .border(1.4.dp, IslandColors.CrimsonBorderStrong, RoundedCornerShape(24.dp))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(56.dp)
+                            .height(22.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black)
+                            .border(1.5.dp, IslandColors.CrimsonBright, CircleShape)
+                    )
+                }
+
+                Text(
+                    text = "Dynamic Island",
+                    color = Color.White,
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    text = "Your phone, beautifully alive.",
+                    color = IslandColors.TextSecondary,
+                    fontSize = 14.sp
+                )
+
+                Spacer(Modifier.height(4.dp))
+
+                // 3 Primary Permission Cards matching setup-wizard mockup
+                WizardPermissionRow(
+                    title = "Accessibility",
+                    subtitle = "Let the island appear over lock screen & other apps.",
+                    icon = Icons.Filled.AccessibilityNew,
+                    granted = status.accessibilityGranted,
+                    buttonLabel = "Grant",
+                    testTag = "wizard_acc_btn",
+                    onAction = {
+                        runCatching { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
+                        refreshTick++
+                    }
+                )
+
+                WizardPermissionRow(
+                    title = "Notifications",
+                    subtitle = "Get alerts and live updates on the island.",
+                    icon = Icons.Filled.Notifications,
+                    granted = status.notificationListenerGranted,
+                    buttonLabel = "Grant",
+                    testTag = "wizard_nl_btn",
+                    onAction = {
+                        runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
+                        refreshTick++
+                    }
+                )
+
+                WizardPermissionRow(
+                    title = "Draw Over Other Apps / Overlay",
+                    subtitle = "Show the island reliably on top of everything.",
+                    icon = Icons.Filled.Layers,
+                    granted = status.overlayGranted,
+                    buttonLabel = "Grant",
+                    testTag = "wizard_overlay_btn",
+                    onAction = {
+                        val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION).apply {
+                            data = Uri.parse("package:${context.packageName}")
+                        }
+                        runCatching { context.startActivity(intent) }
+                        refreshTick++
+                    }
+                )
+
+                // Continue & Skip CTA matching setup-wizard mockup
+                CrimsonPillButton(
+                    text = if (status.accessibilityGranted || status.overlayGranted) "Continue & Activate" else "Finish Setup",
+                    onClick = {
+                        scope.launch {
+                            app.settingsRepository.update {
+                                it.copy(wizardCompleted = true, calibrationConfirmed = true)
+                            }
+                            withContext(Dispatchers.Main) {
+                                if (settings.islandEnabled && (status.accessibilityGranted || status.overlayGranted)) {
+                                    IslandKeepAliveService.start(context)
+                                }
+                                onDone()
+                            }
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("wizard_finish_btn")
+                )
+
+                Text(
+                    text = "Skip for now",
+                    color = IslandColors.TextSecondary,
+                    fontSize = 13.sp,
+                    textDecoration = TextDecoration.Underline,
+                    modifier = Modifier
+                        .clickable(onClick = onDone)
+                        .padding(vertical = 4.dp)
+                )
+
+                // Additional Feature Permissions
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    Text("Additional Permissions", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                }
+
+                WizardPermissionRow(
+                    title = "Post Notifications (Android 13)",
+                    subtitle = "Keep-alive monitor & timer completion alerts.",
+                    icon = Icons.Filled.NotificationsActive,
+                    granted = status.postNotificationsGranted,
+                    buttonLabel = "Allow",
+                    testTag = "wizard_notif_btn",
+                    onAction = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                            notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                        }
+                    }
+                )
+
+                WizardPermissionRow(
+                    title = "Do Not Disturb Policy",
+                    subtitle = "Allows Tools to toggle Do Not Disturb directly.",
+                    icon = Icons.Filled.DoNotDisturbOn,
+                    granted = status.dndPolicyGranted,
+                    buttonLabel = "Grant",
+                    testTag = "wizard_dnd_btn",
+                    onAction = {
+                        runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
+                        refreshTick++
+                    }
+                )
+
+                WizardPermissionRow(
+                    title = "Microphone (Voice Memo)",
+                    subtitle = "Only active while recording a voice memo.",
+                    icon = Icons.Filled.Mic,
+                    granted = status.microphoneGranted,
+                    buttonLabel = "Allow",
+                    testTag = "wizard_mic_btn",
+                    onAction = { micPermLauncher.launch(Manifest.permission.RECORD_AUDIO) }
+                )
+
+                WizardPermissionRow(
+                    title = "Exact Alarms",
+                    subtitle = "Fires countdown completion at the exact second.",
+                    icon = Icons.Filled.Alarm,
+                    granted = status.exactAlarmGranted,
+                    buttonLabel = "Allow",
+                    testTag = "wizard_alarm_btn",
+                    onAction = {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            val i = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                                data = Uri.parse("package:${context.packageName}")
+                            }
+                            runCatching { context.startActivity(i) }
+                        }
+                        refreshTick++
+                    }
+                )
+
+                WizardPermissionRow(
+                    title = "Screenshots Folder (Auto-Shelf)",
+                    subtitle = "Automatically store new screenshots for 10 min via SAF.",
+                    icon = Icons.Filled.FolderOpen,
+                    granted = !settings.vaultScreenshotsTreeUri.isNullOrBlank(),
+                    buttonLabel = "Select",
+                    testTag = "wizard_screenshots_btn",
+                    onAction = {
+                        val initial = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            DocumentsContract.buildDocumentUri(
+                                "com.android.externalstorage.documents",
+                                "primary:DCIM/Screenshots"
+                            )
+                        } else null
+                        screenshotsFolderPicker.launch(initial)
+                    }
+                )
+
+                // Android 13 Sideload & Restricted Settings Card
+                ObsidianGlassCard(highlighted = !status.accessibilityGranted) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Warning, contentDescription = null, tint = IslandColors.AccentOrange)
                         Spacer(Modifier.width(8.dp))
-                        Text("Android 13 Sideload & Play Protect Note", fontWeight = FontWeight.SemiBold)
+                        Text("Android 13 Sideload Note", color = Color.White, fontWeight = FontWeight.Bold)
                     }
+                    Spacer(Modifier.height(6.dp))
                     Text(
-                        "If installing via APK: open App Info → ⋮ (top right) → Allow restricted settings BEFORE enabling Accessibility or Notification Access. If Play Protect prompts on install, choose 'Install anyway' only for builds you compiled.",
-                        style = MaterialTheme.typography.bodyMedium
+                        "If installing via APK: open App Info -> 3-dots menu -> Allow restricted settings before switching Accessibility or Notification Access ON.",
+                        color = IslandColors.TextSecondary,
+                        fontSize = 12.sp
                     )
+                    Spacer(Modifier.height(8.dp))
                     OutlinedButton(
                         onClick = {
                             val i = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                                 data = Uri.parse("package:${context.packageName}")
                             }
                             runCatching { context.startActivity(i) }
-                        }
+                        },
+                        border = BorderStroke(1.dp, IslandColors.CrimsonBorder),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
                     ) {
-                        Text("Open App Info (Restricted Settings)")
+                        Text("Open App Info", fontSize = 12.sp)
                     }
                 }
-            }
 
-            Text("1. Core Permissions (in order)", style = MaterialTheme.typography.titleMedium)
-
-            WizardPermissionRow(
-                title = "Accessibility Service (Overlay Host)",
-                subtitle = "Hosts the Dynamic Island overlay over status bar & lock screen.",
-                granted = status.accessibilityGranted,
-                buttonLabel = "Open Accessibility",
-                testTag = "wizard_acc_btn",
-                onAction = {
-                    runCatching { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) }
-                    refreshTick++
+                // MIUI 14 Checklist
+                Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+                    Text("MIUI 14 Survival Checklist (Redmi Note 10 Pro)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                 }
-            )
 
-            WizardPermissionRow(
-                title = "Notification Listener Access",
-                subtitle = "Previews notifications, mirrors Clock timers, and enables PixelMusic shuffle/repeat/like.",
-                granted = status.notificationListenerGranted,
-                buttonLabel = "Notification Access",
-                testTag = "wizard_nl_btn",
-                onAction = {
-                    runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) }
-                    refreshTick++
-                }
-            )
-
-            WizardPermissionRow(
-                title = "Notifications (Android 13)",
-                subtitle = "Shows Dynamic Island keep-alive monitor and timer completion alerts.",
-                granted = status.postNotificationsGranted,
-                buttonLabel = "Grant",
-                testTag = "wizard_notif_btn",
-                onAction = {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        notifPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
-                    }
-                }
-            )
-
-            WizardPermissionRow(
-                title = "Notification Policy (Do Not Disturb)",
-                subtitle = "Allows the Tools tab to toggle Do Not Disturb directly.",
-                granted = status.dndPolicyGranted,
-                buttonLabel = "Grant DND",
-                testTag = "wizard_dnd_btn",
-                onAction = {
-                    runCatching { context.startActivity(Intent(Settings.ACTION_NOTIFICATION_POLICY_ACCESS_SETTINGS)) }
-                    refreshTick++
-                }
-            )
-
-            WizardPermissionRow(
-                title = "Microphone (Voice Memo only)",
-                subtitle = "Requested in context; used only inside a microphone foreground service while recording.",
-                granted = status.microphoneGranted,
-                buttonLabel = "Allow Mic",
-                testTag = "wizard_mic_btn",
-                onAction = { micPermLauncher.launch(Manifest.permission.RECORD_AUDIO) }
-            )
-
-            WizardPermissionRow(
-                title = "Exact Alarms (Timer)",
-                subtitle = "Fires countdown completion reliably at exact target second.",
-                granted = status.exactAlarmGranted,
-                buttonLabel = "Allow Alarms",
-                testTag = "wizard_alarm_btn",
-                onAction = {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                        val i = Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                MiuiChecklistCard(
+                    step = "1. Autostart — ON",
+                    detail = "Allow Dynamic Island to start automatically on boot.",
+                    buttonLabel = "Autostart",
+                    onClick = { openMiuiAutostart(context) }
+                )
+                MiuiChecklistCard(
+                    step = "2. Display pop-up windows & Background — ON",
+                    detail = "Enable background pop-ups in MIUI Other Permissions.",
+                    buttonLabel = "Other Perms",
+                    onClick = { openMiuiPermissions(context) }
+                )
+                MiuiChecklistCard(
+                    step = "3. Battery Saver — No restrictions",
+                    detail = if (status.batteryUnrestricted) "Granted: Unrestricted" else "Set MIUI Battery Saver to No restrictions.",
+                    buttonLabel = "Battery",
+                    onClick = { openBatteryUnrestricted(context) }
+                )
+                MiuiChecklistCard(
+                    step = "4. Lock app in Recents",
+                    detail = "Long-press Dynamic Island in Recents and tap the Lock icon so MIUI Clear All keeps it running.",
+                    buttonLabel = null,
+                    onClick = {}
+                )
+                MiuiChecklistCard(
+                    step = "5. Disable Unused App Hibernation",
+                    detail = "Switch OFF 'Pause app activity if unused' in App Info.",
+                    buttonLabel = "App Info",
+                    onClick = {
+                        val i = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                             data = Uri.parse("package:${context.packageName}")
                         }
                         runCatching { context.startActivity(i) }
                     }
-                    refreshTick++
-                }
-            )
+                )
 
-            WizardPermissionRow(
-                title = "Screenshots Folder (Auto-Shelf)",
-                subtitle = "Lets 10-minute Photo Shelf automatically capture new screenshots via SAF (no broad storage permission).",
-                granted = !settings.vaultScreenshotsTreeUri.isNullOrBlank(),
-                buttonLabel = "Select Folder",
-                testTag = "wizard_screenshots_btn",
-                onAction = {
-                    val initial = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                        DocumentsContract.buildDocumentUri(
-                            "com.android.externalstorage.documents",
-                            "primary:DCIM/Screenshots"
-                        )
-                    } else null
-                    screenshotsFolderPicker.launch(initial)
-                }
-            )
-
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                tonalElevation = 1.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Zero-Startup / In-Context Permissions", fontWeight = FontWeight.SemiBold)
-                    Text(
-                        "• MediaProjection is requested fresh ONLY when you tap Screenshot→Shelf or OCR Tier B.\n" +
-                            "• Photo Shelf uses app-private storage + Android Photo Picker (no broad storage permission).",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Spacer(Modifier.height(24.dp))
             }
-
-            Spacer(Modifier.height(4.dp))
-            Text("2. MIUI 14 Survival Checklist (Redmi Note 10 Pro)", style = MaterialTheme.typography.titleMedium)
-
-            MiuiChecklistCard(
-                step = "1. Autostart — ON",
-                detail = "Allow Dynamic Island to start automatically on boot.",
-                buttonLabel = "MIUI Autostart",
-                onClick = { openMiuiAutostart(context) }
-            )
-            MiuiChecklistCard(
-                step = "2. Background autostart — ON",
-                detail = "Allow background launch in MIUI App permissions → Other permissions.",
-                buttonLabel = "Other Permissions",
-                onClick = { openMiuiPermissions(context) }
-            )
-            MiuiChecklistCard(
-                step = "3. Battery settings — No restrictions",
-                detail = if (status.batteryUnrestricted) "Granted: Unrestricted" else "Set MIUI Battery Saver to 'No restrictions'.",
-                buttonLabel = "Battery Settings",
-                onClick = { openBatteryUnrestricted(context) }
-            )
-            MiuiChecklistCard(
-                step = "4. Lock the app in Recents",
-                detail = "Open Recents, long-press Dynamic Island card, and tap the Lock icon so MIUI 'Clear All' keeps it alive.",
-                buttonLabel = null,
-                onClick = {}
-            )
-            MiuiChecklistCard(
-                step = "5. \"Pause app activity if unused\" — OFF",
-                detail = "Disable unused app hibernation in App Info.",
-                buttonLabel = "App Info",
-                onClick = {
-                    val i = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                        data = Uri.parse("package:${context.packageName}")
-                    }
-                    runCatching { context.startActivity(i) }
-                }
-            )
-            MiuiChecklistCard(
-                step = "6. Force-stop Accessibility note",
-                detail = "Honest note: MIUI force-stop switches Accessibility OFF, and only you can switch it back on. Dynamic Island detects this and notifies you with a one-tap path back to Accessibility settings.",
-                buttonLabel = "Accessibility",
-                onClick = { runCatching { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } }
-            )
-
-            Button(
-                onClick = {
-                    scope.launch {
-                        app.settingsRepository.update {
-                            it.copy(wizardCompleted = true, calibrationConfirmed = true)
-                        }
-                        onDone()
-                    }
-                },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp)
-                    .testTag("wizard_finish_btn")
-            ) {
-                Text("Finish Setup")
-            }
-
-            Spacer(Modifier.height(16.dp))
         }
     }
 }
@@ -372,34 +483,48 @@ fun SetupWizardScreen(
 private fun WizardPermissionRow(
     title: String,
     subtitle: String,
+    icon: ImageVector,
     granted: Boolean,
     buttonLabel: String,
     testTag: String,
     onAction: () -> Unit
 ) {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        tonalElevation = 1.dp,
+    ObsidianGlassCard(
+        highlighted = !granted,
+        contentPadding = PaddingValues(14.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(14.dp)
-        ) {
-            Icon(
-                imageVector = if (granted) Icons.Filled.CheckCircle else Icons.Filled.RadioButtonUnchecked,
-                contentDescription = if (granted) "Granted" else "Not granted",
-                tint = if (granted) IslandColors.AccentGreen else MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(24.dp)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CrimsonSquircleIcon(
+                icon = if (granted) Icons.Filled.Check else icon,
+                tint = if (granted) IslandColors.AccentGreen else IslandColors.CrimsonBright,
+                size = 44.dp
             )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, fontWeight = FontWeight.SemiBold)
-                Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(subtitle, color = IslandColors.TextSecondary, fontSize = 12.sp)
             }
             Spacer(Modifier.width(8.dp))
-            OutlinedButton(onClick = onAction, modifier = Modifier.testTag(testTag)) {
-                Text(if (granted) "Granted" else buttonLabel)
+            Button(
+                onClick = onAction,
+                shape = CircleShape,
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (granted) IslandColors.AccentGreen.copy(alpha = 0.22f) else IslandColors.CrimsonPrimary,
+                    contentColor = if (granted) IslandColors.AccentGreen else Color.White
+                ),
+                border = BorderStroke(
+                    1.dp,
+                    if (granted) IslandColors.AccentGreen.copy(alpha = 0.65f) else IslandColors.CrimsonGlow.copy(alpha = 0.7f)
+                ),
+                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                modifier = Modifier.height(38.dp).testTag(testTag)
+            ) {
+                Text(
+                    text = if (granted) "Granted" else buttonLabel,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
             }
         }
     }
@@ -412,25 +537,24 @@ private fun MiuiChecklistCard(
     buttonLabel: String?,
     onClick: () -> Unit
 ) {
-    Surface(
-        shape = RoundedCornerShape(16.dp),
-        tonalElevation = 1.dp,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(14.dp)
-        ) {
+    ObsidianGlassCard(contentPadding = PaddingValues(14.dp), modifier = Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
-                Text(step, fontWeight = FontWeight.SemiBold)
-                Text(detail, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(step, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(detail, color = IslandColors.TextSecondary, fontSize = 12.sp)
             }
             if (buttonLabel != null) {
                 Spacer(Modifier.width(8.dp))
-                OutlinedButton(onClick = onClick) {
-                    Text(buttonLabel)
+                OutlinedButton(
+                    onClick = onClick,
+                    shape = CircleShape,
+                    border = BorderStroke(1.dp, IslandColors.CrimsonBorder),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
+                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                ) {
+                    Text(buttonLabel, fontSize = 12.sp)
                     Spacer(Modifier.width(4.dp))
-                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null, modifier = Modifier.size(13.dp))
                 }
             }
         }

@@ -1,0 +1,749 @@
+package com.example.island
+
+import android.annotation.SuppressLint
+import android.content.Context
+import android.content.Intent
+import android.graphics.PixelFormat
+import android.hardware.display.DisplayManager
+import android.media.AudioManager
+import android.net.Uri
+import android.os.Build
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
+import android.provider.Settings
+import android.util.Log
+import android.view.ContextThemeWrapper
+import android.view.Display
+import android.view.DragEvent
+import android.view.GestureDetector
+import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
+import androidx.compose.runtime.MutableFloatState
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.ComposeView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.ViewModelStore
+import androidx.lifecycle.ViewModelStoreOwner
+import androidx.lifecycle.setViewTreeLifecycleOwner
+import androidx.lifecycle.setViewTreeViewModelStoreOwner
+import androidx.savedstate.SavedStateRegistry
+import androidx.savedstate.SavedStateRegistryController
+import androidx.savedstate.SavedStateRegistryOwner
+import androidx.savedstate.setViewTreeSavedStateRegistryOwner
+import com.example.DynamicIslandApp
+import com.example.MainActivity
+import com.example.R
+import com.example.ocr.MediaProjectionPromptActivity
+import com.example.ocr.OcrPrivacyGate
+import com.example.system.HapticsStrength
+import com.example.system.IslandGesture
+import com.example.system.IslandSettings
+import com.example.system.IslandTab
+import com.example.system.PillStyle
+import com.example.system.PillSwipeAction
+import com.example.system.WhenIdleMode
+import com.example.ui.theme.DynamicIslandTheme
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import java.util.function.Consumer
+
+/**
+ * Reusable overlay window host used by [IslandService] (TYPE_ACCESSIBILITY_OVERLAY with fallback
+ * to TYPE_APPLICATION_OVERLAY) and [com.example.keepalive.IslandKeepAliveService]
+ * (TYPE_APPLICATION_OVERLAY fallback when MIUI hasn't attached Accessibility yet).
+ */
+class OverlayWindowHost(
+    private val serviceContext: Context,
+    private val scope: CoroutineScope,
+    private val preferAccessibilityOverlay: Boolean,
+    private val pullDownFractionState: MutableFloatState,
+    private val liveExclusionZone: StateFlow<ExclusionZone?>,
+    private val crossWindowBlurSupported: StateFlow<Boolean>,
+    private val onBlurSupportedChanged: (Boolean) -> Unit,
+    private val onSelectModePoint: (Int, Int) -> Unit
+) {
+    private val _isAttached = MutableStateFlow(false)
+    val isAttached: StateFlow<Boolean> = _isAttached.asStateFlow()
+
+    private var windowManager: WindowManager? = null
+    private var drawingComposeView: ComposeView? = null
+    private var drawingParams: WindowManager.LayoutParams? = null
+    private var touchView: View? = null
+    private var touchParams: WindowManager.LayoutParams? = null
+    private var overlayLifecycleOwner: OverlayLifecycleOwner? = null
+    private var blurEnabledListener: Consumer<Boolean>? = null
+
+    private var lastTouchSignature: String = ""
+    private var lastDrawingSignature: String = ""
+    private val pillPressedState = androidx.compose.runtime.mutableStateOf(false)
+    private var activeWindowType: Int = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+
+    private var latestSettings: IslandSettings = IslandSettings()
+    private var latestState: IslandState = IslandState()
+    private var latestKeepAwake: Boolean = false
+
+    private fun resolveOverlayUiContext(windowType: Int): Context {
+        if (preferAccessibilityOverlay && windowType == WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY) {
+            return ContextThemeWrapper(serviceContext, R.style.Theme_DynamicIsland)
+        }
+        val dm = serviceContext.getSystemService(Context.DISPLAY_SERVICE) as? DisplayManager
+        val display = dm?.getDisplay(Display.DEFAULT_DISPLAY)
+        val base = if (display != null) {
+            val dispCtx = serviceContext.createDisplayContext(display)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                runCatching { dispCtx.createWindowContext(windowType, null) }.getOrDefault(dispCtx)
+            } else {
+                dispCtx
+            }
+        } else {
+            serviceContext
+        }
+        return ContextThemeWrapper(base, R.style.Theme_DynamicIsland)
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    fun attach(
+        app: DynamicIslandApp,
+        initialSettings: IslandSettings,
+        initialState: IslandState,
+        initialKeepAwake: Boolean
+    ): Boolean {
+        latestSettings = initialSettings
+        latestState = initialState
+        latestKeepAwake = initialKeepAwake
+
+        if (!preferAccessibilityOverlay && !Settings.canDrawOverlays(serviceContext)) {
+            return false
+        }
+
+        val initialType = if (preferAccessibilityOverlay) {
+            WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY
+        } else {
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+        }
+
+        val triedTypes = buildList {
+            add(initialType)
+            if (preferAccessibilityOverlay && Settings.canDrawOverlays(serviceContext)) {
+                add(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY)
+            }
+        }
+
+        for (windowType in triedTypes) {
+            if (tryAttachWithType(app, windowType)) {
+                return true
+            }
+        }
+        return false
+    }
+
+    @SuppressLint("ClickableViewAccessibility")
+    private fun tryAttachWithType(app: DynamicIslandApp, windowType: Int): Boolean {
+        detach()
+        val uiCtx = resolveOverlayUiContext(windowType)
+        val wm = if (windowType == WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY) {
+            (serviceContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
+                ?: (uiCtx.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
+        } else {
+            (uiCtx.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
+                ?: (serviceContext.getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
+        } ?: return false
+        windowManager = wm
+        activeWindowType = windowType
+
+        val owner = OverlayLifecycleOwner()
+        owner.onCreate()
+        owner.onStart()
+        owner.onResume()
+        overlayLifecycleOwner = owner
+
+        val density = uiCtx.resources.displayMetrics.density.coerceAtLeast(1f)
+        val cutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+        } else {
+            0
+        }
+
+        val dragListener = View.OnDragListener { _, dragEvent ->
+            when (dragEvent.action) {
+                DragEvent.ACTION_DRAG_STARTED -> true
+                DragEvent.ACTION_DRAG_ENTERED -> {
+                    app.islandController.setDragOverIsland(true)
+                    true
+                }
+                DragEvent.ACTION_DRAG_EXITED, DragEvent.ACTION_DRAG_ENDED -> {
+                    app.islandController.setDragOverIsland(false)
+                    true
+                }
+                DragEvent.ACTION_DROP -> {
+                    app.islandController.setDragOverIsland(false)
+                    val clip = dragEvent.clipData ?: return@OnDragListener false
+                    var savedAny = false
+                    for (i in 0 until clip.itemCount) {
+                        val item = clip.getItemAt(i)
+                        val uri = item.uri ?: item.text?.toString()
+                            ?.takeIf { it.startsWith("content://") }
+                            ?.let { runCatching { Uri.parse(it) }.getOrNull() }
+                        if (uri != null) {
+                            savedAny = true
+                            scope.launch {
+                                app.vaultManager.saveFromUri(uri, sourceType = "DRAGGED")
+                            }
+                        }
+                    }
+                    if (savedAny) performSelectionHaptic()
+                    savedAny
+                }
+                else -> true
+            }
+        }
+
+        val dParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            WindowManager.LayoutParams.MATCH_PARENT,
+            windowType,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            x = 0
+            y = 0
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                layoutInDisplayCutoutMode = cutoutMode
+            }
+        }
+        drawingParams = dParams
+
+        val composeView = ComposeView(uiCtx).apply {
+            setViewTreeLifecycleOwner(owner)
+            setViewTreeViewModelStoreOwner(owner)
+            setViewTreeSavedStateRegistryOwner(owner)
+            setOnDragListener(dragListener)
+            setContent {
+                val liveZone by liveExclusionZone.collectAsState()
+                val blurSupported by crossWindowBlurSupported.collectAsState()
+                DynamicIslandTheme(darkTheme = true, dynamicColor = false) {
+                    IslandOverlayRoot(
+                        app = app,
+                        exclusionZone = liveZone ?: DeadZoneGeometry.measureLive(uiCtx, latestSettings),
+                        crossWindowBlurSupported = blurSupported,
+                        pullDownProgressProvider = { pullDownFractionState.floatValue },
+                        isPillPressedProvider = { pillPressedState.value },
+                        onRequestHaptic = { performSelectionHaptic() },
+                        onOpenAppSettings = {
+                            val i = Intent(serviceContext, MainActivity::class.java).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            runCatching { serviceContext.startActivity(i) }
+                        }
+                    )
+                }
+            }
+        }
+        drawingComposeView = composeView
+
+        val tParams = WindowManager.LayoutParams(
+            (136 * density).toInt(),
+            (48 * density).toInt(),
+            windowType,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            x = 0
+            y = (4 * density).toInt()
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                layoutInDisplayCutoutMode = cutoutMode
+            }
+        }
+        touchParams = tParams
+
+        val gestureDetector = GestureDetector(uiCtx, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+
+            override fun onSingleTapUp(e: MotionEvent): Boolean {
+                pillPressedState.value = false
+                if (latestState.isSelectModeActive) {
+                    onSelectModePoint(e.rawX.toInt(), e.rawY.toInt())
+                    return true
+                }
+                handlePillTap(app)
+                return true
+            }
+
+            override fun onLongPress(e: MotionEvent) {
+                performSelectionHaptic()
+                if (latestState.isSelectModeActive) {
+                    onSelectModePoint(e.rawX.toInt(), e.rawY.toInt())
+                } else {
+                    handlePillLongPress(app)
+                }
+            }
+
+            override fun onFling(
+                e1: MotionEvent?,
+                e2: MotionEvent,
+                velocityX: Float,
+                velocityY: Float
+            ): Boolean {
+                if (latestState.isSelectModeActive) return false
+                val absX = kotlin.math.abs(velocityX)
+                val absY = kotlin.math.abs(velocityY)
+                if (absX > absY && absX > 420f) {
+                    performSelectionHaptic()
+                    val isLeft = velocityX < 0f
+                    val swipeAction = if (isLeft) latestSettings.pillSwipeLeftGesture else latestSettings.pillSwipeRightGesture
+                    if (latestState.primaryActivity is IslandActivity.NotificationPreview &&
+                        swipeAction == PillSwipeAction.TRACK_OR_NOTIF
+                    ) {
+                        if (isLeft) app.islandController.dismissActiveNotification() else app.islandController.nextNotification()
+                        return true
+                    }
+                    when (swipeAction) {
+                        PillSwipeAction.TRACK_OR_NOTIF -> {
+                            when (latestState.primaryActivity) {
+                                is IslandActivity.Music -> {
+                                    app.soundManager.playMusicNext()
+                                    if (isLeft) app.mediaHub.skipNext() else app.mediaHub.skipPrevious()
+                                }
+                                is IslandActivity.NotificationPreview -> app.islandController.nextNotification()
+                                else -> app.islandController.expand(IslandTab.SEARCH)
+                            }
+                        }
+                        PillSwipeAction.VOLUME -> {
+                            val am = serviceContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                            val dir = if (isLeft) AudioManager.ADJUST_LOWER else AudioManager.ADJUST_RAISE
+                            am?.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir, AudioManager.FLAG_SHOW_UI)
+                        }
+                        PillSwipeAction.SEARCH -> app.islandController.expand(IslandTab.SEARCH)
+                        PillSwipeAction.NONE -> Unit
+                    }
+                    return true
+                }
+                if (velocityY > 520f && absY > absX) {
+                    performSelectionHaptic()
+                    app.islandController.openFromPill(latestSettings.twoStageOpen)
+                    return true
+                }
+                return false
+            }
+        })
+
+        var downRawY = 0f
+        var isPullingDown = false
+        val pullThresholdPx = 46f * density
+        val invisibleTouch = View(uiCtx).apply {
+            setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            setOnTouchListener { _, event ->
+                gestureDetector.onTouchEvent(event)
+                if (!latestState.isSelectModeActive) {
+                    when (event.actionMasked) {
+                        MotionEvent.ACTION_DOWN -> {
+                            downRawY = event.rawY
+                            isPullingDown = false
+                            pillPressedState.value = true
+                            performSelectionHaptic(lightPress = true)
+                            app.soundManager.playTap()
+                            app.islandController.setDwellPaused(DwellPauseReason.TOUCH, true)
+                        }
+                        MotionEvent.ACTION_MOVE -> {
+                            val dy = (event.rawY - downRawY).coerceAtLeast(0f)
+                            if (dy > 14f * density) {
+                                isPullingDown = true
+                                pillPressedState.value = false
+                                pullDownFractionState.floatValue = (dy / (110f * density)).coerceIn(0f, 1f)
+                            }
+                        }
+                        MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                            pillPressedState.value = false
+                            app.islandController.setDwellPaused(DwellPauseReason.TOUCH, false)
+                            if (isPullingDown) {
+                                val dy = event.rawY - downRawY
+                                isPullingDown = false
+                                pullDownFractionState.floatValue = 0f
+                                if (dy >= pullThresholdPx) {
+                                    performSelectionHaptic()
+                                    app.islandController.openFromPill(latestSettings.twoStageOpen)
+                                }
+                            }
+                        }
+                    }
+                }
+                true
+            }
+            setOnDragListener(dragListener)
+        }
+        touchView = invisibleTouch
+
+        lastDrawingSignature = ""
+        lastTouchSignature = ""
+
+        val added = runCatching {
+            wm.addView(composeView, dParams)
+            wm.addView(invisibleTouch, tParams)
+        }.onFailure { err ->
+            Log.e("OverlayWindowHost", "Failed adding overlay windowType=$windowType", err)
+            detach()
+        }.isSuccess
+
+        if (added) {
+            registerBlurListener(wm)
+            _isAttached.value = true
+            updateLayout(latestState, latestSettings, latestKeepAwake, liveExclusionZone.value, forceTouch = true)
+        }
+        return added
+    }
+
+    fun updateLayout(
+        state: IslandState,
+        settings: IslandSettings,
+        keepAwake: Boolean,
+        zone: ExclusionZone?,
+        forceTouch: Boolean = false
+    ) {
+        latestState = state
+        latestSettings = settings
+        latestKeepAwake = keepAwake
+        if (!_isAttached.value) return
+
+        updateDrawingWindowAttributes(state, settings, keepAwake)
+        updateTouchWindowBounds(state, settings, zone, force = forceTouch)
+    }
+
+    fun hideTouchForSelectCapture() {
+        touchView?.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        touchView?.visibility = View.GONE
+        lastTouchSignature = "GONE"
+    }
+
+    fun detach() {
+        unregisterBlurListener()
+        val wm = windowManager
+        if (wm != null) {
+            drawingComposeView?.let { runCatching { wm.removeViewImmediate(it) }.onFailure { _ -> runCatching { wm.removeView(it) } } }
+            touchView?.let { runCatching { wm.removeViewImmediate(it) }.onFailure { _ -> runCatching { wm.removeView(it) } } }
+        }
+        drawingComposeView = null
+        touchView = null
+        drawingParams = null
+        touchParams = null
+        overlayLifecycleOwner?.onDestroy()
+        overlayLifecycleOwner = null
+        windowManager = null
+        lastDrawingSignature = ""
+        lastTouchSignature = ""
+        _isAttached.value = false
+    }
+
+    private fun registerBlurListener(wm: WindowManager) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        onBlurSupportedChanged(runCatching { wm.isCrossWindowBlurEnabled }.getOrDefault(false))
+        val listener = Consumer<Boolean> { enabled ->
+            onBlurSupportedChanged(enabled)
+            updateDrawingWindowAttributes(latestState, latestSettings, latestKeepAwake)
+        }
+        blurEnabledListener = listener
+        runCatching { wm.addCrossWindowBlurEnabledListener(listener) }
+    }
+
+    private fun unregisterBlurListener() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
+        val listener = blurEnabledListener ?: return
+        runCatching { windowManager?.removeCrossWindowBlurEnabledListener(listener) }
+        blurEnabledListener = null
+    }
+
+    private fun updateDrawingWindowAttributes(
+        state: IslandState,
+        settings: IslandSettings,
+        keepAwake: Boolean
+    ) {
+        val wm = windowManager ?: return
+        val view = drawingComposeView ?: return
+        val params = drawingParams ?: return
+
+        val isInteractive = state.mode == IslandMode.EXPANDED ||
+            state.mode == IslandMode.MEDIUM ||
+            state.ocrSelection != null ||
+            state.isFlashlightCardOpen ||
+            state.isFloatingSidebarOpen ||
+            state.activeFloatingMiniTab != null
+        val needsIme = isInteractive && state.needsKeyboardFocus
+
+        // Keep home screen & wallpaper crisp behind the MATCH_PARENT drawing canvas so translucent
+        // Liquid Glass shows sharp background content cleanly through the card instead of blurring the whole screen.
+        val useCrossBlur = false
+
+        var flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+
+        if (isInteractive) {
+            flags = flags or WindowManager.LayoutParams.FLAG_WATCH_OUTSIDE_TOUCH
+        } else {
+            flags = flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        }
+        if (!needsIme) {
+            flags = flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        }
+        if (keepAwake) {
+            flags = flags or WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+        }
+        if (useCrossBlur) {
+            flags = flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
+        }
+
+        val blurRadius = 0
+
+        val sig = "$flags:$blurRadius"
+        if (lastDrawingSignature != sig) {
+            lastDrawingSignature = sig
+            params.flags = flags
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                params.blurBehindRadius = blurRadius
+            }
+            runCatching { wm.updateViewLayout(view, params) }
+        }
+    }
+
+    private fun updateTouchWindowBounds(
+        state: IslandState,
+        settings: IslandSettings,
+        zoneInput: ExclusionZone?,
+        force: Boolean = false
+    ) {
+        val wm = windowManager ?: return
+        val view = touchView ?: return
+        val params = touchParams ?: return
+        val zone = zoneInput ?: DeadZoneGeometry.measureLive(serviceContext, settings)
+        val density = zone.density
+
+        if (!settings.islandEnabled && !state.isCalibrationPreview) {
+            if (lastTouchSignature != "DISABLED") {
+                lastTouchSignature = "DISABLED"
+                view.visibility = View.GONE
+            }
+            return
+        }
+
+        if (state.isSelectModeActive) {
+            val sig = "SELECT"
+            if (!force && lastTouchSignature == sig) return
+            lastTouchSignature = sig
+
+            view.setBackgroundColor(android.graphics.Color.argb(1, 0, 0, 0))
+            params.gravity = Gravity.TOP or Gravity.START
+            params.width = WindowManager.LayoutParams.MATCH_PARENT
+            params.height = WindowManager.LayoutParams.MATCH_PARENT
+            params.x = 0
+            params.y = 0
+            params.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+            view.visibility = View.VISIBLE
+            runCatching { wm.updateViewLayout(view, params) }
+            return
+        }
+
+        val hideTouchWindow = state.mode == IslandMode.EXPANDED ||
+            state.mode == IslandMode.MEDIUM ||
+            state.ocrSelection != null ||
+            state.isFlashlightCardOpen ||
+            state.isFloatingSidebarOpen ||
+            state.activeFloatingMiniTab != null
+
+        if (hideTouchWindow) {
+            val sig = "GONE"
+            if (!force && lastTouchSignature == sig) return
+            lastTouchSignature = sig
+            view.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+            view.visibility = View.GONE
+            return
+        }
+
+        val metrics = DeadZoneGeometry.compactSlotMetrics(
+            holeWidthDp = zone.holeWidthDp,
+            holeHeightDp = zone.holeHeightDp,
+            isLandscape = zone.isLandscape,
+            slotWidthDp = settings.pillSizePreset.slotWidthDp
+        )
+
+        if (!zone.isLandscape) {
+            val idleWidthDp = when (settings.whenIdleMode) {
+                WhenIdleMode.INFO_PILL -> metrics.totalWidthDp
+                WhenIdleMode.CAMERA_ONLY -> (zone.holeWidthDp + 94f).coerceIn(114f, 152f)
+                WhenIdleMode.HIDDEN -> (zone.holeWidthDp + 24f).coerceAtLeast(48f)
+            }
+            val pillWidthDp = when (state.mode) {
+                IslandMode.IDLE -> idleWidthDp
+                IslandMode.COMPACT -> metrics.totalWidthDp
+                IslandMode.SPLIT -> metrics.totalWidthDp + 52f
+                IslandMode.MEDIUM -> 320f
+                IslandMode.EXPANDED -> 360f
+            }
+            val touchW = ((pillWidthDp + 16f) * density).toInt()
+            val touchH = ((metrics.pillHeightDp + 12f).coerceAtLeast(48f) * density).toInt()
+            val targetX = ((zone.cutoutRectPx.centerX() - zone.screenWidthPx / 2f)).toInt()
+            val targetY = (zone.cutoutRectPx.top - (2f * density).toInt()).coerceAtLeast(0)
+
+            val sig = "PORTRAIT:$touchW:$touchH:$targetX:$targetY"
+            if (!force && lastTouchSignature == sig) return
+            lastTouchSignature = sig
+
+            params.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            params.width = touchW
+            params.height = touchH
+            params.x = targetX
+            params.y = targetY
+        } else {
+            val verticalLenDp = when (state.mode) {
+                IslandMode.IDLE -> (zone.holeHeightDp + 44f).coerceAtLeast(64f)
+                else -> metrics.totalWidthDp
+            }
+            val touchW = ((metrics.pillHeightDp + 12f).coerceAtLeast(48f) * density).toInt()
+            val touchH = ((verticalLenDp + 16f) * density).toInt()
+            val targetX = if (zone.isRightEdgeInLandscape) 0 else (zone.cutoutRectPx.left).coerceAtLeast(0)
+            val targetY = (zone.cutoutRectPx.centerY() - zone.screenHeightPx / 2f).toInt()
+
+            val sig = "LANDSCAPE:${zone.isRightEdgeInLandscape}:$touchW:$touchH:$targetX:$targetY"
+            if (!force && lastTouchSignature == sig) return
+            lastTouchSignature = sig
+
+            params.gravity = (if (zone.isRightEdgeInLandscape) Gravity.END else Gravity.START) or Gravity.CENTER_VERTICAL
+            params.width = touchW
+            params.height = touchH
+            params.x = targetX
+            params.y = targetY
+        }
+
+        view.setBackgroundColor(android.graphics.Color.TRANSPARENT)
+        view.visibility = View.VISIBLE
+        runCatching { wm.updateViewLayout(view, params) }
+    }
+
+    private fun handlePillTap(app: DynamicIslandApp) {
+        val primary = latestState.primaryActivity
+        if (latestState.mode == IslandMode.IDLE) {
+            app.islandController.openFromPill(latestSettings.twoStageOpen)
+            return
+        }
+        when (latestSettings.tapGesture) {
+            IslandGesture.OPEN_APP -> {
+                when (primary) {
+                    is IslandActivity.Music -> {
+                        app.soundManager.playTap()
+                        app.mediaHub.openPlayerApp()
+                    }
+                    is IslandActivity.NotificationPreview -> {
+                        app.soundManager.playTap()
+                        val i = serviceContext.packageManager.getLaunchIntentForPackage(primary.packageName)
+                        i?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)?.let { runCatching { serviceContext.startActivity(it) } }
+                    }
+                    is IslandActivity.Timer -> app.islandController.openFromPill(latestSettings.twoStageOpen, IslandTab.TIMER)
+                    is IslandActivity.VoiceRecording -> app.islandController.openFromPill(latestSettings.twoStageOpen, IslandTab.MEMO)
+                    else -> app.islandController.openFromPill(latestSettings.twoStageOpen)
+                }
+            }
+            IslandGesture.TOGGLE_PLAY -> {
+                if (primary is IslandActivity.Music) {
+                    app.soundManager.playTap()
+                    app.mediaHub.togglePlayPause()
+                } else {
+                    app.islandController.openFromPill(latestSettings.twoStageOpen)
+                }
+            }
+            IslandGesture.EXPAND, IslandGesture.OPEN_CUSTOMISE, IslandGesture.SELECT_OCR -> {
+                app.islandController.openFromPill(latestSettings.twoStageOpen)
+            }
+        }
+    }
+
+    private fun handlePillLongPress(app: DynamicIslandApp) {
+        when (latestSettings.longPressGesture) {
+            IslandGesture.SELECT_OCR -> {
+                scope.launch {
+                    val allowed = OcrPrivacyGate.isScreenReadingAllowed(app.settingsRepository)
+                    if (!allowed) {
+                        app.islandController.showTransientBanner("Screen Reading is OFF in Privacy Settings")
+                    } else {
+                        app.islandController.setSelectMode(true)
+                    }
+                }
+            }
+            IslandGesture.OPEN_CUSTOMISE -> {
+                val i = Intent(serviceContext, MainActivity::class.java).apply {
+                    putExtra("open_route", "feature_picker")
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                runCatching { serviceContext.startActivity(i) }
+            }
+            else -> app.islandController.expand()
+        }
+    }
+
+    private fun performSelectionHaptic(lightPress: Boolean = false) {
+        val s = latestSettings
+        if (s.hapticsStrength == HapticsStrength.OFF) return
+        val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            (serviceContext.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager)?.defaultVibrator
+        } else {
+            @Suppress("DEPRECATION")
+            serviceContext.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+        } ?: return
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val effect = if (!lightPress && s.hapticsStrength == HapticsStrength.MEDIUM) {
+                VibrationEffect.EFFECT_CLICK
+            } else {
+                VibrationEffect.EFFECT_TICK
+            }
+            vibrator.vibrate(VibrationEffect.createPredefined(effect))
+        } else {
+            @Suppress("DEPRECATION")
+            vibrator.vibrate(if (!lightPress && s.hapticsStrength == HapticsStrength.MEDIUM) 16L else 8L)
+        }
+    }
+
+    private class OverlayLifecycleOwner : LifecycleOwner, ViewModelStoreOwner, SavedStateRegistryOwner {
+        private val lifecycleRegistry = LifecycleRegistry(this)
+        private val store = ViewModelStore()
+        private val savedStateController = SavedStateRegistryController.create(this)
+
+        override val lifecycle: Lifecycle get() = lifecycleRegistry
+        override val viewModelStore: ViewModelStore get() = store
+        override val savedStateRegistry: SavedStateRegistry get() = savedStateController.savedStateRegistry
+
+        fun onCreate() {
+            savedStateController.performRestore(null)
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+        }
+
+        fun onStart() {
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
+        }
+
+        fun onResume() {
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+        }
+
+        fun onDestroy() {
+            lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
+            store.clear()
+        }
+    }
+}

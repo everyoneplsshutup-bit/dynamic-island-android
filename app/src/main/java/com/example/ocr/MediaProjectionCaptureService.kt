@@ -43,6 +43,7 @@ class MediaProjectionCaptureService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var projection: MediaProjection? = null
+    private var projectionCallback: MediaProjection.Callback? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
 
@@ -97,18 +98,34 @@ class MediaProjectionCaptureService : Service() {
         val reader = ImageReader.newInstance(width, height, PixelFormat.RGBA_8888, 2)
         imageReader = reader
 
+        val mainHandler = Handler(Looper.getMainLooper())
+        val callback = object : MediaProjection.Callback() {
+            override fun onStop() {
+                cleanupAndStop()
+            }
+        }
+        projectionCallback = callback
+        runCatching { mp.registerCallback(callback, mainHandler) }
+
         // Delay ~180ms so the transparent prompt activity finishes animating away before capture
-        Handler(Looper.getMainLooper()).postDelayed({
-            virtualDisplay = mp.createVirtualDisplay(
-                "DynamicIslandSingleCapture",
-                width,
-                height,
-                density,
-                DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                reader.surface,
-                null,
-                null
-            )
+        mainHandler.postDelayed({
+            if (projection !== mp) return@postDelayed
+            virtualDisplay = runCatching {
+                mp.createVirtualDisplay(
+                    "DynamicIslandSingleCapture",
+                    width,
+                    height,
+                    density,
+                    DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    reader.surface,
+                    null,
+                    mainHandler
+                )
+            }.getOrNull()
+            if (virtualDisplay == null) {
+                cleanupAndStop()
+                return@postDelayed
+            }
 
             reader.setOnImageAvailableListener({ r ->
                 r.setOnImageAvailableListener(null, null)
@@ -164,12 +181,18 @@ class MediaProjectionCaptureService : Service() {
     }
 
     private fun cleanupAndStop() {
+        val mp = projection
+        val cb = projectionCallback
+        projection = null
+        projectionCallback = null
         runCatching { virtualDisplay?.release() }
         runCatching { imageReader?.close() }
-        runCatching { projection?.stop() }
+        if (mp != null && cb != null) {
+            runCatching { mp.unregisterCallback(cb) }
+        }
+        runCatching { mp?.stop() }
         virtualDisplay = null
         imageReader = null
-        projection = null
         ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)
         stopSelf()
     }

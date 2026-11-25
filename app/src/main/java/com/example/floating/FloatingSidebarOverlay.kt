@@ -2,7 +2,7 @@ package com.example.floating
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import com.example.ui.theme.MotionTokens
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -348,9 +348,9 @@ private fun MiniWindowShortcut(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.91f else 1.0f,
-        animationSpec = spring(dampingRatio = 0.65f, stiffness = 700f),
+    val scaleState = animateFloatAsState(
+        targetValue = if (pressed) MotionTokens.TAP_SQUISH_SCALE else 1.0f,
+        animationSpec = MotionTokens.spatialFast(),
         label = "mini_win_scale"
     )
     Column(
@@ -358,8 +358,8 @@ private fun MiniWindowShortcut(
         modifier = modifier
             .minimumInteractiveComponentSize()
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                scaleX = scaleState.value
+                scaleY = scaleState.value
             }
             .clip(RoundedCornerShape(14.dp))
             .background(Color.White.copy(alpha = 0.08f))

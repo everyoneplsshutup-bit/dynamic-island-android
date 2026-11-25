@@ -226,6 +226,13 @@ class MediaHub(
         val hasAccess = isNotificationListenerEnabled()
         val metadata = controller.metadata
         val playback = controller.playbackState
+        val isPlaying = playback?.state == PlaybackState.STATE_PLAYING
+        if (metadata == null && !isPlaying && playback?.state != PlaybackState.STATE_PAUSED) {
+            _state.value = MediaUiState(hasNotificationAccess = hasAccess)
+            islandController.removeActivity("music_session")
+            progressJob?.cancel()
+            return
+        }
         val isPixelMusic = pkg == PIXEL_MUSIC_PKG
 
         val title = metadata?.getString(MediaMetadata.METADATA_KEY_TITLE)
@@ -239,7 +246,6 @@ class MediaHub(
         val art = rawArt?.let { downsampleArtwork(it) }
         val duration = metadata?.getLong(MediaMetadata.METADATA_KEY_DURATION)?.coerceAtLeast(0L) ?: 0L
         val pos = playback?.position?.coerceAtLeast(0L) ?: 0L
-        val isPlaying = playback?.state == PlaybackState.STATE_PLAYING
 
         val customActions = playback?.customActions ?: emptyList()
         val extras = controller.extras

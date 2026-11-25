@@ -24,6 +24,12 @@ enum class PillStyle(val label: String) {
     LIQUID_GLASS("Liquid Glass")
 }
 
+enum class PillSizePreset(val label: String, val slotWidthDp: Float) {
+    SMALL("Small", 72f),
+    MEDIUM("Medium", 88f),
+    LARGE("Large", 104f)
+}
+
 enum class WhenIdleMode(val label: String, val subtitle: String) {
     CAMERA_ONLY("Camera Only", "Thin minimal border around the front camera"),
     INFO_PILL("Info Pill", "Show two quiet widgets left & right of the camera"),
@@ -35,7 +41,15 @@ enum class MiniCapsuleSize(val label: String, val widthDp: Float, val heightDp: 
     STANDARD("Standard", 252f, 58f)
 }
 
-enum class AccentTheme { ORANGE, CYAN, GREEN, DYNAMIC }
+enum class AccentTheme(val label: String, val swatchHex: Long) {
+    BLUE("Blue", 0xFF1E90FFL),
+    PURPLE("Purple", 0xFFA855F7L),
+    CYAN("Cyan", 0xFF00E5FFL),
+    ORANGE("Amber", 0xFFFF9F0AL),
+    CRIMSON("Crimson", 0xFFFF1E2DL),
+    GREEN("Green", 0xFF30D158L),
+    DYNAMIC("Auto", 0xFF64D2FFL)
+}
 enum class SpringFeel { SNAPPY, BALANCED, GENTLE }
 
 enum class AnimationStyle(val label: String, val subtitle: String) {
@@ -147,12 +161,16 @@ enum class QuickToggleType(val label: String) {
 
 @Serializable
 data class IslandSettings(
+    // 0. Master Overlay Toggle
+    val islandEnabled: Boolean = true,
+
     // 1. Look
-    val pillStyle: PillStyle = PillStyle.APPLE_GLASS,
+    val pillStyle: PillStyle = PillStyle.LIQUID_GLASS,
+    val pillSizePreset: PillSizePreset = PillSizePreset.MEDIUM,
     val glassDensity: Float = 0.65f,
     val reduceGlass: Boolean = false,
     val solidFallback: Boolean = false,
-    val accentTheme: AccentTheme = AccentTheme.ORANGE,
+    val accentTheme: AccentTheme = AccentTheme.BLUE,
     val rotateAlbumArt: Boolean = true,
     val purpleSidebarTheme: Boolean = false,
 
@@ -176,12 +194,12 @@ data class IslandSettings(
     val miniCapsuleSize: MiniCapsuleSize = MiniCapsuleSize.COMPACT,
     val miniCapsuleDurationMs: Long = 3000L,
 
-    // 3. Pill & Calibration (Redmi Note 10 Pro default cutout ~26x33 dp)
+    // 3. Pill & Calibration (Redmi Note 10 Pro cutout 74x93 px = ~27x34 dp, top 0 dp)
     val cutoutXOffsetDp: Float = 0f,
-    val cutoutYOffsetDp: Float = 6f,
-    val cutoutWidthDp: Float = 26f,
-    val cutoutHeightDp: Float = 33f,
-    val cutoutCornerRadiusDp: Float = 16f,
+    val cutoutYOffsetDp: Float = 0f,
+    val cutoutWidthDp: Float = 27f,
+    val cutoutHeightDp: Float = 34f,
+    val cutoutCornerRadiusDp: Float = 17f,
     val calibrationConfirmed: Boolean = true,
     val compactPreference: CompactPreference = CompactPreference.AUTO,
     val companionPosition: CompanionPosition = CompanionPosition.RIGHT,
@@ -279,7 +297,9 @@ class SettingsRepository(private val context: Context) {
     }
 
     private object Keys {
+        val ISLAND_ENABLED = booleanPreferencesKey("island_enabled")
         val PILL_STYLE = stringPreferencesKey("pill_style")
+        val PILL_SIZE_PRESET = stringPreferencesKey("pill_size_preset")
         val GLASS_DENSITY = floatPreferencesKey("glass_density")
         val REDUCE_GLASS = booleanPreferencesKey("reduce_glass")
         val SOLID_FALLBACK = booleanPreferencesKey("solid_fallback")
@@ -363,7 +383,9 @@ class SettingsRepository(private val context: Context) {
             else -> runCatching { PillStyle.valueOf(raw) }.getOrNull() ?: default.pillStyle
         }
         IslandSettings(
+            islandEnabled = prefs[Keys.ISLAND_ENABLED] ?: default.islandEnabled,
             pillStyle = parsedPillStyle,
+            pillSizePreset = prefs[Keys.PILL_SIZE_PRESET]?.let { runCatching { PillSizePreset.valueOf(it) }.getOrNull() } ?: default.pillSizePreset,
             glassDensity = (prefs[Keys.GLASS_DENSITY] ?: default.glassDensity).coerceIn(0f, 1f),
             reduceGlass = prefs[Keys.REDUCE_GLASS] ?: default.reduceGlass,
             solidFallback = prefs[Keys.SOLID_FALLBACK] ?: default.solidFallback,
@@ -465,7 +487,9 @@ class SettingsRepository(private val context: Context) {
 
     private suspend fun writeAll(s: IslandSettings) {
         context.settingsDataStore.edit { prefs ->
+            prefs[Keys.ISLAND_ENABLED] = s.islandEnabled
             prefs[Keys.PILL_STYLE] = s.pillStyle.name
+            prefs[Keys.PILL_SIZE_PRESET] = s.pillSizePreset.name
             prefs[Keys.GLASS_DENSITY] = s.glassDensity.coerceIn(0f, 1f)
             prefs[Keys.REDUCE_GLASS] = s.reduceGlass
             prefs[Keys.SOLID_FALLBACK] = s.solidFallback

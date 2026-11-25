@@ -17,7 +17,8 @@ enum class AlertKind {
     LOW_BATTERY,
     VAULT_EXPIRING,
     ACCESSIBILITY_RECOVERED,
-    OCR_COPIED
+    OCR_COPIED,
+    GENERAL
 }
 
 enum class DwellPauseReason {

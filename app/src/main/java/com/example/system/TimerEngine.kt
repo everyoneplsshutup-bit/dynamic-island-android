@@ -94,6 +94,7 @@ class TimerEngine(
             )
         }
         scheduleExactAlarm(timerEndWallMs)
+        pushTimerToIsland(label = "Sleep", isInitialStart = true)
         startTicker(label = "Sleep")
     }
 
@@ -114,6 +115,7 @@ class TimerEngine(
             )
         }
         scheduleExactAlarm(timerEndWallMs)
+        pushTimerToIsland(label = "Timer", isInitialStart = true)
         startTicker("Timer")
     }
 
@@ -214,7 +216,7 @@ class TimerEngine(
         }
     }
 
-    private fun pushTimerToIsland(label: String = "Timer") {
+    private fun pushTimerToIsland(label: String = "Timer", isInitialStart: Boolean = false) {
         val s = _state.value
         if (!s.isActive) return
         val cfg = latestSettings.eventConfig(EventKind.TIMER)
@@ -229,7 +231,7 @@ class TimerEngine(
                 isMirroredFromClock = false
             ),
             autoShowCompact = true,
-            autoExpandToFull = cfg.autoExpand && s.remainingMs == s.totalMs
+            autoExpandToFull = cfg.autoExpand && isInitialStart
         )
     }
 

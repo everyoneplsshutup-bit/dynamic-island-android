@@ -15,18 +15,18 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
 private val IslandDarkColorScheme = darkColorScheme(
-    primary = IslandColors.AccentOrange,
-    onPrimary = Color.Black,
-    primaryContainer = Color(0xFF332100),
-    onPrimaryContainer = Color(0xFFFFD8A8),
-    secondary = IslandColors.AccentCyan,
-    onSecondary = Color.Black,
+    primary = IslandColors.CrimsonBright,
+    onPrimary = Color.White,
+    primaryContainer = IslandColors.CrimsonDeep,
+    onPrimaryContainer = Color(0xFFFFDADE),
+    secondary = IslandColors.AccentRed,
+    onSecondary = Color.White,
     tertiary = IslandColors.AccentGreen,
-    background = IslandColors.SurfaceContainerLowest,
+    background = IslandColors.ObsidianBg,
     onBackground = IslandColors.TextPrimary,
-    surface = IslandColors.SurfaceContainerLow,
+    surface = IslandColors.ObsidianSurface,
     onSurface = IslandColors.TextPrimary,
-    surfaceVariant = IslandColors.SurfaceContainer,
+    surfaceVariant = IslandColors.ObsidianCard,
     onSurfaceVariant = IslandColors.TextSecondary,
     surfaceContainerLowest = IslandColors.SurfaceContainerLowest,
     surfaceContainerLow = IslandColors.SurfaceContainerLow,
@@ -35,15 +35,15 @@ private val IslandDarkColorScheme = darkColorScheme(
     surfaceContainerHighest = IslandColors.SurfaceContainerHighest,
     error = IslandColors.AccentRed,
     onError = Color.White,
-    outline = Color(0xFF2D2E38)
+    outline = Color(0xFF332024)
 )
 
 private val IslandLightColorScheme = lightColorScheme(
-    primary = Color(0xFFD97706),
+    primary = IslandColors.CrimsonPrimary,
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFFFEDD5),
-    onPrimaryContainer = Color(0xFF451A03),
-    secondary = Color(0xFF0284C7),
+    primaryContainer = Color(0xFFFFDAD6),
+    onPrimaryContainer = Color(0xFF410002),
+    secondary = Color(0xFF9E1B24),
     onSecondary = Color.White,
     tertiary = Color(0xFF16A34A),
     background = IslandColors.AppBgLight,
@@ -61,14 +61,14 @@ val IslandShapes = Shapes(
     extraSmall = RoundedCornerShape(8.dp),
     small = RoundedCornerShape(12.dp),
     medium = RoundedCornerShape(18.dp),
-    large = RoundedCornerShape(28.dp),
+    large = RoundedCornerShape(24.dp),
     extraLarge = RoundedCornerShape(36.dp)
 )
 
 @Composable
 fun DynamicIslandTheme(
     darkTheme: Boolean = isSystemInDarkTheme(),
-    dynamicColor: Boolean = true,
+    dynamicColor: Boolean = false,
     accentOverride: Color? = null,
     content: @Composable () -> Unit
 ) {

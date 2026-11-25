@@ -2,10 +2,10 @@ package com.example.ocr
 
 import android.view.HapticFeedbackConstants
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import com.example.ui.theme.MotionTokens
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -427,7 +427,7 @@ fun OcrSelectionOverlay(
 
         AnimatedVisibility(
             visible = activeHandle == 0,
-            enter = fadeIn() + scaleIn(initialScale = 0.90f, animationSpec = spring(dampingRatio = 0.78f, stiffness = 750f)),
+            enter = fadeIn() + scaleIn(initialScale = 0.90f, animationSpec = MotionTokens.spatialFast()),
             exit = fadeOut(),
             modifier = Modifier.graphicsLayer {
                 translationX = (selectionCenterX - menuWidthPx / 2f).coerceIn(16f, (screenWidthPx - menuWidthPx - 16f).coerceAtLeast(16f))

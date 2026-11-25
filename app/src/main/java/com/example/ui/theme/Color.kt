@@ -9,10 +9,26 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.ColorUtils
+import com.example.system.AccentTheme
 import com.example.system.PillStyle
 
 object IslandColors {
-    // Core Dynamic Island & iOS 26 Liquid Glass palette
+    // Obsidian & Crimson Glass Palette (matching the 12 mockup screens)
+    val ObsidianBg = Color(0xFF050507)
+    val ObsidianSurface = Color(0xFF0E0B0D)
+    val ObsidianCard = Color(0xFF140E11)
+    val ObsidianCardElevated = Color(0xFF1C1317)
+    val ObsidianDock = Color(0xEA100A0C)
+
+    val CrimsonPrimary = Color(0xFFE50914)
+    val CrimsonBright = Color(0xFFFF1E2D)
+    val CrimsonGlow = Color(0xFFFF3B47)
+    val CrimsonDeep = Color(0xFF4A070D)
+    val CrimsonMuted = Color(0xFF28090C)
+    val CrimsonBorder = Color(0x55FF2A38)
+    val CrimsonBorderStrong = Color(0xCCFF2A38)
+
+    // Core Dynamic Island & Glass palette
     val PillBlack = Color(0xFF000000)
     val CardSurfaceBlack = Color(0xFF08090C)
     val CardSurfaceSolid = Color(0xFF13141A)
@@ -23,45 +39,58 @@ object IslandColors {
     val GlassSpecularTop = Color(0x96FFFFFF)
     val GlassSpecularMid = Color(0x36FFFFFF)
     val GlassSpecularBottom = Color(0x18FFFFFF)
-    val GlassSubtleBorder = Color(0x2CFFFFFF)
+    val GlassSubtleBorder = Color(0x22FFFFFF)
 
-    // M3E Surface Container Ladder
-    val SurfaceContainerLowest = Color(0xFF07080B)
-    val SurfaceContainerLow = Color(0xFF101218)
-    val SurfaceContainer = Color(0xFF171922)
-    val SurfaceContainerHigh = Color(0xFF1F222E)
-    val SurfaceContainerHighest = Color(0xFF282C3B)
+    // M3E Surface Container Ladder (Obsidian-tinted)
+    val SurfaceContainerLowest = Color(0xFF050507)
+    val SurfaceContainerLow = Color(0xFF0E0B0D)
+    val SurfaceContainer = Color(0xFF151013)
+    val SurfaceContainerHigh = Color(0xFF1E161A)
+    val SurfaceContainerHighest = Color(0xFF281D22)
 
     // Accent & Semantic Activity colors
-    val AccentOrange = Color(0xFFFF9F0A) // Timer activity color
+    val ElectricBlue = Color(0xFF1E90FF) // Liquid Glass default hero accent
+    val NeonPurple = Color(0xFFA855F7)   // Position chooser Liquid Glass accent
+    val CyanBright = Color(0xFF00E5FF)   // Tools Liquid Glass accent
+    val AccentOrange = Color(0xFFFF9F0A) // Amber / Gold Liquid Glass & Timer accent
     val AccentCyan = Color(0xFF64D2FF)   // Alerts / OCR / Info
-    val AccentGreen = Color(0xFF30D158)  // Charging / Shelf Ready
+    val AccentGreen = Color(0xFF30D158)  // Charging / Shelf Ready / Active
     val AccentLime = Color(0xFFA6E33A)   // Notes / Shelf countdown healthy
     val AccentAmber = Color(0xFFFFB340)  // Shelf < 2:00 warning
-    val AccentRed = Color(0xFFFF3B30)    // Calibration camera ring & recording / < 1:00 / <= 15% battery
+    val AccentRed = Color(0xFFFF2433)    // Crimson primary / calibration ring / recording / <= 15% battery
     val AccentPurple = Color(0xFFBF5AF2) // Sleep / Sidebar option
     val SelectionBlue = Color(0xFF0A84FF) // Native Android/Apple OCR Selection blue
     val TextPrimary = Color(0xFFFFFFFF)
-    val TextSecondary = Color(0xFFB4B8C0)
-    val TextTertiary = Color(0xFF7B808A)
+    val TextSecondary = Color(0xFFA6A8B2)
+    val TextTertiary = Color(0xFF6F727C)
 
     // Concentric radii scale (Apple HIG / Build #5 spec: 36dp full, 28dp medium)
     val ExpandedOuterRadius = 36.dp
     val MediumOuterRadius = 28.dp
     val ExpandedInnerSheetRadius = 28.dp
-    val CardRadius = 28.dp
+    val CardRadius = 22.dp
     val ChipRadius = 8.dp
     val ScreenHorizontalMargin = 16.dp
 
     // App Settings surface tokens
-    val AppBgDark = Color(0xFF08090D)
-    val AppSurfaceDark = Color(0xFF13141C)
-    val AppSurfaceVariantDark = Color(0xFF1D1F2A)
+    val AppBgDark = Color(0xFF050507)
+    val AppSurfaceDark = Color(0xFF120D10)
+    val AppSurfaceVariantDark = Color(0xFF1C1418)
     val AppBgLight = Color(0xFFF5F6FA)
     val AppSurfaceLight = Color(0xFFFFFFFF)
     val AppSurfaceVariantLight = Color(0xFFEBEEF5)
 
-    fun extractMaterialYouAccent(context: Context, fallback: Color = AccentOrange): Color {
+    fun resolveAccentColor(context: Context, theme: AccentTheme): Color = when (theme) {
+        AccentTheme.BLUE -> ElectricBlue
+        AccentTheme.PURPLE -> NeonPurple
+        AccentTheme.CYAN -> CyanBright
+        AccentTheme.ORANGE -> AccentOrange
+        AccentTheme.CRIMSON -> CrimsonBright
+        AccentTheme.GREEN -> AccentGreen
+        AccentTheme.DYNAMIC -> extractMaterialYouAccent(context, fallback = ElectricBlue)
+    }
+
+    fun extractMaterialYouAccent(context: Context, fallback: Color = ElectricBlue): Color {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return fallback
         return runCatching {
             val resId = context.resources.getIdentifier("system_accent1_400", "color", "android")
@@ -78,25 +107,23 @@ object IslandColors {
         }.getOrDefault(fallback)
     }
 
-    /**
-     * Density slider maps 0f (crystal clear translucent glass) -> 1f (rich opaque dark glass).
-     */
     fun glassAlphaRange(pillStyle: PillStyle, density: Float, reduceGlass: Boolean): Pair<Float, Float> {
         val d = density.coerceIn(0f, 1f)
         if (pillStyle == PillStyle.BLACK) return 1f to 1f
         if (reduceGlass) {
-            val top = (0.76f + d * 0.20f).coerceIn(0.76f, 0.96f)
-            return top to (top + 0.04f).coerceAtMost(0.98f)
+            val top = (0.72f + d * 0.18f).coerceIn(0.72f, 0.92f)
+            return top to (top + 0.05f).coerceAtMost(0.96f)
         }
         return when (pillStyle) {
             PillStyle.APPLE_GLASS -> {
-                val top = (0.34f + d * 0.56f).coerceIn(0.32f, 0.92f)
-                val bot = (top + 0.10f).coerceAtMost(0.96f)
+                val top = (0.44f + d * 0.28f).coerceIn(0.40f, 0.76f)
+                val bot = (top + 0.10f).coerceAtMost(0.84f)
                 top to bot
             }
             PillStyle.LIQUID_GLASS -> {
-                val top = (0.20f + d * 0.58f).coerceIn(0.18f, 0.84f)
-                val bot = (top + 0.12f).coerceAtMost(0.90f)
+                // Real translucent Liquid Glass: lets background wallpaper & icons show clearly through it
+                val top = (0.14f + d * 0.20f).coerceIn(0.14f, 0.36f)
+                val bot = (top + 0.08f).coerceAtMost(0.44f)
                 top to bot
             }
             PillStyle.BLACK -> 1f to 1f
@@ -106,26 +133,28 @@ object IslandColors {
     fun blendGlassBase(
         materialYouColor: Color,
         density: Float,
-        pillStyle: PillStyle = PillStyle.APPLE_GLASS,
+        pillStyle: PillStyle = PillStyle.LIQUID_GLASS,
         reduceGlass: Boolean = false
     ): Brush {
         if (pillStyle == PillStyle.BLACK) {
-            return Brush.verticalGradient(colors = listOf(PillBlack, PillBlack))
+            return Brush.verticalGradient(colors = listOf(Color(0xFA060608), PillBlack))
         }
         val (alphaTop, alphaBot) = glassAlphaRange(pillStyle, density, reduceGlass)
-        val tintStrengthTop = if (pillStyle == PillStyle.LIQUID_GLASS) 0.22f else 0.15f
-        val tintStrengthBot = if (pillStyle == PillStyle.LIQUID_GLASS) 0.12f else 0.08f
+        val tintStrengthTop = if (pillStyle == PillStyle.LIQUID_GLASS) 0.26f else 0.12f
+        val tintStrengthBot = if (pillStyle == PillStyle.LIQUID_GLASS) 0.12f else 0.05f
+        val baseTopArgb = if (pillStyle == PillStyle.LIQUID_GLASS) 0xFF0E1522.toInt() else 0xFF14151C.toInt()
+        val baseBotArgb = if (pillStyle == PillStyle.LIQUID_GLASS) 0xFF070A12.toInt() else 0xFF090A0F.toInt()
         val tintedTop = Color(
-            ColorUtils.blendARGB(Color(0xFF1A1E2B).toArgb(), materialYouColor.toArgb(), tintStrengthTop)
+            ColorUtils.blendARGB(baseTopArgb, materialYouColor.toArgb(), tintStrengthTop)
         ).copy(alpha = alphaTop)
         val tintedBottom = Color(
-            ColorUtils.blendARGB(Color(0xFF0A0C12).toArgb(), materialYouColor.toArgb(), tintStrengthBot)
+            ColorUtils.blendARGB(baseBotArgb, materialYouColor.toArgb(), tintStrengthBot)
         ).copy(alpha = alphaBot)
         return Brush.verticalGradient(colors = listOf(tintedTop, tintedBottom))
     }
 
     fun blendGlassBase(materialYouColor: Color, density: Float): Brush =
-        blendGlassBase(materialYouColor, density, PillStyle.APPLE_GLASS, reduceGlass = false)
+        blendGlassBase(materialYouColor, density, PillStyle.LIQUID_GLASS, reduceGlass = false)
 
     fun pressTint(base: Color, pressed: Boolean): Color =
         if (!pressed) base else lerp(base, Color.White, 0.22f)
@@ -138,19 +167,33 @@ object IslandColors {
     ): Brush {
         return when {
             isHighlighted -> Brush.linearGradient(
-                colors = listOf(accentColor, accentColor.copy(alpha = 0.55f), accentColor)
+                colors = listOf(accentColor, Color.White.copy(alpha = 0.85f), accentColor)
+            )
+            useGlass && isLiquidStyle -> Brush.linearGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = 0.62f),
+                    accentColor.copy(alpha = 0.85f),
+                    Color.White.copy(alpha = 0.30f),
+                    accentColor.copy(alpha = 0.56f)
+                ),
+                start = Offset(0f, 0f),
+                end = Offset(420f, 480f)
             )
             useGlass -> Brush.linearGradient(
                 colors = listOf(
-                    if (isLiquidStyle) Color.White.copy(alpha = 0.78f) else GlassSpecularTop,
-                    accentColor.copy(alpha = if (isLiquidStyle) 0.42f else 0.26f),
-                    GlassSpecularBottom
+                    GlassSpecularTop,
+                    accentColor.copy(alpha = 0.34f),
+                    Color.White.copy(alpha = 0.16f)
                 ),
                 start = Offset(0f, 0f),
                 end = Offset(420f, 480f)
             )
             else -> Brush.linearGradient(
-                colors = listOf(Color.White.copy(alpha = 0.22f), Color.White.copy(alpha = 0.08f))
+                colors = listOf(
+                    Color.White.copy(alpha = 0.22f),
+                    accentColor.copy(alpha = 0.28f),
+                    Color.White.copy(alpha = 0.08f)
+                )
             )
         }
     }

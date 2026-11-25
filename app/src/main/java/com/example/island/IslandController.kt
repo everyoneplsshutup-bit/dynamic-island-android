@@ -50,9 +50,16 @@ class IslandController(
             val existing = if (existingIdx >= 0) current.activityQueue[existingIdx] else null
 
             // NO-FLICKER RULE (ajitpal 2.4.1):
-            // 1. If visible content is identical, ignore redundant re-posts (zero redraw).
+            // 1. If visible content is identical (either currently displayed or just displaced to Inbox),
+            //    ignore redundant re-posts (zero redraw, zero accidental re-pop).
             if (existing != null && isVisuallySame(existing, activity)) {
                 return@update current
+            }
+            if (existing == null && activity is IslandActivity.NotificationPreview) {
+                val displacedSame = current.notificationsHistory.firstOrNull { it.id == activity.id }
+                if (displacedSame != null && isVisuallySame(displacedSame, activity)) {
+                    return@update current
+                }
             }
             actuallyChanged = true
 
@@ -63,13 +70,16 @@ class IslandController(
                 current.activityQueue
             }
 
-            // 2. Updating an existing ongoing activity keeps its relative place rather than stealing front;
-            //    only a genuinely new activity is sorted to front by priority.
-            val updatedQueue = if (existingIdx >= 0 && baseQueue.any { it.id == activity.id }) {
+            // 2. Ajitpal rule: existing ongoing activities keep their relative place rather than stealing front;
+            //    only a genuinely NEW pop event comes to the front.
+            val isNewPop = existing == null
+            val updatedQueue = if (!isNewPop && baseQueue.any { it.id == activity.id }) {
                 baseQueue.map { if (it.id == activity.id) activity else it }
             } else {
-                (baseQueue + activity).sortedByDescending { it.priority }
+                listOf(activity) + baseQueue
             }
+
+            val nextPromotedId = if (isNewPop) activity.id else current.promotedPrimaryId
 
             val targetTab = when (activity) {
                 is IslandActivity.Timer -> IslandTab.TIMER
@@ -115,6 +125,7 @@ class IslandController(
                 mode = newMode,
                 activeTab = if (autoExpandToFull && !isExistingUpdate) targetTab else current.activeTab,
                 activityQueue = updatedQueue,
+                promotedPrimaryId = nextPromotedId,
                 alertsHistory = updatedAlerts,
                 notificationsHistory = updatedNotifs
             )
@@ -123,6 +134,8 @@ class IslandController(
         if (!actuallyChanged) return
         if (expandedNow) {
             onSoundEvent(IslandSoundEvent.EXPAND)
+        } else if (activity is IslandActivity.NotificationPreview) {
+            onSoundEvent(IslandSoundEvent.NOTIFICATION)
         }
 
         if (autoDismissMs != null && autoDismissMs > 0L) {
@@ -632,7 +645,7 @@ class IslandController(
         a is IslandActivity.Charging && b is IslandActivity.Charging ->
             a.levelPercent == b.levelPercent && a.isCharging == b.isCharging && a.isFull == b.isFull && a.pluggedLabel == b.pluggedLabel
         a is IslandActivity.NotificationPreview && b is IslandActivity.NotificationPreview ->
-            a.packageName == b.packageName && a.title == b.title && a.text == b.text
+            a.packageName == b.packageName && a.appName == b.appName && a.title == b.title && a.text == b.text
         a is IslandActivity.VoiceRecording && b is IslandActivity.VoiceRecording ->
             (a.elapsedMs / 1000L) == (b.elapsedMs / 1000L)
         a is IslandActivity.Alert && b is IslandActivity.Alert ->

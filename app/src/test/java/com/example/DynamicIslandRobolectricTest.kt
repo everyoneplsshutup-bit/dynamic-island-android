@@ -8,6 +8,8 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Rect
 import androidx.compose.animation.core.SnapSpec
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.SpringSpec
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -294,8 +296,8 @@ class DynamicIslandRobolectricTest {
     }
 
     @Test
-    fun `all 13 unique UI sound assets exist and respect toggle and volume gating`() {
-        assertEquals(13, IslandSoundEvent.entries.size)
+    fun `all 14 unique UI sound assets exist, pass mastering checks, and respect toggle and volume gating`() {
+        assertEquals(14, IslandSoundEvent.entries.size)
         val rawResources = listOf(
             R.raw.sfx_expand,
             R.raw.sfx_collapse,
@@ -304,24 +306,108 @@ class DynamicIslandRobolectricTest {
             R.raw.sfx_timer_done,
             R.raw.sfx_toggle,
             R.raw.sfx_toggle_off,
-            R.raw.sfx_calc_key,
+            R.raw.sfx_notification,
             R.raw.sfx_music_play,
             R.raw.sfx_music_pause,
             R.raw.sfx_music_next,
             R.raw.sfx_vault_add,
-            R.raw.sfx_search_open
+            R.raw.sfx_search_open,
+            R.raw.sfx_error
         )
-        assertEquals(13, rawResources.distinct().size)
+        assertEquals(14, rawResources.distinct().size)
+
+        val rmsDbValues = mutableListOf<Double>()
+        val tickIds = setOf(R.raw.sfx_tap, R.raw.sfx_music_next)
+
         rawResources.forEach { resId ->
-            composeRule.activity.resources.openRawResource(resId).use { stream ->
-                val header = ByteArray(12)
-                val read = stream.read(header)
-                assertEquals(12, read)
-                assertEquals("RIFF", String(header, 0, 4))
-                assertEquals("WAVE", String(header, 8, 4))
-                assertTrue(stream.available() > 32)
+            val bytes = composeRule.activity.resources.openRawResource(resId).use { it.readBytes() }
+            assertTrue("WAV too short for $resId", bytes.size > 44)
+            assertEquals("RIFF", String(bytes, 0, 4))
+            assertEquals("WAVE", String(bytes, 8, 4))
+
+            fun leShort(off: Int): Int =
+                (bytes[off].toInt() and 0xFF) or ((bytes[off + 1].toInt() and 0xFF) shl 8)
+            fun leInt(off: Int): Int =
+                (bytes[off].toInt() and 0xFF) or
+                    ((bytes[off + 1].toInt() and 0xFF) shl 8) or
+                    ((bytes[off + 2].toInt() and 0xFF) shl 16) or
+                    ((bytes[off + 3].toInt() and 0xFF) shl 24)
+
+            val audioFormat = leShort(20)
+            val channels = leShort(22)
+            val sampleRate = leInt(24)
+            val bitsPerSample = leShort(34)
+            assertEquals("PCM format required", 1, audioFormat)
+            assertEquals("Mono required", 1, channels)
+            assertEquals("44.1 kHz required", 44100, sampleRate)
+            assertEquals("16-bit PCM required", 16, bitsPerSample)
+
+            // Locate 'data' chunk
+            var pos = 12
+            var dataStart = -1
+            var dataSize = 0
+            while (pos + 8 <= bytes.size) {
+                val id = String(bytes, pos, 4)
+                val sz = leInt(pos + 4)
+                if (id == "data") {
+                    dataStart = pos + 8
+                    dataSize = sz.coerceAtMost(bytes.size - dataStart)
+                    break
+                }
+                pos += 8 + sz
             }
+            assertTrue("Missing data chunk", dataStart > 0 && dataSize > 0)
+
+            val sampleCount = dataSize / 2
+            val durationSec = sampleCount / 44100.0
+            assertTrue("WAV duration ${durationSec}s exceeds 1.0s", durationSec <= 1.0)
+
+            val samples = DoubleArray(sampleCount) { i ->
+                val o = dataStart + i * 2
+                val raw = (bytes[o].toInt() and 0xFF) or (bytes[o + 1].toInt() shl 8)
+                raw / 32768.0
+            }
+
+            // Leading silence <= 5 ms
+            val firstAudibleIdx = samples.indexOfFirst { kotlin.math.abs(it) >= (256.0 / 32768.0) }
+            assertTrue("No audible audio in $resId", firstAudibleIdx >= 0)
+            val leadMs = (firstAudibleIdx / 44.1)
+            assertTrue("Leading silence ${leadMs}ms > 5ms", leadMs <= 5.0)
+
+            val peak = samples.maxOf { kotlin.math.abs(it) }
+            val peakDbfs = 20.0 * kotlin.math.log10(peak.coerceAtLeast(1e-9))
+            val rms = kotlin.math.sqrt(samples.sumOf { it * it } / sampleCount)
+            val rmsDbfs = 20.0 * kotlin.math.log10(rms.coerceAtLeast(1e-9))
+            rmsDbValues.add(rmsDbfs)
+
+            if (resId in tickIds) {
+                assertTrue("Tick peak ${peakDbfs} dBFS > -12 dBFS", peakDbfs <= -12.0)
+            }
+
+            // Ensure negligible energy below 300 Hz (speaker safety on Redmi Note 10 Pro)
+            val fftN = minOf(sampleCount, 4096)
+            var lowBandEnergy = 0.0
+            var totalSampleEnergy = 0.0
+            for (i in 0 until fftN) totalSampleEnergy += samples[i] * samples[i]
+            for (freqHz in listOf(60.0, 100.0, 150.0, 200.0, 250.0, 280.0)) {
+                var re = 0.0
+                var im = 0.0
+                val w = 2.0 * Math.PI * freqHz / 44100.0
+                for (i in 0 until fftN) {
+                    re += samples[i] * kotlin.math.cos(w * i)
+                    im -= samples[i] * kotlin.math.sin(w * i)
+                }
+                lowBandEnergy += (re * re + im * im) / fftN
+            }
+            val lowRatio = lowBandEnergy / totalSampleEnergy.coerceAtLeast(1e-9)
+            assertTrue("Low-frequency (<300 Hz) energy ratio $lowRatio too high for $resId", lowRatio < 0.05)
         }
+
+        val familyMeanRms = rmsDbValues.average()
+        assertTrue(
+            "Overall family RMS ${familyMeanRms} dBFS should be within -18.5..-12.0 dBFS",
+            familyMeanRms in -18.5..-12.0
+        )
 
         val defaults = IslandSettings()
         assertTrue(defaults.soundEnabled)
@@ -339,8 +425,108 @@ class DynamicIslandRobolectricTest {
         app.soundManager.updateCachedAudioSettings(enabled = false, volume = 0.5f)
         assertFalse(app.soundManager.play(IslandSoundEvent.EXPAND))
         app.soundManager.updateCachedAudioSettings(enabled = true, volume = 0f)
-        assertFalse(app.soundManager.play(IslandSoundEvent.CALC_KEY))
+        assertFalse(app.soundManager.play(IslandSoundEvent.ERROR))
         app.soundManager.updateCachedAudioSettings(enabled = true, volume = 0.75f)
+    }
+
+    @Test
+    fun `motion tokens match exact M3 Expressive table and source contains zero banned animation APIs`() {
+        val sd = MotionTokens.m3SpatialDefault<Float>()
+        assertEquals(0.8f, sd.dampingRatio, 0.0001f)
+        assertEquals(380f, sd.stiffness, 0.0001f)
+
+        val sf = MotionTokens.m3SpatialFast<Float>()
+        assertEquals(0.6f, sf.dampingRatio, 0.0001f)
+        assertEquals(800f, sf.stiffness, 0.0001f)
+
+        val ed = MotionTokens.m3EffectsDefault<Float>()
+        assertEquals(1.0f, ed.dampingRatio, 0.0001f)
+        assertEquals(1600f, ed.stiffness, 0.0001f)
+
+        val pm = MotionTokens.m3PillMorph<Float>()
+        assertEquals(0.6f, pm.dampingRatio, 0.0001f)
+        assertEquals(Spring.StiffnessLow, pm.stiffness, 0.0001f)
+
+        val collapse = MotionTokens.collapseSpec<Float>(AnimationStyle.SPRING, 1.0f) as SpringSpec<Float>
+        assertEquals(1.0f, collapse.dampingRatio, 0.0001f)
+
+        assertEquals(0.97f, MotionTokens.TAP_SQUISH_SCALE, 0.0001f)
+        assertEquals(180, MotionTokens.GLASS_FADE_MS)
+        assertEquals(300, MotionTokens.CONTENT_ENTER_MS)
+        assertEquals(300, MotionTokens.CONTENT_ENTER_DELAY_MS)
+        assertEquals(200, MotionTokens.CONTENT_STAGGER_MS)
+        assertEquals(240, MotionTokens.COLLAPSE_MS)
+
+        // Audit main source files for banned animation APIs
+        val candidateRoots = listOf(
+            java.io.File("src/main/java/com/example"),
+            java.io.File("app/src/main/java/com/example")
+        )
+        val srcRoot = candidateRoots.firstOrNull { it.exists() && it.isDirectory }
+        assertNotNull("Could not locate main Kotlin source directory for animation audit", srcRoot)
+        val bannedPatterns = listOf(
+            "rememberInfiniteTransition",
+            "infiniteRepeatable",
+            "animateDpAsState",
+            "SizeTransform",
+            ".blur("
+        )
+        srcRoot!!.walkTopDown()
+            .filter { it.isFile && it.extension == "kt" }
+            .forEach { file ->
+                val text = file.readText()
+                bannedPatterns.forEach { banned ->
+                    assertFalse(
+                        "Found banned animation API '$banned' in ${file.name}",
+                        text.contains(banned)
+                    )
+                }
+            }
+    }
+
+    @Test
+    fun `ajitpal rule preserves activity order on updates and promotes only new pop events`() {
+        val controller = IslandController()
+        val timer = IslandActivity.Timer(
+            id = "timer_1",
+            label = "Focus",
+            remainingMs = 120_000L,
+            totalMs = 120_000L,
+            isRunning = true
+        )
+        val n1 = IslandActivity.NotificationPreview(
+            id = "notif_a",
+            packageName = "com.pkg.a",
+            appName = "AppA",
+            title = "Alice",
+            text = "Ping 1"
+        )
+        val n2 = IslandActivity.NotificationPreview(
+            id = "notif_b",
+            packageName = "com.pkg.b",
+            appName = "AppB",
+            title = "Bob",
+            text = "Ping 2"
+        )
+        controller.upsertActivity(timer)
+        controller.upsertActivity(n1)
+        // New pop n1 promotes in front of persistent timer; timer remains in queue
+        assertEquals("notif_a", controller.state.value.primaryActivity?.id)
+
+        // Updating persistent timer updates content in place WITHOUT stealing front from n1
+        controller.upsertActivity(timer.copy(remainingMs = 119_000L))
+        assertEquals("notif_a", controller.state.value.primaryActivity?.id)
+        val updatedTimer = controller.state.value.activityQueue.first { it.id == "timer_1" } as IslandActivity.Timer
+        assertEquals(119_000L, updatedTimer.remainingMs)
+
+        // New pop n2 replaces n1 at the front while moving n1 to notificationsHistory
+        controller.upsertActivity(n2)
+        assertEquals("notif_b", controller.state.value.primaryActivity?.id)
+        assertTrue(controller.state.value.notificationsHistory.any { it.id == "notif_a" })
+
+        // Re-posting visually unchanged displaced n1 is ignored (no redraw, does not steal front)
+        controller.upsertActivity(n1.copy())
+        assertEquals("notif_b", controller.state.value.primaryActivity?.id)
     }
 
     @Test
@@ -512,8 +698,12 @@ class DynamicIslandRobolectricTest {
         // Open Settings and verify all 6 groups render
         composeRule.onNodeWithTag("open_settings_button").performClick()
         composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_island_master_switch").assertIsDisplayed().assertIsOn()
+        composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_look"))
         composeRule.onNodeWithTag("settings_group_look").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_motion"))
         composeRule.onNodeWithTag("settings_group_motion").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_pill"))
         composeRule.onNodeWithTag("settings_group_pill").assertIsDisplayed()
         composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_features"))
         composeRule.onNodeWithTag("settings_group_features").assertIsDisplayed()
@@ -521,6 +711,18 @@ class DynamicIslandRobolectricTest {
         composeRule.onNodeWithTag("settings_group_privacy").assertIsDisplayed()
         composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_about"))
         composeRule.onNodeWithTag("settings_group_about").assertIsDisplayed()
+
+        // Open Settings > Look (Appearance) and tap all 3 live previews + size presets (must never crash)
+        composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_look"))
+        composeRule.onNodeWithTag("settings_group_look").performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("look_preview_black").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("look_preview_apple_glass").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("look_preview_liquid_glass").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("look_size_large").assertIsDisplayed().performClick()
+        composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_detail_back").performClick()
+        composeRule.waitForIdle()
 
         // Open Motion settings and verify Build #4 Motion controls + subtabs + Sound Effects + Try It demo
         composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_motion"))
@@ -569,19 +771,53 @@ class DynamicIslandRobolectricTest {
         composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_pill"))
         composeRule.onNodeWithTag("settings_group_pill").performClick()
         composeRule.waitForIdle()
+        composeRule.onNodeWithTag("settings_detail_list").performScrollToNode(hasTestTag("pill_companion_left"))
         composeRule.onNodeWithTag("pill_companion_left").assertIsDisplayed()
         composeRule.onNodeWithTag("pill_companion_right").assertIsDisplayed()
 
-        // Navigate back to Home and open Setup Wizard
+        // Navigate back to Settings, test all 9 Floating Glass Dock tabs, and open Setup Wizard
         composeRule.onNodeWithTag("settings_detail_back").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("settings_back").performClick()
-        composeRule.waitForIdle()
+        listOf(
+            "dock_tab_notes",
+            "dock_tab_alerts",
+            "dock_tab_shelf",
+            "dock_tab_tools",
+            "dock_tab_music",
+            "dock_tab_timer",
+            "dock_tab_search",
+            "dock_tab_settings",
+            "dock_tab_home"
+        ).forEach { tabTag ->
+            composeRule.onNodeWithTag(tabTag).assertIsDisplayed().performClick()
+            composeRule.waitForIdle()
+        }
+
         composeRule.onNodeWithTag("open_wizard_button").performScrollTo().performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("wizard_acc_btn").assertIsDisplayed()
+        composeRule.onNodeWithTag("wizard_acc_btn").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("wizard_nl_btn").performScrollTo().assertIsDisplayed()
+        composeRule.onNodeWithTag("wizard_overlay_btn").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("wizard_screenshots_btn").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("wizard_finish_btn").performScrollTo().performClick()
         composeRule.waitForIdle()
+    }
+
+    @Test
+    fun `islandEnabled, pillStyle, and pillSizePreset persist cleanly in SettingsRepository`() = runTest {
+        val repo = SettingsRepository(composeRule.activity)
+        repo.resetSettings()
+        repo.update {
+            it.copy(
+                islandEnabled = false,
+                pillStyle = com.example.system.PillStyle.APPLE_GLASS,
+                pillSizePreset = com.example.system.PillSizePreset.LARGE
+            )
+        }
+        val saved = repo.settingsFlow.first()
+        assertFalse(saved.islandEnabled)
+        assertEquals(com.example.system.PillStyle.APPLE_GLASS, saved.pillStyle)
+        assertEquals(com.example.system.PillSizePreset.LARGE, saved.pillSizePreset)
+        repo.resetSettings()
     }
 }

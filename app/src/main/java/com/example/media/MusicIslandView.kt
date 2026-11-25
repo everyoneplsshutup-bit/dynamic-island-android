@@ -1,15 +1,6 @@
 package com.example.media
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -49,6 +40,7 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -76,15 +68,13 @@ import com.example.system.TimerEngine
 import com.example.ui.theme.IslandColors
 import com.example.ui.theme.MotionTokens
 import com.example.ui.theme.WavyProgressBar
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 
 /**
- * 120Hz RenderThread-only visualizer bars (~12 Hz stepped easing cadence) using graphicsLayer scaleY only.
- * Zero Measure/Layout passes per frame; freezes cleanly when paused.
+ * Visualizer bars driven deterministically by playback position using graphicsLayer scaleY only.
+ * Zero Measure/Layout passes per frame and zero infinite animation loops.
  */
 @Composable
-fun MusicCompactWaveform(isPlaying: Boolean, accentColor: Color) {
+fun MusicCompactWaveform(isPlaying: Boolean, accentColor: Color, positionMs: Long = 0L) {
     if (!isPlaying) {
         Row(
             horizontalArrangement = Arrangement.spacedBy(2.dp),
@@ -104,31 +94,25 @@ fun MusicCompactWaveform(isPlaying: Boolean, accentColor: Color) {
         return
     }
 
-    var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(isPlaying) {
-        while (isActive) {
-            delay(84L) // ~12 Hz cadence
-            tick = (tick + 1) and 0x7FFFFFFF
-        }
-    }
-    val p0 by animateFloatAsState(
-        targetValue = 0.28f + 0.72f * (((tick * 3 + 1) % 7) / 6f),
-        animationSpec = tween(78),
+    val step = ((positionMs / 160L).toInt() and 0x7FFFFFFF)
+    val p0State = animateFloatAsState(
+        targetValue = 0.34f + 0.66f * (((step * 3 + 1) % 7) / 6f),
+        animationSpec = MotionTokens.spatialFast(),
         label = "cw0"
     )
-    val p1 by animateFloatAsState(
-        targetValue = 0.25f + 0.75f * (((tick * 5 + 3) % 7) / 6f),
-        animationSpec = tween(78),
+    val p1State = animateFloatAsState(
+        targetValue = 0.30f + 0.70f * (((step * 5 + 3) % 7) / 6f),
+        animationSpec = MotionTokens.spatialFast(),
         label = "cw1"
     )
-    val p2 by animateFloatAsState(
-        targetValue = 0.30f + 0.70f * (((tick * 2 + 5) % 7) / 6f),
-        animationSpec = tween(78),
+    val p2State = animateFloatAsState(
+        targetValue = 0.36f + 0.64f * (((step * 2 + 5) % 7) / 6f),
+        animationSpec = MotionTokens.spatialFast(),
         label = "cw2"
     )
-    val p3 by animateFloatAsState(
-        targetValue = 0.24f + 0.76f * (((tick * 4 + 2) % 7) / 6f),
-        animationSpec = tween(78),
+    val p3State = animateFloatAsState(
+        targetValue = 0.28f + 0.72f * (((step * 4 + 2) % 7) / 6f),
+        animationSpec = MotionTokens.spatialFast(),
         label = "cw3"
     )
 
@@ -137,12 +121,12 @@ fun MusicCompactWaveform(isPlaying: Boolean, accentColor: Color) {
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.height(14.dp)
     ) {
-        listOf(p0, p1, p2, p3).forEach { frac ->
+        listOf(p0State, p1State, p2State, p3State).forEach { fracState ->
             Box(
                 modifier = Modifier
                     .width(2.5.dp)
                     .height(13.dp)
-                    .graphicsLayer { scaleY = frac }
+                    .graphicsLayer { scaleY = fracState.value }
                     .clip(CircleShape)
                     .background(accentColor)
             )
@@ -151,22 +135,14 @@ fun MusicCompactWaveform(isPlaying: Boolean, accentColor: Color) {
 }
 
 @Composable
-private fun MusicLiveEqualizer(isPlaying: Boolean, accentColor: Color) {
-    var tick by remember { mutableIntStateOf(0) }
-    LaunchedEffect(isPlaying) {
-        if (!isPlaying) return@LaunchedEffect
-        while (isActive) {
-            delay(84L) // ~12 Hz update, eased smoothly on RenderThread
-            tick = (tick + 1) and 0x7FFFFFFF
-        }
-    }
-
+private fun MusicLiveEqualizer(isPlaying: Boolean, accentColor: Color, positionMs: Long = 0L) {
+    val step = ((positionMs / 160L).toInt() and 0x7FFFFFFF)
     val targets = if (isPlaying) {
         listOf(
-            0.24f + 0.70f * (((tick * 3 + 0) % 8) / 7f),
-            0.30f + 0.70f * (((tick * 5 + 2) % 8) / 7f),
-            0.26f + 0.74f * (((tick * 7 + 4) % 8) / 7f),
-            0.22f + 0.72f * (((tick * 2 + 6) % 8) / 7f)
+            0.30f + 0.64f * (((step * 3 + 0) % 8) / 7f),
+            0.36f + 0.64f * (((step * 5 + 2) % 8) / 7f),
+            0.32f + 0.68f * (((step * 7 + 4) % 8) / 7f),
+            0.28f + 0.66f * (((step * 2 + 6) % 8) / 7f)
         )
     } else {
         listOf(0.22f, 0.28f, 0.24f, 0.20f)
@@ -178,16 +154,16 @@ private fun MusicLiveEqualizer(isPlaying: Boolean, accentColor: Color) {
         modifier = Modifier.height(16.dp)
     ) {
         targets.forEachIndexed { idx, targetFrac ->
-            val animFrac by animateFloatAsState(
+            val animFracState = animateFloatAsState(
                 targetValue = targetFrac,
-                animationSpec = tween(78, easing = FastOutSlowInEasing),
+                animationSpec = MotionTokens.spatialFast(),
                 label = "eq_$idx"
             )
             Box(
                 modifier = Modifier
                     .width(2.5.dp)
                     .height(15.dp)
-                    .graphicsLayer { scaleY = animFrac }
+                    .graphicsLayer { scaleY = animFracState.value }
                     .clip(CircleShape)
                     .background((if (isPlaying) accentColor else IslandColors.TextSecondary).copy(alpha = if (isPlaying) 0.88f else 0.36f))
             )
@@ -197,8 +173,8 @@ private fun MusicLiveEqualizer(isPlaying: Boolean, accentColor: Color) {
 
 /**
  * Compact Music Card strictly capped at <= 78 dp height inside the 160 dp expanded pill.
- * Features rotating circular album art (pauses when paused; toggleable via [rotateAlbumArt]),
- * RenderThread M3E WavyProgressBar seekbar, 12Hz visualizer bars, and on-device lyrics + designed empty state.
+ * Features rotating circular album art driven by track position (pauses when paused; toggleable via [rotateAlbumArt]),
+ * RenderThread M3E WavyProgressBar seekbar, equalizer bars, and on-device lyrics + designed empty state.
  */
 @Composable
 fun MusicExpandedView(
@@ -219,30 +195,24 @@ fun MusicExpandedView(
     }
     var showLyricsPane by remember { mutableStateOf(false) }
 
-    val artRotation = remember { Animatable(0f) }
-    LaunchedEffect(state.isPlaying, rotateAlbumArt) {
-        if (state.isPlaying && rotateAlbumArt) {
-            while (isActive) {
-                val start = artRotation.value % 360f
-                artRotation.snapTo(start)
-                artRotation.animateTo(
-                    targetValue = start + 360f,
-                    animationSpec = tween(durationMillis = 12_000, easing = LinearEasing)
-                )
-            }
-        } else if (!rotateAlbumArt) {
-            artRotation.snapTo(0f)
-        }
+    var lastArtDegrees by remember(state.title) { mutableFloatStateOf(0f) }
+    if (state.isPlaying && rotateAlbumArt) {
+        lastArtDegrees = (state.positionMs / 35f)
     }
+    val artRotationState = animateFloatAsState(
+        targetValue = if (rotateAlbumArt) lastArtDegrees else 0f,
+        animationSpec = MotionTokens.effectsDefault(),
+        label = "art_rotation"
+    )
 
-    val artScale by animateFloatAsState(
+    val artScaleState = animateFloatAsState(
         targetValue = if (state.isPlaying) 1.0f else 0.94f,
-        animationSpec = spring(dampingRatio = 0.72f, stiffness = 460f),
+        animationSpec = MotionTokens.spatialDefault(),
         label = "art_scale"
     )
-    val playBtnScale by animateFloatAsState(
+    val playBtnScaleState = animateFloatAsState(
         targetValue = if (state.isPlaying) 1.05f else 1.0f,
-        animationSpec = spring(dampingRatio = 0.66f, stiffness = 560f),
+        animationSpec = MotionTokens.spatialFast(),
         label = "play_btn_scale"
     )
 
@@ -269,7 +239,7 @@ fun MusicExpandedView(
             .padding(horizontal = 12.dp, vertical = 1.dp),
         verticalArrangement = Arrangement.spacedBy(2.dp)
     ) {
-        // Row 1 (28dp): Rotating Artwork + Title/Artist + Visualizer + Lyrics Toggle + Like
+        // Row 1 (28dp): Album Art + Title/Artist + Visualizer + Lyrics Toggle + Like
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -281,13 +251,17 @@ fun MusicExpandedView(
                 modifier = Modifier
                     .size(28.dp)
                     .graphicsLayer {
-                        scaleX = artScale
-                        scaleY = artScale
-                        rotationZ = artRotation.value
+                        scaleX = artScaleState.value
+                        scaleY = artScaleState.value
+                        rotationZ = if (rotateAlbumArt) (artRotationState.value % 360f) else 0f
                     }
-                    .clip(if (rotateAlbumArt) CircleShape else RoundedCornerShape(9.dp))
-                    .background(Color(0xFF1F2028))
-                    .border(1.dp, effectiveAccent.copy(alpha = 0.55f), if (rotateAlbumArt) CircleShape else RoundedCornerShape(9.dp)),
+                    .clip(if (rotateAlbumArt) CircleShape else RoundedCornerShape(8.dp))
+                    .background(Color.White.copy(alpha = 0.10f))
+                    .border(
+                        1.dp,
+                        effectiveAccent.copy(alpha = 0.72f),
+                        if (rotateAlbumArt) CircleShape else RoundedCornerShape(8.dp)
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 if (state.albumArt != null) {
@@ -314,7 +288,7 @@ fun MusicExpandedView(
                     text = if (state.hasActiveSession) state.title else "No Active Music Session",
                     style = MaterialTheme.typography.titleMedium,
                     fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     color = IslandColors.TextPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -338,12 +312,12 @@ fun MusicExpandedView(
             }
 
             Spacer(Modifier.width(4.dp))
-            MusicLiveEqualizer(isPlaying = state.isPlaying, accentColor = effectiveAccent)
+            MusicLiveEqualizer(isPlaying = state.isPlaying, accentColor = effectiveAccent, positionMs = state.positionMs)
 
             IconButton(
                 onClick = { showLyricsPane = !showLyricsPane },
                 modifier = Modifier
-                    .size(28.dp)
+                    .size(26.dp)
                     .testTag("music_lyrics_toggle")
             ) {
                 Icon(
@@ -358,20 +332,20 @@ fun MusicExpandedView(
                 IconButton(
                     onClick = onToggleLike,
                     modifier = Modifier
-                        .size(28.dp)
+                        .size(26.dp)
                         .testTag("music_like_button")
                 ) {
                     Icon(
                         imageVector = if (state.isLiked) Icons.Filled.Favorite else Icons.Filled.FavoriteBorder,
                         contentDescription = "Like track",
-                        tint = if (state.isLiked) IslandColors.AccentRed else IslandColors.TextSecondary,
+                        tint = if (state.isLiked) IslandColors.CrimsonBright else IslandColors.TextSecondary,
                         modifier = Modifier.size(14.dp)
                     )
                 }
             }
         }
 
-        // Row 2 (18dp): Inline Seekbar OR On-Device Lyrics
+        // Row 2 (16dp): Inline Wavy Seekbar OR On-Device Lyrics
         if (showLyricsPane) {
             if (state.lyrics.isNotEmpty()) {
                 SyncedLyricsPanel(
@@ -385,7 +359,7 @@ fun MusicExpandedView(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(18.dp)
+                        .height(16.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .background(Color.White.copy(alpha = 0.05f))
                         .clickable { showLyricsPane = false }
@@ -413,11 +387,11 @@ fun MusicExpandedView(
             )
         }
 
-        // Row 3 (26dp): Compact Transport Controls
+        // Row 3 (28dp): Compact Transport Controls with Crimson Play/Pause center circle (matching mockup 2c)
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(26.dp),
+                .height(28.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -425,7 +399,7 @@ fun MusicExpandedView(
                 IconButton(
                     onClick = onToggleShuffle,
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(30.dp)
                         .testTag("music_shuffle_button")
                 ) {
                     Icon(
@@ -440,26 +414,31 @@ fun MusicExpandedView(
             IconButton(
                 onClick = onPrevious,
                 modifier = Modifier
-                    .size(34.dp)
+                    .size(32.dp)
                     .testTag("music_prev_button")
             ) {
                 Icon(
                     imageVector = Icons.Filled.SkipPrevious,
                     contentDescription = "Previous track",
-                    tint = IslandColors.TextPrimary,
+                    tint = Color.White,
                     modifier = Modifier.size(20.dp)
                 )
             }
 
             Box(
                 modifier = Modifier
-                    .size(26.dp)
+                    .size(28.dp)
                     .graphicsLayer {
-                        scaleX = playBtnScale
-                        scaleY = playBtnScale
+                        scaleX = playBtnScaleState.value
+                        scaleY = playBtnScaleState.value
                     }
                     .clip(CircleShape)
-                    .background(if (state.isPlaying) effectiveAccent.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.16f))
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(effectiveAccent, effectiveAccent.copy(alpha = 0.72f))
+                        )
+                    )
+                    .border(1.dp, Color.White.copy(alpha = 0.45f), CircleShape)
                     .clickable(onClick = onTogglePlayPause)
                     .testTag("music_play_pause_button"),
                 contentAlignment = Alignment.Center
@@ -467,7 +446,7 @@ fun MusicExpandedView(
                 Icon(
                     imageVector = if (state.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                     contentDescription = if (state.isPlaying) "Pause" else "Play",
-                    tint = if (state.isPlaying) effectiveAccent else IslandColors.TextPrimary,
+                    tint = Color.White,
                     modifier = Modifier.size(18.dp)
                 )
             }
@@ -475,13 +454,13 @@ fun MusicExpandedView(
             IconButton(
                 onClick = onNext,
                 modifier = Modifier
-                    .size(34.dp)
+                    .size(32.dp)
                     .testTag("music_next_button")
             ) {
                 Icon(
                     imageVector = Icons.Filled.SkipNext,
                     contentDescription = "Next track",
-                    tint = IslandColors.TextPrimary,
+                    tint = Color.White,
                     modifier = Modifier.size(20.dp)
                 )
             }
@@ -490,7 +469,7 @@ fun MusicExpandedView(
                 IconButton(
                     onClick = onCycleRepeat,
                     modifier = Modifier
-                        .size(32.dp)
+                        .size(30.dp)
                         .testTag("music_repeat_button")
                 ) {
                     Icon(

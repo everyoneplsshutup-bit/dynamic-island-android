@@ -42,9 +42,10 @@ class IslandNotificationListener : NotificationListenerService() {
         staleReaperJob = scope.launch {
             while (true) {
                 kotlinx.coroutines.delay(15_000L)
-                val activeIds = runCatching {
-                    activeNotifications?.map { "notif_${it.key}" }?.toSet()
-                }.getOrNull() ?: continue
+                val activeList = runCatching { activeNotifications?.toList() }.getOrNull() ?: continue
+                val activeRawKeys = activeList.mapTo(HashSet(activeList.size)) { it.key }
+                lastPostedFingerprints.keys.retainAll(activeRawKeys)
+                val activeIds = activeRawKeys.mapTo(HashSet(activeRawKeys.size)) { "notif_$it" }
                 kotlinx.coroutines.withContext(Dispatchers.Main) {
                     app.islandController.pruneStaleNotifications(activeIds)
                 }
@@ -52,10 +53,13 @@ class IslandNotificationListener : NotificationListenerService() {
         }
     }
 
+    private val lastPostedFingerprints = java.util.concurrent.ConcurrentHashMap<String, String>()
+
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
         staleReaperJob?.cancel()
         staleReaperJob = null
+        lastPostedFingerprints.clear()
         val app = applicationContext as? DynamicIslandApp ?: return
         scope.launch(Dispatchers.Main) {
             app.mediaHub.stop()
@@ -117,6 +121,15 @@ class IslandNotificationListener : NotificationListenerService() {
 
         if (title.isEmpty() && text.isEmpty()) return
 
+        // Ajitpal no-flicker rule: skip identical re-posts before hitting DB or controller
+        val resolvedTitle = title
+        val resolvedText = text.ifEmpty { subText }
+        val fingerprint = "$pkg|$resolvedTitle|$resolvedText"
+        if (lastPostedFingerprints[sbn.key] == fingerprint) {
+            return
+        }
+        lastPostedFingerprints[sbn.key] = fingerprint
+
         scope.launch {
             val settings = app.settingsRepository.settingsFlow.first()
             val notifCfg = settings.eventConfig(com.example.system.EventKind.NOTIFICATIONS)
@@ -141,8 +154,8 @@ class IslandNotificationListener : NotificationListenerService() {
                 notificationKey = sbn.key,
                 packageName = pkg,
                 appName = appName,
-                title = title.ifEmpty { appName },
-                text = text.ifEmpty { subText },
+                title = resolvedTitle.ifEmpty { appName },
+                text = resolvedText,
                 category = notification.category ?: "",
                 timestamp = sbn.postTime
             )
@@ -153,8 +166,8 @@ class IslandNotificationListener : NotificationListenerService() {
                     id = "notif_${sbn.key}",
                     packageName = pkg,
                     appName = appName,
-                    title = title.ifEmpty { appName },
-                    text = text.ifEmpty { subText },
+                    title = resolvedTitle.ifEmpty { appName },
+                    text = resolvedText,
                     timestamp = sbn.postTime
                 ),
                 autoShowCompact = true,
@@ -166,6 +179,7 @@ class IslandNotificationListener : NotificationListenerService() {
 
     override fun onNotificationRemoved(sbn: StatusBarNotification?) {
         sbn ?: return
+        lastPostedFingerprints.remove(sbn.key)
         val app = applicationContext as? DynamicIslandApp ?: return
         if (sbn.packageName in clockPackages) {
             app.timerEngine.updateMirroredClockTimer(null, null)

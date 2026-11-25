@@ -1,12 +1,5 @@
 package com.example.ui.theme
 
-import android.os.Build
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -37,26 +30,16 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.system.PillStyle
 import com.kyant.backdrop.backdrops.LayerBackdrop
-import com.kyant.backdrop.drawBackdrop
-import com.kyant.backdrop.effects.blur
-import com.kyant.backdrop.effects.lens
 import kotlin.math.PI
 import kotlin.math.sin
 
-/**
- * In-app backdrop passed down from MainActivity root so Liquid Glass cards/previews
- * refract real underlying screen content on API 33+ (Redmi Note 10 Pro Android 13).
- * Null inside TYPE_ACCESSIBILITY_OVERLAY where cross-window blur + Apple Glass rim is used.
- */
 val LocalAppBackdrop = staticCompositionLocalOf<LayerBackdrop?> { null }
 
 /**
- * Unified Build #5 glass chrome modifier.
- * - Dark: pure opaque black pill/card, crisp thin outline.
- * - Apple Glass: density-driven translucent scrim + 1px specular top rim + inner edge band.
- * - Liquid Glass: Kyant Backdrop AGSL blur+lens refraction in-app (API 33+ when backdrop provided),
- *   gracefully matching Apple-Glass specular scrim + FLAG_BLUR_BEHIND on the system overlay.
- * Guardrails (732G): applied ONLY to island & dock chrome, never to lists/content cards.
+ * Unified crash-free glass chrome modifier.
+ * Avoids cyclic LayerBackdrop self-recording crashes on Android 13 / MIUI 14 while
+ * rendering Dark, Apple Glass, and Liquid Glass with multi-stop gradients, inner refractive
+ * sheen, and specular top/bottom edge rims.
  */
 fun Modifier.islandGlassChrome(
     shape: Shape,
@@ -85,14 +68,11 @@ fun Modifier.islandGlassChrome(
 
     val density = glassDensity.coerceIn(0f, 1f)
     val isLiquid = effectiveStyle == PillStyle.LIQUID_GLASS
-    val canUseBackdropRefraction =
-        isLiquid && !reduceGlass && backdrop != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
-
     val glassBrush = IslandColors.blendGlassBase(
         materialYouColor = accentColor,
         density = density,
         pillStyle = effectiveStyle,
-        reduceGlass = reduceGlass || (isLiquid && backdrop == null && !crossWindowBlurActive)
+        reduceGlass = reduceGlass
     )
     val borderBrush = IslandColors.liquidBorderBrush(
         useGlass = true,
@@ -101,65 +81,67 @@ fun Modifier.islandGlassChrome(
         isLiquidStyle = isLiquid
     )
 
-    val baseMod = if (canUseBackdropRefraction && backdrop != null) {
-        val blurPx = (6f + (1f - density) * 6f).coerceIn(6f, 12f)
-        val refractionAmt = (12f + (1f - density) * 14f).coerceIn(10f, 26f)
-        this
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape = { shape },
-                effects = {
-                    blur(radius = blurPx.dp.toPx())
-                    lens(
-                        refractionHeight = 10.dp.toPx(),
-                        refractionAmount = refractionAmt.dp.toPx(),
-                        depthEffect = true,
-                        chromaticAberration = false
-                    )
-                },
-                onDrawSurface = {
-                    drawRect(brush = glassBrush)
-                }
-            )
-    } else {
-        this
-            .clip(shape)
-            .background(glassBrush)
-    }
-
-    return baseMod
+    return this
+        .clip(shape)
+        .background(glassBrush)
         .drawWithContent {
             drawContent()
-            // Top & bottom 1dp specular rim band inside edge (Liquid / Apple Glass signature)
-            val topAlpha = if (isLiquid) 0.40f else 0.28f
-            val botAlpha = if (isLiquid) 0.16f else 0.10f
+            if (isLiquid && !reduceGlass) {
+                // Soft inner liquid refractive sheen + subtle edge halo
+                drawRect(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.10f),
+                            accentColor.copy(alpha = 0.16f),
+                            Color.Transparent
+                        ),
+                        center = Offset(size.width * 0.26f, size.height * 0.16f),
+                        radius = (maxOf(size.width, size.height) * 0.90f).coerceAtLeast(1f)
+                    )
+                )
+                drawRect(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            accentColor.copy(alpha = 0.14f),
+                            Color.Transparent
+                        ),
+                        center = Offset(size.width * 0.78f, size.height * 0.88f),
+                        radius = (maxOf(size.width, size.height) * 0.72f).coerceAtLeast(1f)
+                    )
+                )
+            }
+            val topAlpha = if (isLiquid) 0.58f else 0.30f
+            val botAlpha = if (isLiquid) 0.28f else 0.12f
             drawLine(
                 brush = Brush.horizontalGradient(
                     colors = listOf(Color.Transparent, Color.White.copy(alpha = topAlpha), Color.Transparent)
                 ),
-                start = Offset(size.width * 0.10f, 1.dp.toPx()),
-                end = Offset(size.width * 0.90f, 1.dp.toPx()),
-                strokeWidth = 1.dp.toPx(),
+                start = Offset(size.width * 0.08f, 1.dp.toPx()),
+                end = Offset(size.width * 0.92f, 1.dp.toPx()),
+                strokeWidth = 1.2.dp.toPx(),
                 cap = StrokeCap.Round
             )
             drawLine(
                 brush = Brush.horizontalGradient(
                     colors = listOf(Color.Transparent, Color.White.copy(alpha = botAlpha), Color.Transparent)
                 ),
-                start = Offset(size.width * 0.16f, size.height - 1.dp.toPx()),
-                end = Offset(size.width * 0.84f, size.height - 1.dp.toPx()),
-                strokeWidth = 0.8.dp.toPx(),
+                start = Offset(size.width * 0.14f, size.height - 1.dp.toPx()),
+                end = Offset(size.width * 0.86f, size.height - 1.dp.toPx()),
+                strokeWidth = 0.9.dp.toPx(),
                 cap = StrokeCap.Round
             )
         }
-        .border(if (isHighlighted) 1.5.dp else 0.9.dp, borderBrush, shape)
+        .border(
+            width = when {
+                isHighlighted -> 1.5.dp
+                isLiquid -> 1.2.dp
+                else -> 0.9.dp
+            },
+            brush = borderBrush,
+            shape = shape
+        )
 }
 
-/**
- * RenderThread-driven Material 3 Expressive Wavy Progress Bar.
- * Used by MusicIslandView (interactive seek) and TimerStopwatchView (determinate countdown).
- * Zero allocations inside Canvas draw path when calm; smooth 120Hz sinusoidal wave while active.
- */
 @Composable
 fun WavyProgressBar(
     progress: Float,
@@ -176,19 +158,7 @@ fun WavyProgressBar(
     var widthPx by remember { mutableFloatStateOf(1f) }
 
     val displayFraction = if (isDragging) dragFraction else clamped
-
-    val wavePhase = if (isActiveWave) {
-        val infinite = rememberInfiniteTransition(label = "m3e_wavy_phase")
-        val phase by infinite.animateFloat(
-            initialValue = 0f,
-            targetValue = (2.0 * PI).toFloat(),
-            animationSpec = infiniteRepeatable(tween(1150, easing = LinearEasing), RepeatMode.Restart),
-            label = "wave_phase"
-        )
-        phase
-    } else {
-        0f
-    }
+    val wavePhase = if (isActiveWave) (displayFraction * 6f * PI.toFloat()) else 0f
 
     val wavePath = remember { Path() }
 
@@ -234,7 +204,6 @@ fun WavyProgressBar(
         val trackEnd = (size.width - pad).coerceAtLeast(pad + 1f)
         val knobX = trackStart + (trackEnd - trackStart) * displayFraction
 
-        // Calm trailing track
         drawLine(
             color = Color.White.copy(alpha = 0.18f),
             start = Offset(knobX, cy),
@@ -243,7 +212,6 @@ fun WavyProgressBar(
             cap = StrokeCap.Round
         )
 
-        // M3 Expressive sinusoidal active segment
         val activeLen = (knobX - trackStart).coerceAtLeast(0f)
         if (activeLen > 2f) {
             val amplitude = if (isActiveWave) 2.4.dp.toPx() else 0f

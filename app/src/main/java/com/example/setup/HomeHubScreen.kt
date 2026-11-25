@@ -1,42 +1,30 @@
 package com.example.setup
 
 import android.content.Intent
+import android.os.Build
 import android.provider.Settings
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -44,30 +32,32 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddPhotoAlternate
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.CenterFocusStrong
-import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.DashboardCustomize
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.Memory
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material.icons.filled.RocketLaunch
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -77,36 +67,44 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.DynamicIslandApp
 import com.example.island.AlertsIslandPanel
 import com.example.island.BottomChooserBar
 import com.example.island.ClipsIslandPanel
+import com.example.island.DeadZoneGeometry
 import com.example.island.IslandService
 import com.example.island.MemoIslandPanel
 import com.example.island.NotesIslandPanel
 import com.example.island.SearchIslandPanel
 import com.example.island.ToolsIslandPanel
 import com.example.island.VaultIslandPanel
+import com.example.keepalive.IslandKeepAliveService
 import com.example.media.MusicExpandedView
-import com.example.system.AccentTheme
 import com.example.system.AnimationStyle
 import com.example.system.IslandSettings
 import com.example.system.IslandTab
 import com.example.system.PillStyle
 import com.example.system.TimerStopwatchPanel
+import com.example.ui.theme.CrimsonCircularHaloIcon
+import com.example.ui.theme.CrimsonSquircleIcon
 import com.example.ui.theme.IslandColors
+import com.example.ui.theme.MainDockTab
 import com.example.ui.theme.MotionTokens
-import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
+import com.example.ui.theme.ObsidianCrimsonBackground
+import com.example.ui.theme.ObsidianGlassCard
+import com.example.ui.theme.islandGlassChrome
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HomeHubScreen(
     app: DynamicIslandApp,
+    onSelectDockTab: (MainDockTab) -> Unit,
     onOpenSettings: () -> Unit,
     onOpenWizard: () -> Unit,
     onOpenCalibration: () -> Unit,
@@ -114,397 +112,596 @@ fun HomeHubScreen(
     onOpenNotifications: () -> Unit
 ) {
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val settings by app.settingsRepository.settingsFlow.collectAsState(initial = IslandSettings())
     val islandState by app.islandController.state.collectAsState()
     val isServiceRunning by IslandService.isRunning.collectAsState()
+    val isAccHosting by IslandService.isHostingOverlay.collectAsState()
+    val isFallbackHosting by IslandKeepAliveService.isFallbackHosting.collectAsState()
     val mediaState by app.mediaHub.state.collectAsState()
     val timerState by app.timerEngine.state.collectAsState()
+    val alertsCount = islandState.notificationsHistory.size + islandState.alertsHistory.size
 
-    val accentColor = when (settings.accentTheme) {
-        AccentTheme.ORANGE -> IslandColors.AccentOrange
-        AccentTheme.CYAN -> IslandColors.AccentCyan
-        AccentTheme.GREEN -> IslandColors.AccentGreen
-        AccentTheme.DYNAMIC -> IslandColors.extractMaterialYouAccent(context)
-    }
+    val overlayActive = isAccHosting || isFallbackHosting || isServiceRunning
+    val accentColor = IslandColors.resolveAccentColor(context, settings.accentTheme)
     val musicAccent = mediaState.artworkAccentArgb?.let { Color(it) } ?: accentColor
     val effectivePillStyle = if (settings.solidFallback) PillStyle.BLACK else settings.pillStyle
     val useGlass = effectivePillStyle != PillStyle.BLACK
     val effectiveStyle = if (settings.reducedMotion) AnimationStyle.SMOOTH else settings.animationStyle
     val outerShape = RoundedCornerShape(IslandColors.ExpandedOuterRadius)
+    val metrics = context.resources.displayMetrics
 
-    // Zero-permission Photo Picker for adding directly to 10-min Shelf
-    val photoPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickVisualMedia()
-    ) { uri ->
-        if (uri != null) {
-            scope.launch { app.vaultManager.saveFromUri(uri, sourceType = "PICKED") }
-        }
-    }
-
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("Dynamic Island", fontWeight = FontWeight.Bold)
-                        Text(
-                            text = if (isServiceRunning) "Overlay active around punch-hole" else "Overlay inactive · Tap Setup Wizard",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (isServiceRunning) IslandColors.AccentGreen else IslandColors.AccentOrange
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(
-                        onClick = onOpenSettings,
-                        modifier = Modifier.testTag("open_settings_button")
-                    ) {
-                        Icon(Icons.Filled.Settings, contentDescription = "Open Settings")
-                    }
-                }
-            )
-        }
-    ) { innerPadding ->
+    ObsidianCrimsonBackground(showHorizonPlanet = true) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .navigationBarsPadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
-                .widthIn(max = 600.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .widthIn(max = 600.dp)
+                .align(Alignment.TopCenter)
         ) {
-            // Honest MIUI force-stop Accessibility detection banner
-            if (settings.accessibilityWasEnabled && !isServiceRunning) {
-                Surface(
-                    shape = RoundedCornerShape(18.dp),
-                    color = IslandColors.AccentRed.copy(alpha = 0.16f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(14.dp)
-                    ) {
-                        Icon(Icons.Filled.Warning, contentDescription = null, tint = IslandColors.AccentRed)
-                        Spacer(Modifier.width(10.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text("Accessibility was switched off", fontWeight = FontWeight.Bold)
-                            Text(
-                                "MIUI force-stop disables Accessibility. Tap to re-enable.",
-                                style = MaterialTheme.typography.bodyMedium
+            // Mockup Header Bar (App squircle emblem + "Dynamic Island" + circular gear button)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+            ) {
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .clip(RoundedCornerShape(13.dp))
+                        .background(
+                            Brush.radialGradient(
+                                colors = listOf(IslandColors.CrimsonPrimary.copy(alpha = 0.35f), Color(0xFF1A070B))
                             )
-                        }
-                        Button(
-                            onClick = { runCatching { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } },
-                            colors = ButtonDefaults.buttonColors(containerColor = IslandColors.AccentRed)
-                        ) {
-                            Text("Enable")
-                        }
-                    }
+                        )
+                        .border(1.dp, IslandColors.CrimsonBorder, RoundedCornerShape(13.dp))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .width(24.dp)
+                            .height(11.dp)
+                            .clip(CircleShape)
+                            .background(Color.Black)
+                            .border(1.8.dp, IslandColors.CrimsonBright, CircleShape)
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Dynamic Island",
+                        color = Color.White,
+                        fontSize = 21.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Smart · Elegant · Powerful",
+                        color = IslandColors.TextSecondary,
+                        fontSize = 12.sp
+                    )
+                }
+                IconButton(
+                    onClick = onOpenSettings,
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xBB191114))
+                        .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
+                        .testTag("open_settings_button")
+                ) {
+                    Icon(Icons.Filled.Settings, contentDescription = "Open Settings", tint = Color.White)
                 }
             }
 
-            // Live Interactive Island Sandbox (matching live overlay: compact max 360dp x 160dp)
-            val sandboxBorder = IslandColors.liquidBorderBrush(
-                useGlass = useGlass,
-                isHighlighted = false,
-                accentColor = accentColor,
-                isLiquidStyle = effectivePillStyle == PillStyle.LIQUID_GLASS
-            )
-            val sandboxBg = if (useGlass) {
-                IslandColors.blendGlassBase(
-                    materialYouColor = accentColor,
-                    density = settings.glassDensity,
-                    pillStyle = effectivePillStyle,
-                    reduceGlass = settings.reduceGlass
-                )
-            } else {
-                Brush.verticalGradient(listOf(Color(0xFF12131A), IslandColors.PillBlack))
-            }
-            Surface(
-                shape = outerShape,
-                color = Color.Transparent,
+            Column(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .widthIn(max = com.example.island.DeadZoneGeometry.FULL_MAX_WIDTH_DP.dp)
-                    .heightIn(max = com.example.island.DeadZoneGeometry.FULL_MAX_HEIGHT_DP.dp)
-                    .align(Alignment.CenterHorizontally)
-                    .border(1.dp, sandboxBorder, outerShape)
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 16.dp, end = 16.dp, bottom = 104.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(
+                // Live Interactive Island Sandbox (Top of scroll viewport so chooser_tab_* & panel controls are immediately visible)
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(outerShape)
-                        .background(sandboxBg)
-                        .padding(top = 6.dp, bottom = 4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
+                        .widthIn(max = DeadZoneGeometry.FULL_MAX_WIDTH_DP.dp)
+                        .heightIn(max = DeadZoneGeometry.FULL_MAX_HEIGHT_DP.dp)
+                        .align(Alignment.CenterHorizontally)
+                        .islandGlassChrome(
+                            shape = outerShape,
+                            pillStyle = effectivePillStyle,
+                            glassDensity = settings.glassDensity,
+                            reduceGlass = settings.reduceGlass,
+                            solidFallback = settings.solidFallback,
+                            accentColor = accentColor,
+                            backdrop = null
+                        )
                 ) {
-                    Row(
+                    Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 16.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .padding(top = 6.dp, bottom = 4.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(16.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF24262E))
+                                        .border(1.dp, accentColor, CircleShape)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = "Live Island · ${islandState.activeTab.title}",
+                                    color = IslandColors.TextPrimary,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                            val dotPulse = if (overlayActive) 1.0f else 0.72f
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier
-                                    .size(18.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xFF24262E))
-                                    .border(1.dp, accentColor, CircleShape)
-                            )
-                            Spacer(Modifier.width(8.dp))
-                            Text(
-                                text = "Live Island · ${islandState.activeTab.title}",
-                                color = IslandColors.TextPrimary,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
+                                    .background((if (overlayActive) IslandColors.AccentGreen else accentColor).copy(alpha = 0.16f))
+                                    .padding(horizontal = 9.dp, vertical = 3.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(6.dp)
+                                        .graphicsLayer { alpha = dotPulse }
+                                        .clip(CircleShape)
+                                        .background(if (overlayActive) IslandColors.AccentGreen else accentColor)
+                                )
+                                Spacer(Modifier.width(5.dp))
+                                Text(
+                                    text = if (overlayActive) "Overlay ON" else "Preview",
+                                    color = if (overlayActive) IslandColors.AccentGreen else accentColor,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+
+                        Spacer(Modifier.height(4.dp))
+
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f, fill = false)
+                                .heightIn(max = 78.dp)
+                        ) {
+                            AnimatedContent(
+                                targetState = islandState.activeTab,
+                                transitionSpec = {
+                                    if (effectiveStyle == AnimationStyle.NONE) {
+                                        fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                                    } else {
+                                        MotionTokens.contentEnterTransition(effectiveStyle) togetherWith
+                                            MotionTokens.contentExitTransition(effectiveStyle)
+                                    }
+                                },
+                                label = "sandbox_tab"
+                            ) { tab ->
+                                when (tab) {
+                                    IslandTab.MUSIC -> MusicExpandedView(
+                                        state = mediaState,
+                                        accentColor = musicAccent,
+                                        onTogglePlayPause = {
+                                            if (mediaState.isPlaying) app.soundManager.playMusicPause() else app.soundManager.playMusicPlay()
+                                            app.mediaHub.togglePlayPause()
+                                        },
+                                        onPrevious = {
+                                            app.soundManager.playMusicNext()
+                                            app.mediaHub.skipPrevious()
+                                        },
+                                        onNext = {
+                                            app.soundManager.playMusicNext()
+                                            app.mediaHub.skipNext()
+                                        },
+                                        onSeekTo = { app.mediaHub.seekTo(it) },
+                                        onToggleShuffle = {
+                                            app.soundManager.playToggle(!mediaState.isShuffled)
+                                            app.mediaHub.sendShuffleCommand()
+                                        },
+                                        onCycleRepeat = {
+                                            app.soundManager.playTap()
+                                            app.mediaHub.sendRepeatCommand()
+                                        },
+                                        onToggleLike = {
+                                            app.soundManager.playToggle(!mediaState.isLiked)
+                                            app.mediaHub.sendLikeCommand()
+                                        },
+                                        onOpenPlayer = {
+                                            app.soundManager.playTap()
+                                            app.mediaHub.openPlayerApp()
+                                        }
+                                    )
+                                    IslandTab.TIMER -> TimerStopwatchPanel(
+                                        state = timerState,
+                                        accentColor = accentColor,
+                                        onPickerChanged = { h, m, s -> app.timerEngine.setPickerDuration(h, m, s) },
+                                        onStartTimer = { app.timerEngine.startTimer() },
+                                        onPauseTimer = { app.timerEngine.pauseTimer() },
+                                        onResumeTimer = { app.timerEngine.resumeTimer() },
+                                        onCancelTimer = { app.timerEngine.cancelTimer() },
+                                        onStartStopwatch = { app.timerEngine.startStopwatch() },
+                                        onPauseStopwatch = { app.timerEngine.pauseStopwatch() },
+                                        onResetStopwatch = { app.timerEngine.resetStopwatch() },
+                                        onLapStopwatch = { app.timerEngine.lapStopwatch() },
+                                        onTimerSetSound = { app.soundManager.playTimerSet() },
+                                        onStartSleepTimer = { durationMs -> app.timerEngine.startSleepTimer(durationMs) }
+                                    )
+                                    IslandTab.SEARCH -> SearchIslandPanel(app = app, accentColor = accentColor, onCollapse = {})
+                                    IslandTab.TOOLS -> ToolsIslandPanel(app = app, settings = settings, accentColor = accentColor, onHaptic = {}, onCollapse = {})
+                                    IslandTab.VAULT -> VaultIslandPanel(app = app, accentColor = accentColor, onCollapse = {})
+                                    IslandTab.CLIPS -> ClipsIslandPanel(app = app, accentColor = accentColor)
+                                    IslandTab.NOTES -> NotesIslandPanel(app = app, accentColor = accentColor)
+                                    IslandTab.MEMO -> MemoIslandPanel(app = app, accentColor = accentColor)
+                                    IslandTab.ALERTS -> AlertsIslandPanel(app = app, state = islandState, accentColor = accentColor)
+                                }
+                            }
+                        }
+
+                        Spacer(Modifier.height(2.dp))
+
+                        BottomChooserBar(
+                            settings = settings,
+                            activeTab = islandState.activeTab,
+                            isMoreOpen = islandState.isMoreRowOpen,
+                            accentColor = accentColor,
+                            useLightGlass = useGlass,
+                            onSelectTab = { app.islandController.selectTab(it) },
+                            onToggleMore = { app.islandController.toggleMoreRow() }
+                        )
+                    }
+                }
+
+                // Active / Inactive Overlay Status Card matching youtubers742-home-hub.png
+                ObsidianGlassCard(
+                    highlighted = !overlayActive,
+                    onClick = onOpenWizard
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    Brush.radialGradient(
+                                        colors = listOf(
+                                            (if (overlayActive) IslandColors.AccentGreen else IslandColors.CrimsonBright).copy(alpha = 0.36f),
+                                            Color(0xFF0E1310)
+                                        )
+                                    )
+                                )
+                                .border(
+                                    1.2.dp,
+                                    if (overlayActive) IslandColors.AccentGreen else IslandColors.CrimsonBright,
+                                    CircleShape
+                                )
+                        ) {
+                            Icon(
+                                imageVector = if (overlayActive) Icons.Filled.Check else Icons.Filled.Warning,
+                                contentDescription = null,
+                                tint = if (overlayActive) IslandColors.AccentGreen else IslandColors.CrimsonBright
                             )
                         }
-                        val dotPulse = if (isServiceRunning) {
-                            val inf = rememberInfiniteTransition(label = "live_dot")
-                            val a by inf.animateFloat(
-                                initialValue = 0.45f,
-                                targetValue = 1.0f,
-                                animationSpec = infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse),
-                                label = "live_alpha"
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = buildAnnotatedString {
+                                    append("Dynamic Island is ")
+                                    withStyle(
+                                        SpanStyle(
+                                            color = if (overlayActive) IslandColors.AccentGreen else IslandColors.CrimsonBright,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    ) {
+                                        append(if (overlayActive) "Active" else "Inactive")
+                                    }
+                                },
+                                color = Color.White,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold
                             )
-                            a
-                        } else 1.0f
+                            Text(
+                                text = if (overlayActive) {
+                                    when {
+                                        isAccHosting -> "Accessibility overlay live on top"
+                                        isFallbackHosting -> "Window overlay fallback live on top"
+                                        else -> "Ready to enhance your experience"
+                                    }
+                                } else {
+                                    "Tap here to grant Accessibility & Overlay access"
+                                },
+                                color = IslandColors.TextSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = IslandColors.TextSecondary)
+                    }
+                }
+
+                if (settings.accessibilityWasEnabled && !isServiceRunning) {
+                    ObsidianGlassCard(highlighted = true) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Filled.Warning, contentDescription = null, tint = IslandColors.CrimsonBright)
+                            Spacer(Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Accessibility was switched off", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("MIUI stopped Accessibility. Re-enable for lock-screen & OCR.", color = IslandColors.TextSecondary, fontSize = 11.sp)
+                            }
+                            Button(
+                                onClick = { runCatching { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } },
+                                colors = ButtonDefaults.buttonColors(containerColor = IslandColors.CrimsonPrimary),
+                                shape = CircleShape
+                            ) { Text("Enable", fontSize = 12.sp) }
+                        }
+                    }
+                }
+
+                // Quick Access 3-column Bento Card matching youtubers742-home-hub.png
+                ObsidianGlassCard(cornerRadius = 24.dp, contentPadding = PaddingValues(14.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CrimsonSquircleIcon(icon = Icons.Filled.Home, size = 38.dp, iconSize = 20.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text("Quick Access", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            Text("Open features instantly", color = IslandColors.TextSecondary, fontSize = 11.sp)
+                        }
+                    }
+                    Spacer(Modifier.height(12.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        BentoQuickTile("Notes", Icons.Filled.Description, onClick = { onSelectDockTab(MainDockTab.NOTES) }, modifier = Modifier.weight(1f))
+                        BentoQuickTile(
+                            title = "Alerts",
+                            icon = Icons.Filled.Notifications,
+                            badgeCount = alertsCount,
+                            onClick = { onSelectDockTab(MainDockTab.ALERTS) },
+                            modifier = Modifier.weight(1f)
+                        )
+                        BentoQuickTile("Shelf", Icons.Filled.Layers, onClick = { onSelectDockTab(MainDockTab.SHELF) }, modifier = Modifier.weight(1f))
+                    }
+                    Spacer(Modifier.height(10.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        BentoQuickTile("Tools", Icons.Filled.Build, onClick = { onSelectDockTab(MainDockTab.TOOLS) }, modifier = Modifier.weight(1f))
+                        BentoQuickTile("Music", Icons.Filled.MusicNote, onClick = { onSelectDockTab(MainDockTab.MUSIC) }, modifier = Modifier.weight(1f))
+                        BentoQuickTile("Timer", Icons.Filled.Timer, onClick = { onSelectDockTab(MainDockTab.TIMER) }, modifier = Modifier.weight(1f))
+                    }
+                    Spacer(Modifier.height(10.dp))
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                        BentoQuickTile("Search /\nApp Opener", Icons.Filled.Search, onClick = { onSelectDockTab(MainDockTab.SEARCH) }, modifier = Modifier.weight(1f))
+                        ObsidianGlassCard(
+                            highlighted = true,
+                            cornerRadius = 18.dp,
+                            contentPadding = PaddingValues(14.dp),
+                            onClick = onOpenFeaturePicker,
+                            modifier = Modifier
+                                .weight(2.08f)
+                                .height(108.dp)
+                                .testTag("open_feature_picker_button")
+                        ) {
+                            Column(
+                                verticalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CrimsonSquircleIcon(icon = Icons.Filled.DashboardCustomize, size = 30.dp, iconSize = 16.dp)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Customise Island", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text(
+                                        "${settings.enabledTabs.size} / 8 dock slots active",
+                                        color = IslandColors.TextSecondary,
+                                        fontSize = 11.sp
+                                    )
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(CircleShape)
+                                            .background(Color(0xFF470B13))
+                                            .border(1.dp, IslandColors.CrimsonBorderStrong, CircleShape)
+                                            .padding(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Text("Reorder >", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Setup Wizard + Calibration + Alerts History utility row (preserves all existing testTags)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    ObsidianGlassCard(
+                        cornerRadius = 18.dp,
+                        onClick = onOpenWizard,
+                        modifier = Modifier.weight(1f).testTag("open_wizard_button")
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CrimsonSquircleIcon(icon = Icons.Filled.RocketLaunch, size = 34.dp, iconSize = 17.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text("Setup Wizard", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1)
+                                Text(
+                                    if (settings.wizardCompleted) "Checklist ready" else "Required",
+                                    color = IslandColors.TextSecondary,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                    }
+                    ObsidianGlassCard(
+                        cornerRadius = 18.dp,
+                        onClick = onOpenCalibration,
+                        modifier = Modifier.weight(1f).testTag("open_calibration_button")
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CrimsonSquircleIcon(icon = Icons.Filled.CenterFocusStrong, size = 34.dp, iconSize = 17.dp)
+                            Spacer(Modifier.width(8.dp))
+                            Column {
+                                Text("Calibration", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1)
+                                Text("Align cutout", color = IslandColors.TextSecondary, fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+
+                ObsidianGlassCard(
+                    cornerRadius = 18.dp,
+                    onClick = onOpenNotifications,
+                    modifier = Modifier.fillMaxWidth().testTag("open_notifications_button")
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                        CrimsonSquircleIcon(icon = Icons.Filled.Notifications, size = 34.dp, iconSize = 17.dp)
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("Notification Inbox & App Rules", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                            Text("Manage per-app island previews", color = IslandColors.TextSecondary, fontSize = 11.sp)
+                        }
+                        Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = IslandColors.TextSecondary)
+                    }
+                }
+
+                // Real System Status Telemetry Card matching youtubers742-home-hub.png
+                ObsidianGlassCard(cornerRadius = 22.dp, contentPadding = PaddingValues(14.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            CrimsonSquircleIcon(icon = Icons.Filled.Memory, size = 34.dp, iconSize = 17.dp)
+                            Spacer(Modifier.width(10.dp))
+                            Column {
+                                Text("System Status", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                Text("Live device telemetry", color = IslandColors.TextSecondary, fontSize = 11.sp)
+                            }
+                        }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .clip(CircleShape)
-                                .background((if (isServiceRunning) IslandColors.AccentGreen else accentColor).copy(alpha = 0.14f))
-                                .padding(horizontal = 9.dp, vertical = 3.dp)
+                                .background(IslandColors.AccentGreen.copy(alpha = 0.16f))
+                                .border(1.dp, IslandColors.AccentGreen.copy(alpha = 0.45f), CircleShape)
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(6.dp)
-                                    .graphicsLayer { alpha = dotPulse }
-                                    .clip(CircleShape)
-                                    .background(if (isServiceRunning) IslandColors.AccentGreen else accentColor)
-                            )
+                            Box(Modifier.size(7.dp).clip(CircleShape).background(IslandColors.AccentGreen))
                             Spacer(Modifier.width(5.dp))
-                            Text(
-                                text = if (isServiceRunning) "Overlay ON" else "Preview",
-                                color = if (isServiceRunning) IslandColors.AccentGreen else accentColor,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
+                            Text(if (overlayActive) "Active" else "Standby", color = IslandColors.AccentGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }
                     }
 
-                    Spacer(Modifier.height(4.dp))
+                    Spacer(Modifier.height(12.dp))
 
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f, fill = false)
-                            .heightIn(max = 78.dp)
-                    ) {
-                        AnimatedContent(
-                            targetState = islandState.activeTab,
-                            transitionSpec = {
-                                if (effectiveStyle == AnimationStyle.NONE) {
-                                    fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                                } else {
-                                    val forward = targetState.ordinal >= initialState.ordinal
-                                    val enterOffset = if (forward) { w: Int -> (w * 0.14f).roundToInt() } else { w: Int -> -(w * 0.14f).roundToInt() }
-                                    val exitOffset = if (forward) { w: Int -> -(w * 0.10f).roundToInt() } else { w: Int -> (w * 0.10f).roundToInt() }
-                                    val moveSpec = MotionTokens.spatialFast<IntOffset>(effectiveStyle, settings.animationElasticity, settings.animationSpeed)
-                                    val scaleSpec = MotionTokens.spatialFast<Float>(effectiveStyle, settings.animationElasticity, settings.animationSpeed)
-                                    val fadeSpec = MotionTokens.contentCrossfadeTween(effectiveStyle, settings.animationSpeed)
-                                    (slideInHorizontally(moveSpec, initialOffsetX = enterOffset) +
-                                        fadeIn(fadeSpec) +
-                                        scaleIn(initialScale = 0.95f, animationSpec = scaleSpec))
-                                        .togetherWith(
-                                            slideOutHorizontally(tween(110), targetOffsetX = exitOffset) + fadeOut(tween(95))
-                                        )
-                                        .using(
-                                            androidx.compose.animation.SizeTransform(clip = false) { _, _ ->
-                                                MotionTokens.sizeTransformSpec(effectiveStyle, settings.animationElasticity, settings.animationSpeed)
-                                            }
-                                        )
-                                }
-                            },
-                            label = "sandbox_tab"
-                        ) { tab ->
-                            when (tab) {
-                                IslandTab.MUSIC -> MusicExpandedView(
-                                    state = mediaState,
-                                    accentColor = musicAccent,
-                                    onTogglePlayPause = {
-                                        if (mediaState.isPlaying) app.soundManager.playMusicPause() else app.soundManager.playMusicPlay()
-                                        app.mediaHub.togglePlayPause()
-                                    },
-                                    onPrevious = {
-                                        app.soundManager.playMusicNext()
-                                        app.mediaHub.skipPrevious()
-                                    },
-                                    onNext = {
-                                        app.soundManager.playMusicNext()
-                                        app.mediaHub.skipNext()
-                                    },
-                                    onSeekTo = { app.mediaHub.seekTo(it) },
-                                    onToggleShuffle = {
-                                        app.soundManager.playToggle(!mediaState.isShuffled)
-                                        app.mediaHub.sendShuffleCommand()
-                                    },
-                                    onCycleRepeat = {
-                                        app.soundManager.playTap()
-                                        app.mediaHub.sendRepeatCommand()
-                                    },
-                                    onToggleLike = {
-                                        app.soundManager.playToggle(!mediaState.isLiked)
-                                        app.mediaHub.sendLikeCommand()
-                                    },
-                                    onOpenPlayer = {
-                                        app.soundManager.playTap()
-                                        app.mediaHub.openPlayerApp()
-                                    }
-                                )
-
-                                IslandTab.TIMER -> TimerStopwatchPanel(
-                                    state = timerState,
-                                    accentColor = accentColor,
-                                    onPickerChanged = { h, m, s -> app.timerEngine.setPickerDuration(h, m, s) },
-                                    onStartTimer = { app.timerEngine.startTimer() },
-                                    onPauseTimer = { app.timerEngine.pauseTimer() },
-                                    onResumeTimer = { app.timerEngine.resumeTimer() },
-                                    onCancelTimer = { app.timerEngine.cancelTimer() },
-                                    onStartStopwatch = { app.timerEngine.startStopwatch() },
-                                    onPauseStopwatch = { app.timerEngine.pauseStopwatch() },
-                                    onResetStopwatch = { app.timerEngine.resetStopwatch() },
-                                    onLapStopwatch = { app.timerEngine.lapStopwatch() },
-                                    onTimerSetSound = { app.soundManager.playTimerSet() },
-                                    onStartSleepTimer = { durationMs -> app.timerEngine.startSleepTimer(durationMs) }
-                                )
-
-                                IslandTab.SEARCH -> SearchIslandPanel(app = app, accentColor = accentColor, onCollapse = {})
-                                IslandTab.TOOLS -> ToolsIslandPanel(app = app, settings = settings, accentColor = accentColor, onHaptic = {}, onCollapse = {})
-                                IslandTab.VAULT -> VaultIslandPanel(app = app, accentColor = accentColor, onCollapse = {})
-                                IslandTab.CLIPS -> ClipsIslandPanel(app = app, accentColor = accentColor)
-                                IslandTab.NOTES -> NotesIslandPanel(app = app, accentColor = accentColor)
-                                IslandTab.MEMO -> MemoIslandPanel(app = app, accentColor = accentColor)
-                                IslandTab.ALERTS -> AlertsIslandPanel(app = app, state = islandState, accentColor = accentColor)
-                            }
-                        }
+                    Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
+                        StatusCell(
+                            icon = Icons.Filled.Memory,
+                            primary = "Android ${Build.VERSION.RELEASE}",
+                            secondary = Build.MODEL.take(16),
+                            modifier = Modifier.weight(1f)
+                        )
+                        StatusCell(
+                            icon = Icons.Filled.PhoneAndroid,
+                            primary = "${metrics.widthPixels} × ${metrics.heightPixels}",
+                            secondary = "Resolution",
+                            modifier = Modifier.weight(1f)
+                        )
+                        StatusCell(
+                            icon = Icons.Filled.BatteryChargingFull,
+                            primary = "${islandState.batteryLevelPercent}%",
+                            secondary = if (islandState.isBatteryCharging) "Charging" else "Battery",
+                            modifier = Modifier.weight(1f)
+                        )
                     }
-
-                    Spacer(Modifier.height(2.dp))
-
-                    BottomChooserBar(
-                        settings = settings,
-                        activeTab = islandState.activeTab,
-                        isMoreOpen = islandState.isMoreRowOpen,
-                        accentColor = accentColor,
-                        useLightGlass = useGlass,
-                        onSelectTab = { app.islandController.selectTab(it) },
-                        onToggleMore = { app.islandController.toggleMoreRow() }
-                    )
                 }
             }
-
-            // Quick Actions Grid
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                HubTile(
-                    title = "Setup Wizard",
-                    subtitle = if (settings.wizardCompleted) "Checklist ready" else "Required steps",
-                    icon = if (settings.wizardCompleted) Icons.Filled.CheckCircle else Icons.Filled.RocketLaunch,
-                    modifier = Modifier.weight(1f).testTag("open_wizard_button"),
-                    onClick = onOpenWizard
-                )
-                HubTile(
-                    title = "Calibration",
-                    subtitle = "Align punch-hole",
-                    icon = Icons.Filled.CenterFocusStrong,
-                    modifier = Modifier.weight(1f).testTag("open_calibration_button"),
-                    onClick = onOpenCalibration
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                HubTile(
-                    title = "Customise (${settings.enabledTabs.size}/8)",
-                    subtitle = "Pick & reorder tabs",
-                    icon = Icons.Filled.DashboardCustomize,
-                    modifier = Modifier.weight(1f).testTag("open_feature_picker_button"),
-                    onClick = onOpenFeaturePicker
-                )
-                HubTile(
-                    title = "Notifications",
-                    subtitle = "Inbox & app rules",
-                    icon = Icons.Filled.Notifications,
-                    modifier = Modifier.weight(1f).testTag("open_notifications_button"),
-                    onClick = onOpenNotifications
-                )
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
-                OutlinedButton(
-                    onClick = {
-                        photoPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
-                    },
-                    modifier = Modifier.weight(1f).height(48.dp)
-                ) {
-                    Icon(Icons.Filled.AddPhotoAlternate, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Add to Shelf")
-                }
-
-                Button(
-                    onClick = onOpenSettings,
-                    modifier = Modifier.weight(1f).height(48.dp).testTag("hub_settings_btn")
-                ) {
-                    Icon(Icons.Filled.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("All Settings")
-                }
-            }
-
-            Spacer(Modifier.height(16.dp))
         }
     }
 }
 
 @Composable
-private fun HubTile(
+private fun BentoQuickTile(
     title: String,
-    subtitle: String,
     icon: ImageVector,
+    onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    onClick: () -> Unit
+    badgeCount: Int = 0
 ) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val pressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (pressed) 0.96f else 1.0f,
-        animationSpec = spring(dampingRatio = 0.68f, stiffness = 620f),
-        label = "hub_tile_scale"
-    )
-    Surface(
-        shape = RoundedCornerShape(18.dp),
-        tonalElevation = 2.dp,
-        modifier = modifier
-            .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+    Box(modifier = modifier.height(108.dp)) {
+        ObsidianGlassCard(
+            cornerRadius = 18.dp,
+            contentPadding = PaddingValues(10.dp),
+            onClick = onClick,
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                CrimsonCircularHaloIcon(icon = icon, size = 46.dp, iconSize = 22.dp)
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = title,
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Medium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = 14.sp
+                )
             }
-            .clickable(
-                interactionSource = interactionSource,
-                indication = null,
-                onClick = onClick
-            )
-    ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            Spacer(Modifier.height(8.dp))
-            Text(title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
-            Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
+        if (badgeCount > 0) {
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(8.dp)
+                    .size(20.dp)
+                    .clip(CircleShape)
+                    .background(IslandColors.CrimsonBright)
+            ) {
+                Text(
+                    text = if (badgeCount > 99) "99+" else "$badgeCount",
+                    color = Color.White,
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun StatusCell(
+    icon: ImageVector,
+    primary: String,
+    secondary: String,
+    modifier: Modifier = Modifier
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
+        Icon(icon, contentDescription = null, tint = IslandColors.TextSecondary, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.height(4.dp))
+        Text(primary, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(secondary, color = IslandColors.TextTertiary, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

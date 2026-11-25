@@ -12,18 +12,20 @@ import android.provider.Settings
 import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.SizeTransform
-import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.Transition
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
-import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
-import androidx.compose.animation.slideOutHorizontally
-import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -83,6 +85,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -92,13 +95,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Outline
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -110,7 +120,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.graphics.drawable.toBitmap
@@ -148,6 +160,142 @@ import java.util.Date
 import java.util.Locale
 import kotlin.math.roundToInt
 
+private class DeadZoneGuardState(var violated: Boolean = false)
+
+private class MorphCapsuleShape(
+    private val widthDpState: State<Float>,
+    private val heightDpState: State<Float>,
+    private val radiusDpState: State<Float>
+) : Shape {
+    override fun createOutline(
+        size: Size,
+        layoutDirection: LayoutDirection,
+        density: Density
+    ): Outline {
+        val w = (widthDpState.value * density.density).coerceIn(1f, size.width.coerceAtLeast(1f))
+        val h = (heightDpState.value * density.density).coerceIn(1f, size.height.coerceAtLeast(1f))
+        val r = (radiusDpState.value * density.density).coerceIn(0f, minOf(w, h) / 2f)
+        val left = ((size.width - w) / 2f).coerceAtLeast(0f)
+        return Outline.Rounded(
+            RoundRect(
+                left = left,
+                top = 0f,
+                right = left + w,
+                bottom = h,
+                cornerRadius = CornerRadius(r, r)
+            )
+        )
+    }
+}
+
+private fun DrawScope.drawMorphCapsuleChrome(
+    widthDp: Float,
+    heightDp: Float,
+    radiusDp: Float,
+    glassAlpha: Float,
+    pillStyle: PillStyle,
+    glassDensity: Float,
+    reduceGlass: Boolean,
+    solidFallback: Boolean,
+    accentColor: Color,
+    isHighlighted: Boolean
+) {
+    val w = (widthDp * density).coerceIn(1f, size.width.coerceAtLeast(1f))
+    val h = (heightDp * density).coerceIn(1f, size.height.coerceAtLeast(1f))
+    val r = (radiusDp * density).coerceIn(0f, minOf(w, h) / 2f)
+    val left = ((size.width - w) / 2f).coerceAtLeast(0f)
+    val corner = CornerRadius(r, r)
+
+    val effectiveStyle = if (solidFallback) PillStyle.BLACK else pillStyle
+    val g = glassAlpha.coerceIn(0f, 1f)
+
+    if (effectiveStyle == PillStyle.BLACK) {
+        drawRoundRect(
+            color = IslandColors.PillBlack,
+            topLeft = Offset(left, 0f),
+            size = Size(w, h),
+            cornerRadius = corner
+        )
+        drawRoundRect(
+            color = if (isHighlighted) accentColor.copy(alpha = 0.72f) else Color.White.copy(alpha = 0.16f),
+            topLeft = Offset(left, 0f),
+            size = Size(w, h),
+            cornerRadius = corner,
+            style = Stroke(width = (if (isHighlighted) 1.4f else 1.0f).dp.toPx())
+        )
+        return
+    }
+
+    val isLiquid = effectiveStyle == PillStyle.LIQUID_GLASS
+    val d = glassDensity.coerceIn(0f, 1f)
+    val targetBaseAlpha = if (isLiquid) (0.76f - d * 0.44f).coerceIn(0.28f, 0.82f) else (0.88f - d * 0.36f).coerceIn(0.42f, 0.90f)
+    val obsidianUnderlayAlpha = 0.96f * (1f - g) + targetBaseAlpha * g
+
+    // Continuous obsidian core smoothly liquefies into translucent glass so card never vanishes mid-morph
+    drawRoundRect(
+        color = IslandColors.PillBlack.copy(alpha = obsidianUnderlayAlpha),
+        topLeft = Offset(left, 0f),
+        size = Size(w, h),
+        cornerRadius = corner
+    )
+
+    if (g > 0.01f) {
+        val topTintAlpha = if (isLiquid) (0.16f + d * 0.08f) else 0.12f
+        val botTintAlpha = if (isLiquid) (0.12f + d * 0.06f) else 0.07f
+        drawRoundRect(
+            brush = Brush.verticalGradient(
+                colors = listOf(
+                    Color.White.copy(alpha = 0.14f * g),
+                    accentColor.copy(alpha = topTintAlpha * g),
+                    accentColor.copy(alpha = botTintAlpha * g)
+                ),
+                startY = 0f,
+                endY = h
+            ),
+            topLeft = Offset(left, 0f),
+            size = Size(w, h),
+            cornerRadius = corner
+        )
+        if (isLiquid && !reduceGlass) {
+            drawRoundRect(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.11f * g),
+                        accentColor.copy(alpha = 0.15f * g),
+                        Color.Transparent
+                    ),
+                    center = Offset(left + w * 0.28f, h * 0.18f),
+                    radius = (maxOf(w, h) * 0.88f).coerceAtLeast(1f)
+                ),
+                topLeft = Offset(left, 0f),
+                size = Size(w, h),
+                cornerRadius = corner
+            )
+        }
+    }
+
+    val borderBrush = if (isHighlighted) {
+        Brush.horizontalGradient(listOf(accentColor, accentColor.copy(alpha = 0.8f)))
+    } else {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color.White.copy(alpha = 0.24f + (if (isLiquid) 0.34f else 0.16f) * g),
+                accentColor.copy(alpha = (if (isLiquid) 0.42f else 0.22f) * g + 0.10f),
+                Color.White.copy(alpha = 0.14f + 0.16f * g)
+            ),
+            startY = 0f,
+            endY = h
+        )
+    }
+    drawRoundRect(
+        brush = borderBrush,
+        topLeft = Offset(left, 0f),
+        size = Size(w, h),
+        cornerRadius = corner,
+        style = Stroke(width = (if (isHighlighted) 1.5f else if (isLiquid) 1.15f else 0.9f).dp.toPx())
+    )
+}
+
 /**
  * Runtime debug guard ensuring no rendered text/glyph enters the camera cutout exclusion zone.
  */
@@ -156,7 +304,7 @@ internal fun Modifier.debugCameraDeadZoneGuard(
     label: String
 ): Modifier {
     if (!BuildConfig.DEBUG) return this
-    var violated by mutableStateOf(false)
+    val guardState = DeadZoneGuardState()
     return this
         .onGloballyPositioned { coords ->
             val bounds = coords.boundsInWindow()
@@ -170,13 +318,13 @@ internal fun Modifier.debugCameraDeadZoneGuard(
                 bRight = exclusionZone.exclusionRectPx.right.toFloat(),
                 bBottom = exclusionZone.exclusionRectPx.bottom.toFloat()
             )
-            violated = hit
+            guardState.violated = hit
             if (hit) {
                 Log.e("DeadZoneGuard", "Overlap detected for $label: bounds=$bounds vs cutout=${exclusionZone.exclusionRectPx}")
             }
         }
         .drawBehind {
-            if (violated) {
+            if (guardState.violated) {
                 drawRect(color = Color.Red, style = Stroke(width = 1.5.dp.toPx()))
             }
         }
@@ -189,6 +337,7 @@ fun IslandOverlayRoot(
     exclusionZone: ExclusionZone = DeadZoneGeometry.measureLive(LocalContext.current, IslandSettings()),
     crossWindowBlurSupported: Boolean = false,
     pullDownProgressProvider: () -> Float = { 0f },
+    isPillPressedProvider: () -> Boolean = { false },
     onRequestHaptic: () -> Unit,
     onOpenAppSettings: () -> Unit
 ) {
@@ -208,17 +357,15 @@ fun IslandOverlayRoot(
     val elasticity = settings.animationElasticity
     val durationScale = settings.animationSpeed
 
-    val materialYouAccent = remember(settings.accentTheme) {
-        IslandColors.extractMaterialYouAccent(context, fallback = IslandColors.AccentOrange)
-    }
-    val accentColor = when (settings.accentTheme) {
-        AccentTheme.ORANGE -> IslandColors.AccentOrange
-        AccentTheme.CYAN -> IslandColors.AccentCyan
-        AccentTheme.GREEN -> IslandColors.AccentGreen
-        AccentTheme.DYNAMIC -> materialYouAccent
+    val accentColor = remember(settings.accentTheme) {
+        IslandColors.resolveAccentColor(context, settings.accentTheme)
     }
     val musicAccent = remember(mediaState.artworkAccentArgb, accentColor) {
         mediaState.artworkAccentArgb?.let { Color(it) } ?: accentColor
+    }
+
+    if (!settings.islandEnabled && !state.isCalibrationPreview) {
+        return
     }
 
     // Lock screen visibility policy
@@ -226,156 +373,158 @@ fun IslandOverlayRoot(
         return
     }
 
-    // 120Hz Velocity-Continuous Spring Choreography (no jarring snap resets mid-flight)
-    var showMediumStage by remember { mutableStateOf(state.mode == IslandMode.MEDIUM) }
-    var showExpandedCard by remember { mutableStateOf(state.mode == IslandMode.EXPANDED) }
-    val pillPreStretchX = remember { Animatable(1f) }
-    val cardScaleX = remember { Animatable(if (state.mode == IslandMode.EXPANDED || state.mode == IslandMode.MEDIUM) 1f else 0.42f) }
-    val cardScaleY = remember { Animatable(if (state.mode == IslandMode.EXPANDED || state.mode == IslandMode.MEDIUM) 1f else 0.24f) }
-    val cardAlpha = remember { Animatable(if (state.mode == IslandMode.EXPANDED || state.mode == IslandMode.MEDIUM) 1f else 0f) }
-    val revealBlurDp = remember { Animatable(0f) }
-    val innerContentAlpha = remember { Animatable(if (state.mode == IslandMode.EXPANDED || state.mode == IslandMode.MEDIUM) 1f else 0f) }
-    val innerContentOffsetDp = remember { Animatable(0f) }
+    // Single M3 Expressive integrator: one updateTransition drives width, height, corner radius, and position
+    val holeW = exclusionZone.holeWidthDp.coerceAtLeast(settings.cutoutWidthDp)
+    val holeH = exclusionZone.holeHeightDp.coerceAtLeast(settings.cutoutHeightDp)
+    val compactMetrics = remember(holeW, holeH, exclusionZone.isLandscape, settings.pillSizePreset) {
+        DeadZoneGeometry.compactSlotMetrics(
+            holeWidthDp = holeW,
+            holeHeightDp = holeH,
+            isLandscape = exclusionZone.isLandscape,
+            slotWidthDp = settings.pillSizePreset.slotWidthDp
+        )
+    }
+    val idleWidthDp = remember(settings.whenIdleMode, compactMetrics.totalWidthDp, holeW) {
+        when (settings.whenIdleMode) {
+            WhenIdleMode.INFO_PILL -> compactMetrics.totalWidthDp
+            WhenIdleMode.CAMERA_ONLY -> (holeW + 94f).coerceIn(114f, 152f)
+            WhenIdleMode.HIDDEN -> (holeW + 24f).coerceAtLeast(48f)
+        }
+    }
+    val densityPx = androidx.compose.ui.platform.LocalDensity.current.density
 
-    LaunchedEffect(state.mode, effectiveStyle, settings.openingEffect, elasticity, durationScale) {
-        val useLiquidBlur = settings.openingEffect == OpeningEffect.LIQUID
-        when (state.mode) {
-            IslandMode.MEDIUM -> {
-                val wasAlreadyOpen = showMediumStage || showExpandedCard
-                showExpandedCard = false
-                showMediumStage = true
-                if (effectiveStyle == AnimationStyle.NONE) {
-                    pillPreStretchX.snapTo(1f)
-                    cardScaleX.snapTo(1f)
-                    cardScaleY.snapTo(1f)
-                    cardAlpha.snapTo(1f)
-                    revealBlurDp.snapTo(0f)
-                    innerContentAlpha.snapTo(1f)
-                    innerContentOffsetDp.snapTo(0f)
+    val morphTransition = updateTransition(targetState = state.mode, label = "island_morph")
+    val morphSpringSpec: @Composable Transition.Segment<IslandMode>.() -> FiniteAnimationSpec<Float> = {
+        when {
+            effectiveStyle == AnimationStyle.NONE -> snap()
+            targetState == IslandMode.IDLE || targetState == IslandMode.COMPACT || targetState == IslandMode.SPLIT -> {
+                if (initialState == IslandMode.EXPANDED || initialState == IslandMode.MEDIUM) {
+                    MotionTokens.collapseSpec(effectiveStyle, durationScale)
                 } else {
-                    if (!wasAlreadyOpen) {
-                        revealBlurDp.snapTo(if (useLiquidBlur) 8f else 0f)
-                        cardScaleX.snapTo(if (settings.openingEffect == OpeningEffect.POP) 0.78f else 0.66f)
-                        cardScaleY.snapTo(if (settings.openingEffect == OpeningEffect.POP) 0.70f else 0.56f)
-                        cardAlpha.snapTo(0.28f)
-                        innerContentAlpha.snapTo(0f)
-                        innerContentOffsetDp.snapTo(5f)
-                    }
-                    val spec = MotionTokens.idleToMediumSpec<Float>(effectiveStyle, elasticity, durationScale)
-                    launch { cardScaleX.animateTo(1f, spec) }
-                    launch { cardScaleY.animateTo(1f, spec) }
-                    if (useLiquidBlur) {
-                        launch { revealBlurDp.animateTo(0f, MotionTokens.effectsDefault(durationScale)) }
-                    } else {
-                        launch { revealBlurDp.snapTo(0f) }
-                    }
-                    launch {
-                        if (!wasAlreadyOpen) delay(65L)
-                        launch { innerContentOffsetDp.animateTo(0f, tween(MotionTokens.CONTENT_CROSSFADE_MS, easing = MotionTokens.ContentCrossfadeEasing)) }
-                        innerContentAlpha.animateTo(1f, tween(MotionTokens.CONTENT_CROSSFADE_MS, easing = MotionTokens.ContentCrossfadeEasing))
-                    }
-                    cardAlpha.animateTo(1f, MotionTokens.contentCrossfadeTween(effectiveStyle, durationScale))
+                    MotionTokens.pillMorphSpec(effectiveStyle, durationScale)
                 }
             }
-
-            IslandMode.EXPANDED -> {
-                val cameFromMedium = showMediumStage
-                val wasExpanded = showExpandedCard
-                showMediumStage = false
-                if (effectiveStyle == AnimationStyle.NONE) {
-                    showExpandedCard = true
-                    pillPreStretchX.snapTo(1f)
-                    cardScaleX.snapTo(1f)
-                    cardScaleY.snapTo(1f)
-                    cardAlpha.snapTo(1f)
-                    revealBlurDp.snapTo(0f)
-                    innerContentAlpha.snapTo(1f)
-                    innerContentOffsetDp.snapTo(0f)
+            targetState == IslandMode.MEDIUM -> {
+                if (initialState == IslandMode.EXPANDED) {
+                    MotionTokens.collapseSpec(effectiveStyle, durationScale)
                 } else {
-                    if (!cameFromMedium && !wasExpanded) {
-                        pillPreStretchX.animateTo(
-                            targetValue = 1.22f,
-                            animationSpec = MotionTokens.spatialFast(effectiveStyle, elasticity, durationScale)
-                        )
-                        val initScale = when (settings.openingEffect) {
-                            OpeningEffect.POP -> 0.80f
-                            OpeningEffect.SMOOTH -> 0.68f
-                            else -> 0.50f
-                        }
-                        cardScaleX.snapTo(initScale)
-                        cardScaleY.snapTo((initScale * 0.68f).coerceAtLeast(0.32f))
-                        cardAlpha.snapTo(0.18f)
-                        innerContentAlpha.snapTo(0f)
-                        innerContentOffsetDp.snapTo(7f)
-                        revealBlurDp.snapTo(if (useLiquidBlur) 12f else 0f)
-                    } else if (cameFromMedium) {
-                        cardScaleX.snapTo(0.84f)
-                        cardScaleY.snapTo(0.68f)
-                        cardAlpha.snapTo(0.75f)
-                        innerContentAlpha.snapTo(0f)
-                        innerContentOffsetDp.snapTo(5f)
-                        revealBlurDp.snapTo(if (useLiquidBlur) 6f else 0f)
-                    }
-                    showExpandedCard = true
-                    val expandSpec = if (cameFromMedium) {
-                        MotionTokens.mediumToFullSpec<Float>(effectiveStyle, elasticity, durationScale)
-                    } else {
-                        MotionTokens.openingEffectSpec<Float>(
-                            openingEffect = settings.openingEffect,
-                            style = effectiveStyle,
-                            elasticity = elasticity,
-                            durationScale = durationScale
-                        )
-                    }
-                    launch { pillPreStretchX.snapTo(1f) }
-                    launch { cardScaleX.animateTo(1f, expandSpec) }
-                    launch { cardScaleY.animateTo(1f, expandSpec) }
-                    if (useLiquidBlur) {
-                        launch { revealBlurDp.animateTo(0f, MotionTokens.effectsDefault(durationScale)) }
-                    } else {
-                        launch { revealBlurDp.snapTo(0f) }
-                    }
-                    launch {
-                        if (!wasExpanded) delay(if (cameFromMedium) 45L else 105L)
-                        launch { innerContentOffsetDp.animateTo(0f, tween(MotionTokens.CONTENT_CROSSFADE_MS, easing = MotionTokens.ContentCrossfadeEasing)) }
-                        innerContentAlpha.animateTo(1f, tween(MotionTokens.CONTENT_CROSSFADE_MS, easing = MotionTokens.ContentCrossfadeEasing))
-                    }
-                    cardAlpha.animateTo(1f, MotionTokens.contentCrossfadeTween(effectiveStyle, durationScale))
+                    MotionTokens.idleToMediumSpec(effectiveStyle, elasticity, durationScale)
                 }
             }
-
-            else -> {
-                if (effectiveStyle == AnimationStyle.NONE) {
-                    showExpandedCard = false
-                    showMediumStage = false
-                    cardAlpha.snapTo(0f)
-                    cardScaleX.snapTo(0.45f)
-                    cardScaleY.snapTo(0.25f)
-                    revealBlurDp.snapTo(0f)
-                    pillPreStretchX.snapTo(1f)
-                    innerContentAlpha.snapTo(0f)
-                    innerContentOffsetDp.snapTo(0f)
-                } else if (showExpandedCard || showMediumStage) {
-                    val collapseSpec = MotionTokens.collapseSpec<Float>(effectiveStyle, durationScale)
-                    launch { innerContentAlpha.animateTo(0f, tween(75)) }
-                    launch { cardScaleX.animateTo(0.46f, collapseSpec) }
-                    launch { cardScaleY.animateTo(0.26f, collapseSpec) }
-                    cardAlpha.animateTo(0f, tween(durationMillis = 115))
-                    showExpandedCard = false
-                    showMediumStage = false
-                    revealBlurDp.snapTo(0f)
-                    pillPreStretchX.snapTo(1.14f)
-                    pillPreStretchX.animateTo(1f, MotionTokens.spatialDefault(effectiveStyle, elasticity, durationScale))
-                }
+            targetState == IslandMode.EXPANDED -> {
+                MotionTokens.openingEffectSpec(settings.openingEffect, effectiveStyle, elasticity, durationScale)
             }
+            else -> MotionTokens.spatialDefault(effectiveStyle, elasticity, durationScale)
         }
     }
 
-    val compactScale by animateFloatAsState(
-        targetValue = if (state.mode == IslandMode.COMPACT || state.mode == IslandMode.SPLIT) 1f else 0.94f,
-        animationSpec = MotionTokens.spatialDefault(effectiveStyle, elasticity, durationScale),
-        label = "compact_scale"
+    val morphWidthDpState = morphTransition.animateFloat(
+        transitionSpec = morphSpringSpec,
+        label = "morph_width"
+    ) { mode ->
+        when (mode) {
+            IslandMode.IDLE -> idleWidthDp
+            IslandMode.COMPACT -> compactMetrics.totalWidthDp
+            IslandMode.SPLIT -> compactMetrics.totalWidthDp + 44f
+            IslandMode.MEDIUM -> DeadZoneGeometry.MEDIUM_MAX_WIDTH_DP
+            IslandMode.EXPANDED -> DeadZoneGeometry.FULL_MAX_WIDTH_DP
+        }
+    }
+    val morphHeightDpState = morphTransition.animateFloat(
+        transitionSpec = morphSpringSpec,
+        label = "morph_height"
+    ) { mode ->
+        when (mode) {
+            IslandMode.IDLE, IslandMode.COMPACT, IslandMode.SPLIT -> compactMetrics.pillHeightDp
+            IslandMode.MEDIUM -> DeadZoneGeometry.MEDIUM_MAX_HEIGHT_DP
+            IslandMode.EXPANDED -> DeadZoneGeometry.FULL_MAX_HEIGHT_DP
+        }
+    }
+    val morphRadiusDpState = morphTransition.animateFloat(
+        transitionSpec = morphSpringSpec,
+        label = "morph_radius"
+    ) { mode ->
+        when (mode) {
+            IslandMode.IDLE, IslandMode.COMPACT, IslandMode.SPLIT -> compactMetrics.pillHeightDp * 0.5f
+            IslandMode.MEDIUM -> IslandColors.MediumOuterRadius.value
+            IslandMode.EXPANDED -> IslandColors.ExpandedOuterRadius.value
+        }
+    }
+    val morphPosYDpState = morphTransition.animateFloat(
+        transitionSpec = morphSpringSpec,
+        label = "morph_pos_y"
+    ) { mode ->
+        when (mode) {
+            IslandMode.IDLE, IslandMode.COMPACT, IslandMode.SPLIT -> 0f
+            IslandMode.MEDIUM -> 2f
+            IslandMode.EXPANDED -> 4f
+        }
+    }
+    val glassAlphaState = morphTransition.animateFloat(
+        transitionSpec = {
+            if (effectiveStyle == AnimationStyle.NONE) snap()
+            else MotionTokens.effectsDefault(durationScale)
+        },
+        label = "glass_alpha"
+    ) { mode ->
+        if (mode == IslandMode.MEDIUM || mode == IslandMode.EXPANDED) 1f else 0f
+    }
+
+    // Staggered Apple choreography: Header -> Body -> Bottom Chooser (fast clear on collapse)
+    val headerRevealState = morphTransition.animateFloat(
+        transitionSpec = {
+            when {
+                effectiveStyle == AnimationStyle.NONE -> snap()
+                targetState == IslandMode.EXPANDED || targetState == IslandMode.MEDIUM ->
+                    tween(durationMillis = (200 / durationScale).toInt().coerceIn(80, 320), delayMillis = 70, easing = FastOutSlowInEasing)
+                else -> tween(durationMillis = (95 / durationScale).toInt().coerceIn(40, 140), easing = FastOutLinearInEasing)
+            }
+        },
+        label = "header_reveal"
+    ) { mode ->
+        if (mode == IslandMode.MEDIUM || mode == IslandMode.EXPANDED) 1f else 0f
+    }
+    val bodyRevealState = morphTransition.animateFloat(
+        transitionSpec = {
+            when {
+                effectiveStyle == AnimationStyle.NONE -> snap()
+                targetState == IslandMode.EXPANDED || targetState == IslandMode.MEDIUM ->
+                    tween(durationMillis = (260 / durationScale).toInt().coerceIn(100, 380), delayMillis = 140, easing = MotionTokens.ContentCrossfadeEasing)
+                else -> tween(durationMillis = (85 / durationScale).toInt().coerceIn(40, 130), easing = FastOutLinearInEasing)
+            }
+        },
+        label = "body_reveal"
+    ) { mode ->
+        if (mode == IslandMode.MEDIUM || mode == IslandMode.EXPANDED) 1f else 0f
+    }
+    val chooserRevealState = morphTransition.animateFloat(
+        transitionSpec = {
+            when {
+                effectiveStyle == AnimationStyle.NONE -> snap()
+                targetState == IslandMode.EXPANDED ->
+                    tween(durationMillis = (240 / durationScale).toInt().coerceIn(90, 360), delayMillis = 200, easing = MotionTokens.ContentCrossfadeEasing)
+                else -> tween(durationMillis = (75 / durationScale).toInt().coerceIn(35, 110), easing = FastOutLinearInEasing)
+            }
+        },
+        label = "chooser_reveal"
+    ) { mode ->
+        if (mode == IslandMode.EXPANDED) 1f else 0f
+    }
+
+    val isPressedNow = isPillPressedProvider()
+    val pressScaleState = animateFloatAsState(
+        targetValue = if (isPressedNow) MotionTokens.TAP_SQUISH_SCALE else 1f,
+        animationSpec = if (effectiveStyle == AnimationStyle.NONE) snap() else MotionTokens.spatialFast(effectiveStyle, elasticity, durationScale),
+        label = "press_squish"
     )
+
+    val morphCapsuleShape = remember(morphWidthDpState, morphHeightDpState, morphRadiusDpState) {
+        MorphCapsuleShape(
+            widthDpState = morphWidthDpState,
+            heightDpState = morphHeightDpState,
+            radiusDpState = morphRadiusDpState
+        )
+    }
 
     val effectivePillStyle = if (settings.solidFallback) PillStyle.BLACK else settings.pillStyle
     val useGlass = effectivePillStyle != PillStyle.BLACK
@@ -387,7 +536,12 @@ fun IslandOverlayRoot(
     }
 
     val isCalibratedOrPreview = settings.calibrationConfirmed || state.isCalibrationPreview
-    val backdrop = LocalAppBackdrop.current
+    val showExpandedCard = state.mode == IslandMode.EXPANDED ||
+        (effectiveStyle != AnimationStyle.NONE && morphTransition.currentState == IslandMode.EXPANDED && state.mode != IslandMode.MEDIUM)
+    val showMediumStage = !showExpandedCard && (
+        state.mode == IslandMode.MEDIUM ||
+            (effectiveStyle != AnimationStyle.NONE && morphTransition.currentState == IslandMode.MEDIUM)
+        )
 
     Box(modifier = Modifier.fillMaxSize()) {
         if (state.isSelectModeActive) {
@@ -428,20 +582,23 @@ fun IslandOverlayRoot(
             )
         }
 
-        val blurMod = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && revealBlurDp.value > 0.4f) {
-            Modifier.blur(revealBlurDp.value.dp)
-        } else {
-            Modifier
-        }
-
         // Anchor island relative to live DisplayCutout in Portrait or Landscape
         val anchorAlign = when {
             exclusionZone.isLandscape && exclusionZone.isRightEdgeInLandscape -> Alignment.CenterEnd
             exclusionZone.isLandscape -> Alignment.CenterStart
             else -> Alignment.TopCenter
         }
-        val anchorOffsetX = if (!exclusionZone.isLandscape) settings.cutoutXOffsetDp.dp else 4.dp
-        val anchorOffsetY = if (!exclusionZone.isLandscape) (settings.cutoutYOffsetDp - 2f).coerceAtLeast(0f).dp else 0.dp
+        val anchorOffsetX = if (!exclusionZone.isLandscape) {
+            val screenCenterDp = (exclusionZone.screenWidthPx / exclusionZone.density) / 2f
+            (exclusionZone.cutoutRectDp.centerX - screenCenterDp).dp
+        } else {
+            4.dp
+        }
+        val anchorOffsetY = if (!exclusionZone.isLandscape) {
+            (exclusionZone.cutoutRectDp.top - 2f).coerceAtLeast(0f).dp
+        } else {
+            0.dp
+        }
 
         Box(
             modifier = Modifier
@@ -465,15 +622,32 @@ fun IslandOverlayRoot(
                 showExpandedCard -> {
                     Box(
                         modifier = Modifier
+                            .offset { IntOffset(0, (morphPosYDpState.value * densityPx).roundToInt()) }
                             .graphicsLayer {
                                 val pull = pullDownProgressProvider()
+                                val press = pressScaleState.value
+                                val uniformPull = 1f + pull * 0.04f
                                 transformOrigin = TransformOrigin(0.5f, 0f)
-                                scaleX = cardScaleX.value
-                                scaleY = cardScaleY.value
-                                alpha = cardAlpha.value
+                                scaleX = press * uniformPull
+                                scaleY = press * uniformPull
+                                shape = morphCapsuleShape
+                                clip = true
                                 translationY = pull * 16f
                             }
-                            .then(blurMod)
+                            .drawBehind {
+                                drawMorphCapsuleChrome(
+                                    widthDp = morphWidthDpState.value,
+                                    heightDp = morphHeightDpState.value,
+                                    radiusDp = morphRadiusDpState.value,
+                                    glassAlpha = glassAlphaState.value,
+                                    pillStyle = effectivePillStyle,
+                                    glassDensity = settings.glassDensity,
+                                    reduceGlass = settings.reduceGlass,
+                                    solidFallback = settings.solidFallback,
+                                    accentColor = accentColor,
+                                    isHighlighted = state.isDragOverIsland
+                                )
+                            }
                     ) {
                         ExpandedIslandCard(
                             app = app,
@@ -487,8 +661,11 @@ fun IslandOverlayRoot(
                             effectiveStyle = effectiveStyle,
                             elasticity = elasticity,
                             durationScale = durationScale,
-                            contentAlphaProvider = { innerContentAlpha.value },
-                            contentOffsetYDProvider = { innerContentOffsetDp.value },
+                            drawOwnChrome = false,
+                            headerAlphaProvider = { headerRevealState.value.coerceIn(0f, 1f) },
+                            contentAlphaProvider = { bodyRevealState.value.coerceIn(0f, 1f) },
+                            contentOffsetYDProvider = { (1f - bodyRevealState.value.coerceIn(0f, 1f)) * 10f },
+                            chooserAlphaProvider = { chooserRevealState.value.coerceIn(0f, 1f) },
                             onRequestHaptic = onRequestHaptic,
                             onOpenAppSettings = onOpenAppSettings
                         )
@@ -498,15 +675,32 @@ fun IslandOverlayRoot(
                 showMediumStage -> {
                     Box(
                         modifier = Modifier
+                            .offset { IntOffset(0, (morphPosYDpState.value * densityPx).roundToInt()) }
                             .graphicsLayer {
                                 val pull = pullDownProgressProvider()
+                                val press = pressScaleState.value
+                                val uniformPull = 1f + pull * 0.04f
                                 transformOrigin = TransformOrigin(0.5f, 0f)
-                                scaleX = cardScaleX.value
-                                scaleY = cardScaleY.value
-                                alpha = cardAlpha.value
+                                scaleX = press * uniformPull
+                                scaleY = press * uniformPull
+                                shape = morphCapsuleShape
+                                clip = true
                                 translationY = pull * 16f
                             }
-                            .then(blurMod)
+                            .drawBehind {
+                                drawMorphCapsuleChrome(
+                                    widthDp = morphWidthDpState.value,
+                                    heightDp = morphHeightDpState.value,
+                                    radiusDp = morphRadiusDpState.value,
+                                    glassAlpha = glassAlphaState.value,
+                                    pillStyle = effectivePillStyle,
+                                    glassDensity = settings.glassDensity,
+                                    reduceGlass = settings.reduceGlass,
+                                    solidFallback = settings.solidFallback,
+                                    accentColor = accentColor,
+                                    isHighlighted = state.isDragOverIsland
+                                )
+                            }
                     ) {
                         MediumPillView(
                             app = app,
@@ -519,6 +713,9 @@ fun IslandOverlayRoot(
                             crossWindowBlurSupported = crossWindowBlurSupported,
                             mediaState = mediaState,
                             timerState = timerState,
+                            drawOwnChrome = false,
+                            headerAlphaProvider = { headerRevealState.value.coerceIn(0f, 1f) },
+                            bodyAlphaProvider = { bodyRevealState.value.coerceIn(0f, 1f) },
                             onRequestHaptic = onRequestHaptic
                         )
                     }
@@ -526,13 +723,18 @@ fun IslandOverlayRoot(
 
                 state.mode == IslandMode.IDLE -> {
                     Box(
-                        modifier = Modifier.graphicsLayer {
-                            val pull = pullDownProgressProvider()
-                            val boost = 1f + pull * 0.14f
-                            scaleX = pillPreStretchX.value * boost
-                            scaleY = boost
-                            translationY = pull * 22f
-                        }
+                        modifier = Modifier
+                            .offset { IntOffset(0, (morphPosYDpState.value * densityPx).roundToInt()) }
+                            .graphicsLayer {
+                                val pull = pullDownProgressProvider()
+                                val press = pressScaleState.value
+                                val boost = press * (1f + pull * 0.14f)
+                                val ratioX = (morphWidthDpState.value / idleWidthDp.coerceAtLeast(1f)).coerceIn(0.85f, 1.25f)
+                                transformOrigin = TransformOrigin(0.5f, 0f)
+                                scaleX = ratioX * boost
+                                scaleY = boost
+                                translationY = pull * 22f
+                            }
                     ) {
                         IdlePillView(
                             settings = settings,
@@ -547,36 +749,61 @@ fun IslandOverlayRoot(
                 }
 
                 else -> {
+                    val showCompanion = state.mode == IslandMode.SPLIT && state.secondaryActivity != null
                     val companionView: @Composable () -> Unit = {
-                        if (state.mode == IslandMode.SPLIT && state.secondaryActivity != null) {
-                            SplitSecondaryBubble(
-                                activity = state.secondaryActivity!!,
-                                companionCount = state.companionCount,
-                                accentColor = activityAccent(state.secondaryActivity!!, accentColor, musicAccent),
-                                borderColor = pillBorderColor,
-                                effectivePillStyle = effectivePillStyle,
-                                glassDensity = settings.glassDensity,
-                                reduceGlass = settings.reduceGlass,
-                                solidFallback = settings.solidFallback,
-                                crossWindowBlurActive = crossWindowBlurSupported,
-                                onClick = {
-                                    onRequestHaptic()
-                                    app.islandController.swapPrimaryAndSecondary()
-                                }
-                            )
+                        AnimatedVisibility(
+                            visible = showCompanion,
+                            enter = if (effectiveStyle == AnimationStyle.NONE) {
+                                fadeIn(tween(0))
+                            } else {
+                                fadeIn(MotionTokens.effectsDefault(durationScale)) + scaleIn(
+                                    animationSpec = MotionTokens.spatialFast(effectiveStyle, elasticity, durationScale),
+                                    initialScale = 0.5f
+                                )
+                            },
+                            exit = if (effectiveStyle == AnimationStyle.NONE) {
+                                fadeOut(tween(0))
+                            } else {
+                                fadeOut(MotionTokens.effectsFast(durationScale)) + scaleOut(
+                                    animationSpec = MotionTokens.collapseSpec(effectiveStyle, durationScale),
+                                    targetScale = 0.5f
+                                )
+                            }
+                        ) {
+                            state.secondaryActivity?.let { secondary ->
+                                SplitSecondaryBubble(
+                                    activity = secondary,
+                                    companionCount = state.companionCount,
+                                    accentColor = activityAccent(secondary, accentColor, musicAccent),
+                                    borderColor = pillBorderColor,
+                                    effectivePillStyle = effectivePillStyle,
+                                    glassDensity = settings.glassDensity,
+                                    reduceGlass = settings.reduceGlass,
+                                    solidFallback = settings.solidFallback,
+                                    crossWindowBlurActive = crossWindowBlurSupported,
+                                    onClick = {
+                                        onRequestHaptic()
+                                        app.islandController.swapPrimaryAndSecondary()
+                                    }
+                                )
+                            }
                         }
                     }
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.graphicsLayer {
-                            val pull = pullDownProgressProvider()
-                            val boost = 1f + pull * 0.14f
-                            scaleX = compactScale * pillPreStretchX.value * boost
-                            scaleY = compactScale * boost
-                            translationY = pull * 22f
-                        }
+                        modifier = Modifier
+                            .offset { IntOffset(0, (morphPosYDpState.value * densityPx).roundToInt()) }
+                            .graphicsLayer {
+                                val pull = pullDownProgressProvider()
+                                val boost = pressScaleState.value * (1f + pull * 0.14f)
+                                val pillRatioX = (morphWidthDpState.value / compactMetrics.totalWidthDp.coerceAtLeast(1f)).coerceIn(0.84f, 1.24f)
+                                transformOrigin = TransformOrigin(0.5f, 0f)
+                                scaleX = (if (showCompanion) 1f else pillRatioX) * boost
+                                scaleY = boost
+                                translationY = pull * 22f
+                            }
                     ) {
                         if (settings.companionPosition == CompanionPosition.LEFT) {
                             companionView()
@@ -717,7 +944,7 @@ private fun activityAccent(
     defaultAccent: Color,
     musicAccent: Color
 ): Color = when (activity) {
-    is IslandActivity.Timer -> IslandColors.AccentOrange
+    is IslandActivity.Timer -> defaultAccent
     is IslandActivity.Charging -> IslandColors.AccentGreen
     is IslandActivity.Music -> musicAccent
     is IslandActivity.VoiceRecording -> IslandColors.AccentRed
@@ -753,7 +980,12 @@ fun IdlePillView(
     val strokeWidth = if (isDragOverIsland || isCalibrationPreview || isLowBatteryWarning) 2.dp else 1.dp
 
     if (settings.whenIdleMode == WhenIdleMode.INFO_PILL && !isCalibrationPreview) {
-        val metrics = DeadZoneGeometry.compactSlotMetrics(holeW, holeH, exclusionZone.isLandscape)
+        val metrics = DeadZoneGeometry.compactSlotMetrics(
+            holeWidthDp = holeW,
+            holeHeightDp = holeH,
+            isLandscape = exclusionZone.isLandscape,
+            slotWidthDp = settings.pillSizePreset.slotWidthDp
+        )
         var minuteTick by remember { mutableLongStateOf(System.currentTimeMillis()) }
         LaunchedEffect(Unit) {
             while (isActive) {
@@ -812,28 +1044,80 @@ fun IdlePillView(
         return
     }
 
+    val wingWidthDp = when (settings.pillSizePreset) {
+        com.example.system.PillSizePreset.SMALL -> 32.dp
+        com.example.system.PillSizePreset.MEDIUM -> 38.dp
+        com.example.system.PillSizePreset.LARGE -> 46.dp
+    }
+    val effectivePillStyle = if (settings.solidFallback) PillStyle.BLACK else settings.pillStyle
+    val pillAccent = if (isLowBatteryWarning) IslandColors.AccentRed else accentColor
+    val idleBorder = when {
+        isCalibrationPreview || isLowBatteryWarning -> IslandColors.AccentRed.copy(alpha = 0.85f)
+        isDragOverIsland -> accentColor
+        else -> pillAccent.copy(alpha = 0.78f)
+    }
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
-            .clip(CircleShape)
-            .background(IslandColors.PillBlack)
-            .border(strokeWidth, ringBorderColor, CircleShape)
-            .padding(horizontal = 4.dp, vertical = 3.dp)
+            .height((holeH + 4f).coerceAtLeast(36f).dp)
+            .islandGlassChrome(
+                shape = CircleShape,
+                pillStyle = effectivePillStyle,
+                glassDensity = settings.glassDensity,
+                reduceGlass = settings.reduceGlass,
+                solidFallback = settings.solidFallback,
+                accentColor = pillAccent,
+                isHighlighted = isDragOverIsland || isCalibrationPreview || isLowBatteryWarning,
+                backdrop = LocalAppBackdrop.current
+            )
+            .border(strokeWidth, idleBorder, CircleShape)
+            .padding(horizontal = 10.dp, vertical = 2.dp)
             .testTag("idle_camera_ring")
     ) {
-        if (isLowBatteryWarning) {
-            Spacer(Modifier.width(4.dp))
-            Icon(
-                imageVector = Icons.Filled.BatteryAlert,
-                contentDescription = "Low battery warning",
-                tint = IslandColors.AccentRed,
-                modifier = Modifier.size(14.dp)
+        Box(
+            modifier = Modifier.width(wingWidthDp),
+            contentAlignment = Alignment.CenterStart
+        ) {
+            if (isLowBatteryWarning) {
+                Icon(
+                    imageVector = Icons.Filled.BatteryAlert,
+                    contentDescription = "Low battery warning",
+                    tint = IslandColors.AccentRed,
+                    modifier = Modifier.size(14.dp)
+                )
+            } else {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(5.dp)
+                            .clip(CircleShape)
+                            .background(pillAccent)
+                    )
+                    Box(
+                        modifier = Modifier
+                            .width(10.dp)
+                            .height(2.5.dp)
+                            .clip(CircleShape)
+                            .background(pillAccent.copy(alpha = 0.58f))
+                    )
+                }
+            }
+        }
+        Spacer(modifier = Modifier.width((holeW + 16f).dp))
+        Box(
+            modifier = Modifier.width(wingWidthDp),
+            contentAlignment = Alignment.CenterEnd
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(5.dp)
+                    .clip(CircleShape)
+                    .background(pillAccent.copy(alpha = 0.55f))
             )
-            Spacer(Modifier.width(8.dp))
-            Spacer(modifier = Modifier.size(width = holeW.dp, height = holeH.dp))
-            Spacer(Modifier.width(8.dp))
-        } else {
-            Spacer(modifier = Modifier.size(width = holeW.dp, height = holeH.dp))
         }
     }
 }
@@ -950,7 +1234,12 @@ fun CompactPillView(
     val hideTextOnLock = state.isDeviceLocked && settings.lockScreenPreset == LockScreenPreset.PRIVACY_HIDE_TEXT
     val holeW = exclusionZone.holeWidthDp.coerceAtLeast(settings.cutoutWidthDp)
     val holeH = exclusionZone.holeHeightDp.coerceAtLeast(settings.cutoutHeightDp)
-    val metrics = DeadZoneGeometry.compactSlotMetrics(holeW, holeH, exclusionZone.isLandscape)
+    val metrics = DeadZoneGeometry.compactSlotMetrics(
+        holeWidthDp = holeW,
+        holeHeightDp = holeH,
+        isLandscape = exclusionZone.isLandscape,
+        slotWidthDp = settings.pillSizePreset.slotWidthDp
+    )
     val context = LocalContext.current
 
     val notifAppIcon: Bitmap? = remember(activity) {
@@ -1009,7 +1298,7 @@ fun CompactPillView(
                 when (activity) {
                     is IslandActivity.Timer -> Text(
                         text = TimerEngine.formatDuration(activity.remainingMs),
-                        color = IslandColors.AccentOrange,
+                        color = accentColor,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1
@@ -1021,7 +1310,7 @@ fun CompactPillView(
                         fontWeight = FontWeight.Bold,
                         maxLines = 1
                     )
-                    is IslandActivity.Music -> MusicCompactWaveform(isPlaying = isPlaying, accentColor = musicAccent)
+                    is IslandActivity.Music -> MusicCompactWaveform(isPlaying = isPlaying, accentColor = musicAccent, positionMs = activity.positionMs)
                     else -> Spacer(Modifier.size(12.dp))
                 }
             }
@@ -1087,14 +1376,14 @@ fun CompactPillView(
                                         .debugCameraDeadZoneGuard(exclusionZone, "music_title")
                                 )
                             }
-                            MusicCompactWaveform(isPlaying = isPlaying, accentColor = musicAccent)
+                            MusicCompactWaveform(isPlaying = isPlaying, accentColor = musicAccent, positionMs = activity.positionMs)
                         }
                     }
                     is IslandActivity.Timer -> {
                         Text(
                             text = TimerEngine.formatDuration(activity.remainingMs),
                             style = TextStyle(
-                                color = IslandColors.AccentOrange,
+                                color = accentColor,
                                 fontSize = 12.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 fontFeatureSettings = "tnum"
@@ -1218,14 +1507,17 @@ private fun CompactLeftGlyph(
                 Image(
                     bitmap = albumArt.asImageBitmap(),
                     contentDescription = "Album art",
-                    modifier = Modifier.size(22.dp).clip(CircleShape)
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .border(0.6.dp, musicAccent.copy(alpha = 0.65f), RoundedCornerShape(6.dp))
                 )
             } else {
                 Icon(Icons.Filled.MusicNote, contentDescription = "Music", tint = musicAccent, modifier = Modifier.size(18.dp))
             }
         }
         is IslandActivity.Timer -> {
-            Icon(Icons.Filled.Timer, contentDescription = "Timer", tint = IslandColors.AccentOrange, modifier = Modifier.size(18.dp))
+            Icon(Icons.Filled.Timer, contentDescription = "Timer", tint = accentColor, modifier = Modifier.size(18.dp))
         }
         is IslandActivity.Charging -> {
             Icon(
@@ -1240,7 +1532,10 @@ private fun CompactLeftGlyph(
                 Image(
                     bitmap = notifAppIcon.asImageBitmap(),
                     contentDescription = activity.appName,
-                    modifier = Modifier.size(20.dp).clip(CircleShape)
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clip(RoundedCornerShape(6.dp))
+                        .border(0.6.dp, IslandColors.CrimsonBorder.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
                 )
             } else {
                 Icon(Icons.Filled.Notifications, contentDescription = activity.appName, tint = accentColor, modifier = Modifier.size(18.dp))
@@ -1294,7 +1589,7 @@ private fun SplitSecondaryBubble(
             when (activity) {
                 is IslandActivity.Timer -> Text(
                     text = "${(activity.remainingMs / 1000L).coerceAtMost(99)}",
-                    color = IslandColors.AccentOrange,
+                    color = accentColor,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
                 )
@@ -1339,6 +1634,9 @@ fun MediumPillView(
     crossWindowBlurSupported: Boolean = false,
     mediaState: MediaUiState = MediaUiState(),
     timerState: TimerUiState = TimerUiState(),
+    drawOwnChrome: Boolean = true,
+    headerAlphaProvider: () -> Float = { 1f },
+    bodyAlphaProvider: () -> Float = { 1f },
     onRequestHaptic: () -> Unit = {}
 ) {
     val primary = state.primaryActivity
@@ -1346,36 +1644,47 @@ fun MediumPillView(
     val holeH = exclusionZone.holeHeightDp.coerceAtLeast(settings.cutoutHeightDp)
     val shape = RoundedCornerShape(IslandColors.MediumOuterRadius)
 
+    val chromeMod = if (drawOwnChrome) {
+        Modifier.islandGlassChrome(
+            shape = shape,
+            pillStyle = effectivePillStyle,
+            glassDensity = settings.glassDensity,
+            reduceGlass = settings.reduceGlass,
+            solidFallback = settings.solidFallback,
+            accentColor = accentColor,
+            isHighlighted = state.isDragOverIsland,
+            backdrop = LocalAppBackdrop.current,
+            crossWindowBlurActive = crossWindowBlurSupported
+        )
+    } else {
+        Modifier
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp)
+            .padding(horizontal = if (drawOwnChrome) 24.dp else 0.dp)
             .widthIn(max = DeadZoneGeometry.MEDIUM_MAX_WIDTH_DP.dp)
             .heightIn(min = 96.dp, max = DeadZoneGeometry.MEDIUM_MAX_HEIGHT_DP.dp)
-            .islandGlassChrome(
-                shape = shape,
-                pillStyle = effectivePillStyle,
-                glassDensity = settings.glassDensity,
-                reduceGlass = settings.reduceGlass,
-                solidFallback = settings.solidFallback,
-                accentColor = accentColor,
-                isHighlighted = state.isDragOverIsland,
-                backdrop = LocalAppBackdrop.current,
-                crossWindowBlurActive = crossWindowBlurSupported
-            )
+            .then(chromeMod)
             .clickable {
                 onRequestHaptic()
                 app.islandController.expand()
             }
-            .padding(horizontal = 14.dp, vertical = 8.dp)
+            .padding(horizontal = 14.dp, vertical = 7.dp)
             .testTag("medium_stage1_pill"),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.spacedBy(5.dp)
     ) {
         // Top header strictly clears punch-hole camera
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height((holeH + 8f).coerceAtLeast(36f).dp),
+                .height((holeH + 6f).coerceAtLeast(35f).dp)
+                .graphicsLayer {
+                    val a = headerAlphaProvider()
+                    alpha = a
+                    translationY = (1f - a) * -4.dp.toPx()
+                },
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1401,7 +1710,8 @@ fun MediumPillView(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.10f))
+                    .background(Color.White.copy(alpha = 0.08f))
+                    .border(0.6.dp, accentColor.copy(alpha = 0.40f), CircleShape)
                     .clickable {
                         onRequestHaptic()
                         app.islandController.expand()
@@ -1411,55 +1721,105 @@ fun MediumPillView(
                     .testTag("medium_expand_btn")
             ) {
                 Text("Full", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Medium)
-                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Open full card", tint = Color.White, modifier = Modifier.size(14.dp))
+                Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Open full card", tint = accentColor, modifier = Modifier.size(14.dp))
             }
         }
 
         // Body sits strictly >= 4 dp + header clearance below camera
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    val a = bodyAlphaProvider()
+                    val s = 0.96f + 0.04f * a
+                    alpha = a
+                    scaleX = s
+                    scaleY = s
+                    translationY = (1f - a) * 8.dp.toPx()
+                }
+        ) {
         when (primary) {
             is IslandActivity.Music -> {
-                Row(
+                val trackFraction = if (mediaState.durationMs > 0L) {
+                    (mediaState.positionMs.toFloat() / mediaState.durationMs.toFloat()).coerceIn(0f, 1f)
+                } else 0f
+                Column(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
                 ) {
-                    if (mediaState.albumArt != null) {
-                        Image(
-                            bitmap = mediaState.albumArt.asImageBitmap(),
-                            contentDescription = "Album art",
-                            modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp))
-                        )
-                    } else {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        if (mediaState.albumArt != null) {
+                            Image(
+                                bitmap = mediaState.albumArt.asImageBitmap(),
+                                contentDescription = "Album art",
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .border(0.75.dp, accentColor.copy(alpha = 0.65f), RoundedCornerShape(8.dp))
+                            )
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.White.copy(alpha = 0.10f))
+                                    .border(0.75.dp, accentColor.copy(alpha = 0.55f), RoundedCornerShape(8.dp)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Filled.MusicNote, contentDescription = null, tint = musicAccent, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(mediaState.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                            Text(mediaState.artist, color = IslandColors.TextSecondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        }
+                        IconButton(onClick = { onRequestHaptic(); app.mediaHub.skipPrevious() }, modifier = Modifier.size(30.dp)) {
+                            Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous", tint = Color.White, modifier = Modifier.size(19.dp))
+                        }
                         Box(
-                            modifier = Modifier.size(36.dp).clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.1f)),
+                            modifier = Modifier
+                                .size(30.dp)
+                                .clip(CircleShape)
+                                .background(musicAccent)
+                                .border(0.75.dp, Color.White.copy(alpha = 0.45f), CircleShape)
+                                .clickable {
+                                    onRequestHaptic()
+                                    if (mediaState.isPlaying) app.soundManager.playMusicPause() else app.soundManager.playMusicPlay()
+                                    app.mediaHub.togglePlayPause()
+                                },
                             contentAlignment = Alignment.Center
                         ) {
-                            Icon(Icons.Filled.MusicNote, contentDescription = null, tint = musicAccent)
+                            Icon(
+                                imageVector = if (mediaState.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                                contentDescription = "Play/Pause",
+                                tint = Color.White,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                        IconButton(onClick = { onRequestHaptic(); app.mediaHub.skipNext() }, modifier = Modifier.size(30.dp)) {
+                            Icon(Icons.Filled.SkipNext, contentDescription = "Next", tint = Color.White, modifier = Modifier.size(19.dp))
                         }
                     }
-                    Spacer(Modifier.width(10.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(mediaState.title, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        Text(mediaState.artist, color = IslandColors.TextSecondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    IconButton(onClick = { onRequestHaptic(); app.mediaHub.skipPrevious() }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Filled.SkipPrevious, contentDescription = "Previous", tint = Color.White)
-                    }
-                    IconButton(
-                        onClick = {
-                            onRequestHaptic()
-                            if (mediaState.isPlaying) app.soundManager.playMusicPause() else app.soundManager.playMusicPlay()
-                            app.mediaHub.togglePlayPause()
-                        },
-                        modifier = Modifier.size(34.dp)
+
+                    // Slim glowing accent track progress line matching Liquid Glass mockups
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(3.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.14f))
                     ) {
-                        Icon(
-                            imageVector = if (mediaState.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                            contentDescription = "Play/Pause",
-                            tint = musicAccent
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(trackFraction.coerceAtLeast(0.02f))
+                                .height(3.dp)
+                                .clip(CircleShape)
+                                .background(musicAccent)
                         )
-                    }
-                    IconButton(onClick = { onRequestHaptic(); app.mediaHub.skipNext() }, modifier = Modifier.size(32.dp)) {
-                        Icon(Icons.Filled.SkipNext, contentDescription = "Next", tint = Color.White)
                     }
                 }
             }
@@ -1472,7 +1832,7 @@ fun MediumPillView(
                 ) {
                     Text(
                         text = TimerEngine.formatDuration(timerState.remainingMs),
-                        style = TextStyle(color = IslandColors.AccentOrange, fontSize = 22.sp, fontWeight = FontWeight.Light, fontFeatureSettings = "tnum")
+                        style = TextStyle(color = accentColor, fontSize = 22.sp, fontWeight = FontWeight.Light, fontFeatureSettings = "tnum")
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         IconButton(
@@ -1480,17 +1840,21 @@ fun MediumPillView(
                                 onRequestHaptic()
                                 if (timerState.isRunning) app.timerEngine.pauseTimer() else app.timerEngine.resumeTimer()
                             },
-                            modifier = Modifier.size(34.dp).clip(CircleShape).background(IslandColors.AccentOrange)
+                            modifier = Modifier.size(34.dp).clip(CircleShape).background(accentColor)
                         ) {
                             Icon(
                                 imageVector = if (timerState.isRunning) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                                 contentDescription = "Toggle timer",
-                                tint = Color.Black
+                                tint = Color.White
                             )
                         }
                         IconButton(
                             onClick = { onRequestHaptic(); app.timerEngine.cancelTimer() },
-                            modifier = Modifier.size(34.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.14f))
+                            modifier = Modifier
+                                .size(34.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF1A1417))
+                                .border(0.75.dp, Color.White.copy(alpha = 0.20f), CircleShape)
                         ) {
                             Icon(Icons.Filled.Close, contentDescription = "Cancel timer", tint = Color.White)
                         }
@@ -1543,6 +1907,7 @@ fun MediumPillView(
                 }
             }
         }
+        }
     }
 }
 
@@ -1562,8 +1927,11 @@ fun ExpandedIslandCard(
     effectiveStyle: AnimationStyle = AnimationStyle.FRUIT,
     elasticity: Float = settings.animationElasticity,
     durationScale: Float = settings.animationSpeed,
+    drawOwnChrome: Boolean = true,
+    headerAlphaProvider: () -> Float = { 1f },
     contentAlphaProvider: () -> Float = { 1f },
     contentOffsetYDProvider: () -> Float = { 0f },
+    chooserAlphaProvider: () -> Float = { 1f },
     onRequestHaptic: () -> Unit = {},
     onOpenAppSettings: () -> Unit = {}
 ) {
@@ -1575,23 +1943,29 @@ fun ExpandedIslandCard(
     val outerShape = RoundedCornerShape(IslandColors.ExpandedOuterRadius)
     val useGlass = effectivePillStyle != PillStyle.BLACK
 
+    val chromeMod = if (drawOwnChrome) {
+        Modifier.islandGlassChrome(
+            shape = outerShape,
+            pillStyle = effectivePillStyle,
+            glassDensity = settings.glassDensity,
+            reduceGlass = settings.reduceGlass,
+            solidFallback = settings.solidFallback,
+            accentColor = accentColor,
+            isHighlighted = state.isDragOverIsland,
+            backdrop = LocalAppBackdrop.current,
+            crossWindowBlurActive = crossWindowBlurSupported
+        )
+    } else {
+        Modifier
+    }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = IslandColors.ScreenHorizontalMargin)
+            .padding(horizontal = if (drawOwnChrome) IslandColors.ScreenHorizontalMargin else 0.dp)
             .widthIn(max = DeadZoneGeometry.FULL_MAX_WIDTH_DP.dp)
             .heightIn(max = DeadZoneGeometry.FULL_MAX_HEIGHT_DP.dp)
-            .islandGlassChrome(
-                shape = outerShape,
-                pillStyle = effectivePillStyle,
-                glassDensity = settings.glassDensity,
-                reduceGlass = settings.reduceGlass,
-                solidFallback = settings.solidFallback,
-                accentColor = accentColor,
-                isHighlighted = state.isDragOverIsland,
-                backdrop = LocalAppBackdrop.current,
-                crossWindowBlurActive = crossWindowBlurSupported
-            )
+            .then(chromeMod)
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -1614,7 +1988,12 @@ fun ExpandedIslandCard(
             modifier = Modifier
                 .fillMaxWidth()
                 .height((holeH + 10f).coerceAtLeast(42f).dp)
-                .padding(horizontal = 12.dp),
+                .padding(horizontal = 12.dp)
+                .graphicsLayer {
+                    val a = headerAlphaProvider()
+                    alpha = a
+                    translationY = (1f - a) * -5.dp.toPx()
+                },
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1743,68 +2122,27 @@ fun ExpandedIslandCard(
             Modifier
         }
 
-        val innerBlur = remember { Animatable(0f) }
-        LaunchedEffect(state.activeTab, settings.contentEffect, effectiveStyle) {
-            if (effectiveStyle != AnimationStyle.NONE && settings.contentEffect == ContentEffect.BLUR_IN) {
-                innerBlur.snapTo(8f)
-                innerBlur.animateTo(0f, MotionTokens.effectsFast(durationScale))
-            } else {
-                innerBlur.snapTo(0f)
-            }
-        }
-        val contentBlurMod = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && innerBlur.value > 0.4f) {
-            Modifier.blur(innerBlur.value.dp)
-        } else {
-            Modifier
-        }
-
-        // Compact content slot (hard-capped at 78dp so full card never exceeds 160dp)
+        // Compact content slot (hard-capped at 78dp so full card never exceeds 160dp, static blur kept)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f, fill = false)
                 .heightIn(max = maxPanelHeightForTab(state.activeTab))
                 .graphicsLayer {
-                    alpha = contentAlphaProvider()
+                    val a = contentAlphaProvider()
+                    val s = 0.96f + 0.04f * a
+                    alpha = a
+                    scaleX = s
+                    scaleY = s
                     translationY = contentOffsetYDProvider() * density
                 }
                 .then(expandedSwipeModifier)
-                .then(contentBlurMod)
         ) {
             AnimatedContent(
                 targetState = state.activeTab,
                 transitionSpec = {
-                    if (effectiveStyle == AnimationStyle.NONE) {
-                        fadeIn(tween(0)) togetherWith fadeOut(tween(0))
-                    } else {
-                        val fadeSpec = MotionTokens.contentCrossfadeTween(effectiveStyle, durationScale)
-                        val moveSpec = MotionTokens.spatialFast<IntOffset>(effectiveStyle, elasticity, durationScale)
-                        val scaleSpec = MotionTokens.spatialFast<Float>(effectiveStyle, elasticity, durationScale)
-                        val transition = when (settings.contentEffect) {
-                            ContentEffect.FADE -> fadeIn(fadeSpec) togetherWith fadeOut(tween(90))
-                            ContentEffect.SLIDE_UP -> (slideInVertically(moveSpec) { h -> (h * 0.16f).roundToInt() } + fadeIn(fadeSpec))
-                                .togetherWith(slideOutVertically(tween(95)) { h -> -(h * 0.08f).roundToInt() } + fadeOut(tween(80)))
-                            ContentEffect.SCALE_IN -> (scaleIn(initialScale = 0.88f, animationSpec = scaleSpec) + fadeIn(fadeSpec))
-                                .togetherWith(fadeOut(tween(85)))
-                            ContentEffect.BLUR_IN -> {
-                                val forward = targetState.ordinal >= initialState.ordinal
-                                val enterOffset = if (forward) { fullW: Int -> (fullW * 0.14f).roundToInt() } else { fullW: Int -> -(fullW * 0.14f).roundToInt() }
-                                val exitOffset = if (forward) { fullW: Int -> -(fullW * 0.10f).roundToInt() } else { fullW: Int -> (fullW * 0.10f).roundToInt() }
-                                (slideInHorizontally(moveSpec, initialOffsetX = enterOffset) +
-                                    fadeIn(fadeSpec) +
-                                    scaleIn(initialScale = 0.95f, animationSpec = scaleSpec))
-                                    .togetherWith(
-                                        slideOutHorizontally(tween(110), targetOffsetX = exitOffset) +
-                                            fadeOut(tween(95))
-                                    )
-                            }
-                        }
-                        transition.using(
-                            SizeTransform(clip = false) { _, _ ->
-                                MotionTokens.sizeTransformSpec(effectiveStyle, elasticity, durationScale)
-                            }
-                        )
-                    }
+                    MotionTokens.tabSwitchEnterTransition(effectiveStyle) togetherWith
+                        MotionTokens.tabSwitchExitTransition(effectiveStyle)
                 },
                 label = "island_tab_content"
             ) { tab ->
@@ -1854,7 +2192,7 @@ fun ExpandedIslandCard(
 
                     IslandTab.TIMER -> TimerStopwatchPanel(
                         state = timerState,
-                        accentColor = IslandColors.AccentOrange,
+                        accentColor = accentColor,
                         onPickerChanged = { h, m, s -> app.timerEngine.setPickerDuration(h, m, s) },
                         onStartTimer = { app.timerEngine.startTimer() },
                         onPauseTimer = { app.timerEngine.pauseTimer() },
@@ -1916,21 +2254,31 @@ fun ExpandedIslandCard(
         Spacer(Modifier.height(2.dp))
 
         // Locked Single-Row Bottom Chooser strictly honoring user-ordered settings.enabledTabs
-        BottomChooserBar(
-            settings = settings,
-            activeTab = state.activeTab,
-            isMoreOpen = state.isMoreRowOpen,
-            accentColor = accentColor,
-            useLightGlass = useGlass,
-            onSelectTab = { tab ->
-                onRequestHaptic()
-                app.islandController.selectTab(tab)
-            },
-            onToggleMore = {
-                onRequestHaptic()
-                app.islandController.toggleMoreRow()
-            }
-        )
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    val a = chooserAlphaProvider()
+                    alpha = a
+                    translationY = (1f - a) * 8.dp.toPx()
+                }
+        ) {
+            BottomChooserBar(
+                settings = settings,
+                activeTab = state.activeTab,
+                isMoreOpen = state.isMoreRowOpen,
+                accentColor = accentColor,
+                useLightGlass = useGlass,
+                onSelectTab = { tab ->
+                    onRequestHaptic()
+                    app.islandController.selectTab(tab)
+                },
+                onToggleMore = {
+                    onRequestHaptic()
+                    app.islandController.toggleMoreRow()
+                }
+            )
+        }
     }
 }
 
@@ -2027,11 +2375,11 @@ fun BottomChooserBar(
     val mainTabs = orderedActive.take(5)
     val moreTabs = orderedActive.drop(5)
 
-    // Never glass on glass: opaque elevated bar when outer island is Glass; translucent bar when outer is Solid Black
+    // Translucent Liquid Glass chooser capsule so the background wallpaper clearly shines through the entire card
     val chooserBg = if (!useLightGlass) {
-        Color(0x22FFFFFF)
+        Color(0x1EFFFFFF)
     } else {
-        Color(0xFF1A1B23)
+        Color(0x320C1220)
     }
 
     Box(
@@ -2041,7 +2389,17 @@ fun BottomChooserBar(
             .padding(horizontal = 10.dp)
             .clip(RoundedCornerShape(IslandColors.ExpandedInnerSheetRadius))
             .background(chooserBg)
-            .border(0.75.dp, Color.White.copy(alpha = 0.20f), RoundedCornerShape(IslandColors.ExpandedInnerSheetRadius))
+            .border(
+                width = 0.8.dp,
+                brush = androidx.compose.ui.graphics.Brush.horizontalGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.24f),
+                        accentColor.copy(alpha = 0.55f),
+                        Color.White.copy(alpha = 0.18f)
+                    )
+                ),
+                shape = RoundedCornerShape(IslandColors.ExpandedInnerSheetRadius)
+            )
             .padding(horizontal = 4.dp, vertical = 2.dp)
     ) {
         val showMore = isMoreOpen && moreTabs.isNotEmpty()
@@ -2108,13 +2466,13 @@ private fun ChooserChip(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val pressed by interactionSource.collectIsPressedAsState()
-    val scale by animateFloatAsState(
+    val scaleState = animateFloatAsState(
         targetValue = when {
-            pressed -> MotionTokens.BUTTON_PRESS_SCALE
-            selected -> 1.04f
+            pressed -> MotionTokens.TAP_SQUISH_SCALE
+            selected -> 1.03f
             else -> 1.0f
         },
-        animationSpec = spring(dampingRatio = 0.66f, stiffness = 680f),
+        animationSpec = MotionTokens.spatialFast(),
         label = "chip_scale"
     )
     Column(
@@ -2124,8 +2482,9 @@ private fun ChooserChip(
             .widthIn(min = 44.dp)
             .heightIn(min = 30.dp)
             .graphicsLayer {
-                scaleX = scale
-                scaleY = scale
+                val s = scaleState.value
+                scaleX = s
+                scaleY = s
             }
             .clip(RoundedCornerShape(12.dp))
             .background(if (selected) accentColor.copy(alpha = 0.24f) else Color.Transparent)
