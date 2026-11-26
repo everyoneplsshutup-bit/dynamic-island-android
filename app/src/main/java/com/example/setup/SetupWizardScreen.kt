@@ -51,6 +51,7 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -210,7 +211,19 @@ fun SetupWizardScreen(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Hero glowing crimson emblem with capsule pill matching everyoneplsshutup-setup-wizard.png
+                // Hero neutral capsule emblem
+                val accent = MaterialTheme.colorScheme.primary
+                var activeStep by remember(status) {
+                    mutableIntStateOf(
+                        when {
+                            !status.accessibilityGranted -> 0
+                            !status.notificationListenerGranted -> 1
+                            !status.overlayGranted -> 2
+                            !settings.calibrationConfirmed -> 3
+                            else -> 4
+                        }
+                    )
+                }
                 Box(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
@@ -220,13 +233,13 @@ fun SetupWizardScreen(
                         .background(
                             Brush.radialGradient(
                                 colors = listOf(
-                                    IslandColors.CrimsonBright.copy(alpha = 0.42f),
-                                    Color(0xFF2B070C),
-                                    Color(0xFF100407)
+                                    accent.copy(alpha = 0.34f),
+                                    IslandColors.ObsidianCardElevated,
+                                    IslandColors.ObsidianBg
                                 )
                             )
                         )
-                        .border(1.4.dp, IslandColors.CrimsonBorderStrong, RoundedCornerShape(24.dp))
+                        .border(1.4.dp, accent.copy(alpha = 0.65f), RoundedCornerShape(24.dp))
                 ) {
                     Box(
                         modifier = Modifier
@@ -234,7 +247,7 @@ fun SetupWizardScreen(
                             .height(22.dp)
                             .clip(CircleShape)
                             .background(Color.Black)
-                            .border(1.5.dp, IslandColors.CrimsonBright, CircleShape)
+                            .border(1.5.dp, accent, CircleShape)
                     )
                 }
 
@@ -249,6 +262,92 @@ fun SetupWizardScreen(
                     color = IslandColors.TextSecondary,
                     fontSize = 14.sp
                 )
+
+                // 5-Step Guided Progress Indicator (Accessibility -> Notifications -> Overlay -> Cutout -> Done)
+                val stepLabels = listOf("Access", "Notifs", "Overlay", "Cutout", "Done")
+                ObsidianGlassCard(contentPadding = PaddingValues(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        stepLabels.forEachIndexed { idx, label ->
+                            val stepDone = when (idx) {
+                                0 -> status.accessibilityGranted
+                                1 -> status.notificationListenerGranted
+                                2 -> status.overlayGranted
+                                3 -> settings.calibrationConfirmed
+                                else -> settings.wizardCompleted
+                            }
+                            val current = activeStep == idx
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .clickable { activeStep = idx }
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                Box(
+                                    contentAlignment = Alignment.Center,
+                                    modifier = Modifier
+                                        .size(26.dp)
+                                        .clip(CircleShape)
+                                        .background(
+                                            when {
+                                                stepDone -> IslandColors.AccentGreen.copy(alpha = 0.25f)
+                                                current -> accent.copy(alpha = 0.28f)
+                                                else -> Color.White.copy(alpha = 0.08f)
+                                            }
+                                        )
+                                        .border(
+                                            1.dp,
+                                            when {
+                                                stepDone -> IslandColors.AccentGreen
+                                                current -> accent
+                                                else -> Color.White.copy(alpha = 0.16f)
+                                            },
+                                            CircleShape
+                                        )
+                                ) {
+                                    if (stepDone) {
+                                        Icon(Icons.Filled.Check, contentDescription = null, tint = IslandColors.AccentGreen, modifier = Modifier.size(14.dp))
+                                    } else {
+                                        Text("${idx + 1}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = label,
+                                    color = if (current) Color.White else IslandColors.TextSecondary,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (current) FontWeight.Bold else FontWeight.Normal,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Step ${activeStep + 1} of 5 · ${stepLabels[activeStep]}",
+                            color = accent,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        TextButton(
+                            onClick = {
+                                if (activeStep < 4) activeStep++ else onDone()
+                            },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+                        ) {
+                            Text("Skip", color = IslandColors.TextSecondary, fontSize = 12.sp)
+                        }
+                    }
+                }
 
                 Spacer(Modifier.height(4.dp))
 
@@ -425,7 +524,7 @@ fun SetupWizardScreen(
                             }
                             runCatching { context.startActivity(i) }
                         },
-                        border = BorderStroke(1.dp, IslandColors.CrimsonBorder),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.50f)),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
                     ) {
                         Text("Open App Info", fontSize = 12.sp)
@@ -489,6 +588,7 @@ private fun WizardPermissionRow(
     testTag: String,
     onAction: () -> Unit
 ) {
+    val accent = MaterialTheme.colorScheme.primary
     ObsidianGlassCard(
         highlighted = !granted,
         contentPadding = PaddingValues(14.dp),
@@ -497,7 +597,7 @@ private fun WizardPermissionRow(
         Row(verticalAlignment = Alignment.CenterVertically) {
             CrimsonSquircleIcon(
                 icon = if (granted) Icons.Filled.Check else icon,
-                tint = if (granted) IslandColors.AccentGreen else IslandColors.CrimsonBright,
+                tint = if (granted) IslandColors.AccentGreen else accent,
                 size = 44.dp
             )
             Spacer(Modifier.width(12.dp))
@@ -510,12 +610,12 @@ private fun WizardPermissionRow(
                 onClick = onAction,
                 shape = CircleShape,
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (granted) IslandColors.AccentGreen.copy(alpha = 0.22f) else IslandColors.CrimsonPrimary,
+                    containerColor = if (granted) IslandColors.AccentGreen.copy(alpha = 0.22f) else accent,
                     contentColor = if (granted) IslandColors.AccentGreen else Color.White
                 ),
                 border = BorderStroke(
                     1.dp,
-                    if (granted) IslandColors.AccentGreen.copy(alpha = 0.65f) else IslandColors.CrimsonGlow.copy(alpha = 0.7f)
+                    if (granted) IslandColors.AccentGreen.copy(alpha = 0.65f) else accent.copy(alpha = 0.72f)
                 ),
                 contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
                 modifier = Modifier.height(38.dp).testTag(testTag)
@@ -537,6 +637,7 @@ private fun MiuiChecklistCard(
     buttonLabel: String?,
     onClick: () -> Unit
 ) {
+    val accent = MaterialTheme.colorScheme.primary
     ObsidianGlassCard(contentPadding = PaddingValues(14.dp), modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
@@ -548,7 +649,7 @@ private fun MiuiChecklistCard(
                 OutlinedButton(
                     onClick = onClick,
                     shape = CircleShape,
-                    border = BorderStroke(1.dp, IslandColors.CrimsonBorder),
+                    border = BorderStroke(1.dp, accent.copy(alpha = 0.55f)),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White),
                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                 ) {

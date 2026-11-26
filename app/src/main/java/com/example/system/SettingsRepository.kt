@@ -6,6 +6,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.floatPreferencesKey
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -31,8 +32,8 @@ enum class PillSizePreset(val label: String, val slotWidthDp: Float) {
 }
 
 enum class WhenIdleMode(val label: String, val subtitle: String) {
-    CAMERA_ONLY("Camera Only", "Thin minimal border around the front camera"),
-    INFO_PILL("Info Pill", "Show two quiet widgets left & right of the camera"),
+    CAMERA_ONLY("Camera Only", "Compact pure-black pill hugging the front camera"),
+    INFO_PILL("Info Pill", "Show quiet offline widgets left & right of the camera"),
     HIDDEN("Hidden", "Completely invisible until an activity or alert arrives")
 }
 
@@ -42,14 +43,15 @@ enum class MiniCapsuleSize(val label: String, val widthDp: Float, val heightDp: 
 }
 
 enum class AccentTheme(val label: String, val swatchHex: Long) {
-    BLUE("Blue", 0xFF1E90FFL),
-    PURPLE("Purple", 0xFFA855F7L),
-    CYAN("Cyan", 0xFF00E5FFL),
-    ORANGE("Amber", 0xFFFF9F0AL),
-    CRIMSON("Crimson", 0xFFFF1E2DL),
-    GREEN("Green", 0xFF30D158L),
+    BLUE("Blue", 0xFF5E9EFFL),
+    PURPLE("Purple", 0xFFB085F5L),
+    CYAN("Cyan", 0xFF4DD0E1L),
+    ORANGE("Amber", 0xFFFFB74DL),
+    CRIMSON("Coral", 0xFFE57373L),
+    GREEN("Mint", 0xFF66BB6AL),
     DYNAMIC("Auto", 0xFF64D2FFL)
 }
+
 enum class SpringFeel { SNAPPY, BALANCED, GENTLE }
 
 enum class AnimationStyle(val label: String, val subtitle: String) {
@@ -77,6 +79,10 @@ enum class PillSwipeAction(val label: String) {
     TRACK_OR_NOTIF("Track / Cycle Notif"),
     VOLUME("Media Volume"),
     SEARCH("Open Search"),
+    EXPAND("Expand Island"),
+    COLLAPSE("Collapse / Dismiss"),
+    TORCH("Toggle Torch"),
+    OPEN_SHELF("Open Shelf"),
     NONE("Off")
 }
 
@@ -98,7 +104,7 @@ enum class IdleWidgetType(val label: String) {
     DATE("Date"),
     NEXT_ALARM("Next Alarm"),
     UNREAD_COUNT("Unread Count"),
-    NETWORK("Network"),
+    DND_STATUS("DND Status"),
     NET_SPEED("Net Speed"),
     CLOCK("Clock"),
     BATTERY_RING("Battery Ring"),
@@ -117,10 +123,10 @@ enum class EventGroup(val label: String) {
 }
 
 enum class EventKind(val label: String, val subtitle: String, val group: EventGroup) {
-    CHARGING("Charging Mini Capsule", "Show transient battery level & wattage capsule when plugged in", EventGroup.SYSTEM),
-    LOW_BATTERY("Low Battery Warning", "Transient warning at 20%, 15%, and 10% + red glyph <=15%", EventGroup.SYSTEM),
+    CHARGING("Charging Mini Capsule", "Show single-value live battery & wattage glimpse when plugged in", EventGroup.SYSTEM),
+    LOW_BATTERY("Low Battery Warning", "Transient warning at 20%, 15%, and 10% + subtle alert", EventGroup.SYSTEM),
     TIMER("Timer & Sleep", "Show countdown ring in compact/split pill", EventGroup.TIMERS_SHELF),
-    MUSIC("Music Playback", "Show chosen music player session in island pill", EventGroup.MUSIC),
+    MUSIC("Music Playback", "Show art + animated visualizer in compact pill", EventGroup.MUSIC),
     NOTIFICATIONS("Notifications", "Show incoming notification preview pill (app icon + name only)", EventGroup.NOTIFICATIONS),
     VAULT("Shelf Expiry & Capture", "Show confirmation & expiry alerts from 10-min Shelf", EventGroup.TIMERS_SHELF),
     VOICE_MEMO("Voice Memo", "Show live recording elapsed badge in island", EventGroup.SYSTEM)
@@ -138,14 +144,14 @@ enum class IslandTab(
     val isMainRow: Boolean
 ) {
     SEARCH("Search", "Apps, contacts, notes & inline math", true),
-    MUSIC("Music", "On-device media player & local lyrics", true),
+    MUSIC("Music", "Media controls, local & LRCLIB lyrics", true),
     TIMER("Timer", "Countdown rings, sleep dial & stopwatch", true),
-    TOOLS("Tools", "Torch beam, Keep Awake, brightness & OCR", true),
+    TOOLS("Tools", "Control Centre sliders, toggles, recorder & OCR", true),
     VAULT("Shelf", "10-minute auto-expiring photo shelf", true),
     CLIPS("Clips", "Foreground-only saved clip history", false),
     NOTES("Notes", "On-device auto-saved quick notes", false),
     MEMO("Memo", "One-tap voice memo recorder", false),
-    ALERTS("Alerts", "App-grouped notifications & activity alerts", false)
+    ALERTS("Alerts", "Searchable, app-grouped inbox & OTP copy", false)
 }
 
 enum class QuickToggleType(val label: String) {
@@ -173,8 +179,11 @@ data class IslandSettings(
     val accentTheme: AccentTheme = AccentTheme.BLUE,
     val rotateAlbumArt: Boolean = true,
     val purpleSidebarTheme: Boolean = false,
+    val appleWidthIdlePill: Boolean = false,
+    val energyRingEnabled: Boolean = true,
+    val privacyDotsEnabled: Boolean = true,
 
-    // 2. Motion
+    // 2. Motion & Audio
     val animationSpeed: Float = 1.0f,
     val animationStyle: AnimationStyle = AnimationStyle.FRUIT,
     val openingEffect: OpeningEffect = OpeningEffect.LIQUID,
@@ -183,11 +192,16 @@ data class IslandSettings(
     val springFeel: SpringFeel = SpringFeel.BALANCED,
     val twoStageOpen: Boolean = true,
     val reducedMotion: Boolean = false,
+    val metaballRenderEffect: Boolean = true,
     val hapticsStrength: HapticsStrength = HapticsStrength.LIGHT,
     val soundEnabled: Boolean = true,
     val soundVolume: Float = 0.75f,
+    val sfxMorphEnabled: Boolean = false,
     val pillSwipeLeftGesture: PillSwipeAction = PillSwipeAction.TRACK_OR_NOTIF,
     val pillSwipeRightGesture: PillSwipeAction = PillSwipeAction.TRACK_OR_NOTIF,
+    val pillSwipeUpGesture: PillSwipeAction = PillSwipeAction.COLLAPSE,
+    val pillSwipeDownGesture: PillSwipeAction = PillSwipeAction.EXPAND,
+    val gestureSensitivity: Float = 1.0f,
     val expandedSwipeLeftGesture: ExpandedSwipeAction = ExpandedSwipeAction.DISMISS,
     val expandedSwipeRightGesture: ExpandedSwipeAction = ExpandedSwipeAction.NEXT_NOTIFICATION,
     val expandedLongPressGesture: ExpandedSwipeAction = ExpandedSwipeAction.COLLAPSE,
@@ -209,11 +223,20 @@ data class IslandSettings(
     val idleRightWidget: IdleWidgetType = IdleWidgetType.BATTERY,
     val lockScreenPreset: LockScreenPreset = LockScreenPreset.MINIMAL,
     val alertsDwellMs: Long = 2000L,
-    val reelOverlayEnabled: Boolean = true,
+    val reelOverlayEnabled: Boolean = false,
     val swipeUpDismissEnabled: Boolean = true,
     val hideNotifInForegroundApp: Boolean = true,
+    val notifInboxGrouped: Boolean = true,
 
-    // 4. Features (Hard cap: max 8 enabled on island)
+    // 4. Music, Lyrics & Mascot
+    val lyricsFromInternet: Boolean = true,
+    val lyricsOffsetMs: Int = 0,
+    val expandedLyricsMarquee: Boolean = false,
+    val mochiPetEnabled: Boolean = true,
+    val mochiHiddenUntilMs: Long = 0L,
+    val mochiQuietHoursAnimate: Boolean = false,
+
+    // 5. Features (Hard cap: max 8 enabled on island)
     val enabledTabs: List<IslandTab> = listOf(
         IslandTab.SEARCH,
         IslandTab.MUSIC,
@@ -252,7 +275,7 @@ data class IslandSettings(
     val tapGesture: IslandGesture = IslandGesture.OPEN_APP,
     val longPressGesture: IslandGesture = IslandGesture.EXPAND,
 
-    // 5. Privacy (HARD CONSTRAINT: screenReadingEnabled defaults to false)
+    // 6. Privacy (HARD CONSTRAINT: screenReadingEnabled defaults to false)
     val screenReadingEnabled: Boolean = false,
     val ocrTierBEnabled: Boolean = false,
     val vaultAutoCapture3Finger: Boolean = true,
@@ -309,6 +332,9 @@ class SettingsRepository(private val context: Context) {
         val ACCENT_THEME = stringPreferencesKey("accent_theme")
         val ROTATE_ALBUM_ART = booleanPreferencesKey("rotate_album_art")
         val PURPLE_SIDEBAR_THEME = booleanPreferencesKey("purple_sidebar_theme")
+        val APPLE_WIDTH_IDLE_PILL = booleanPreferencesKey("apple_width_idle_pill")
+        val ENERGY_RING_ENABLED = booleanPreferencesKey("energy_ring_enabled")
+        val PRIVACY_DOTS_ENABLED = booleanPreferencesKey("privacy_dots_enabled")
 
         val ANIMATION_SPEED = floatPreferencesKey("animation_speed")
         val ANIMATION_STYLE = stringPreferencesKey("animation_style")
@@ -318,11 +344,16 @@ class SettingsRepository(private val context: Context) {
         val SPRING_FEEL = stringPreferencesKey("spring_feel")
         val TWO_STAGE_OPEN = booleanPreferencesKey("two_stage_open")
         val REDUCED_MOTION = booleanPreferencesKey("reduced_motion")
+        val METABALL_RENDER_EFFECT = booleanPreferencesKey("metaball_render_effect")
         val HAPTICS_STRENGTH = stringPreferencesKey("haptics_strength")
         val SOUND_ENABLED = booleanPreferencesKey("sound_enabled")
         val SOUND_VOLUME = floatPreferencesKey("sound_volume")
+        val SFX_MORPH_ENABLED = booleanPreferencesKey("sfx_morph_enabled")
         val PILL_SWIPE_LEFT = stringPreferencesKey("pill_swipe_left")
         val PILL_SWIPE_RIGHT = stringPreferencesKey("pill_swipe_right")
+        val PILL_SWIPE_UP = stringPreferencesKey("pill_swipe_up")
+        val PILL_SWIPE_DOWN = stringPreferencesKey("pill_swipe_down")
+        val GESTURE_SENSITIVITY = floatPreferencesKey("gesture_sensitivity")
         val EXPANDED_SWIPE_LEFT = stringPreferencesKey("expanded_swipe_left")
         val EXPANDED_SWIPE_RIGHT = stringPreferencesKey("expanded_swipe_right")
         val EXPANDED_LONG_PRESS = stringPreferencesKey("expanded_long_press")
@@ -346,7 +377,15 @@ class SettingsRepository(private val context: Context) {
         val REEL_OVERLAY_ENABLED = booleanPreferencesKey("reel_overlay_enabled")
         val SWIPE_UP_DISMISS_ENABLED = booleanPreferencesKey("swipe_up_dismiss_enabled")
         val HIDE_NOTIF_IN_FG = booleanPreferencesKey("hide_notif_in_fg")
+        val NOTIF_INBOX_GROUPED = booleanPreferencesKey("notif_inbox_grouped")
         val PER_EVENT_CONFIG = stringPreferencesKey("per_event_config_json")
+
+        val LYRICS_FROM_INTERNET = booleanPreferencesKey("lyrics_from_internet")
+        val LYRICS_OFFSET_MS = intPreferencesKey("lyrics_offset_ms")
+        val EXPANDED_LYRICS_MARQUEE = booleanPreferencesKey("expanded_lyrics_marquee")
+        val MOCHI_PET_ENABLED = booleanPreferencesKey("mochi_pet_enabled")
+        val MOCHI_HIDDEN_UNTIL_MS = longPreferencesKey("mochi_hidden_until_ms")
+        val MOCHI_QUIET_HOURS_ANIMATE = booleanPreferencesKey("mochi_quiet_hours_animate")
 
         val ENABLED_TABS = stringPreferencesKey("enabled_tabs_json")
         val MUSIC_ENABLED = booleanPreferencesKey("music_enabled")
@@ -388,6 +427,16 @@ class SettingsRepository(private val context: Context) {
             null -> default.pillStyle
             else -> runCatching { PillStyle.valueOf(raw) }.getOrNull() ?: default.pillStyle
         }
+        val parsedLeftWidget = when (val raw = prefs[Keys.IDLE_LEFT_WIDGET]) {
+            "NETWORK" -> IdleWidgetType.DND_STATUS
+            null -> default.idleLeftWidget
+            else -> runCatching { IdleWidgetType.valueOf(raw) }.getOrNull() ?: default.idleLeftWidget
+        }
+        val parsedRightWidget = when (val raw = prefs[Keys.IDLE_RIGHT_WIDGET]) {
+            "NETWORK" -> IdleWidgetType.DND_STATUS
+            null -> default.idleRightWidget
+            else -> runCatching { IdleWidgetType.valueOf(raw) }.getOrNull() ?: default.idleRightWidget
+        }
         IslandSettings(
             islandEnabled = prefs[Keys.ISLAND_ENABLED] ?: default.islandEnabled,
             pillStyle = parsedPillStyle,
@@ -398,6 +447,9 @@ class SettingsRepository(private val context: Context) {
             accentTheme = prefs[Keys.ACCENT_THEME]?.let { runCatching { AccentTheme.valueOf(it) }.getOrNull() } ?: default.accentTheme,
             rotateAlbumArt = prefs[Keys.ROTATE_ALBUM_ART] ?: default.rotateAlbumArt,
             purpleSidebarTheme = prefs[Keys.PURPLE_SIDEBAR_THEME] ?: default.purpleSidebarTheme,
+            appleWidthIdlePill = prefs[Keys.APPLE_WIDTH_IDLE_PILL] ?: default.appleWidthIdlePill,
+            energyRingEnabled = prefs[Keys.ENERGY_RING_ENABLED] ?: default.energyRingEnabled,
+            privacyDotsEnabled = prefs[Keys.PRIVACY_DOTS_ENABLED] ?: default.privacyDotsEnabled,
 
             animationSpeed = prefs[Keys.ANIMATION_SPEED] ?: default.animationSpeed,
             animationStyle = prefs[Keys.ANIMATION_STYLE]?.let { runCatching { AnimationStyle.valueOf(it) }.getOrNull() } ?: default.animationStyle,
@@ -407,11 +459,16 @@ class SettingsRepository(private val context: Context) {
             springFeel = prefs[Keys.SPRING_FEEL]?.let { runCatching { SpringFeel.valueOf(it) }.getOrNull() } ?: default.springFeel,
             twoStageOpen = prefs[Keys.TWO_STAGE_OPEN] ?: default.twoStageOpen,
             reducedMotion = prefs[Keys.REDUCED_MOTION] ?: default.reducedMotion,
+            metaballRenderEffect = prefs[Keys.METABALL_RENDER_EFFECT] ?: default.metaballRenderEffect,
             hapticsStrength = prefs[Keys.HAPTICS_STRENGTH]?.let { runCatching { HapticsStrength.valueOf(it) }.getOrNull() } ?: default.hapticsStrength,
             soundEnabled = prefs[Keys.SOUND_ENABLED] ?: default.soundEnabled,
             soundVolume = (prefs[Keys.SOUND_VOLUME] ?: default.soundVolume).coerceIn(0f, 1f),
+            sfxMorphEnabled = prefs[Keys.SFX_MORPH_ENABLED] ?: default.sfxMorphEnabled,
             pillSwipeLeftGesture = prefs[Keys.PILL_SWIPE_LEFT]?.let { runCatching { PillSwipeAction.valueOf(it) }.getOrNull() } ?: default.pillSwipeLeftGesture,
             pillSwipeRightGesture = prefs[Keys.PILL_SWIPE_RIGHT]?.let { runCatching { PillSwipeAction.valueOf(it) }.getOrNull() } ?: default.pillSwipeRightGesture,
+            pillSwipeUpGesture = prefs[Keys.PILL_SWIPE_UP]?.let { runCatching { PillSwipeAction.valueOf(it) }.getOrNull() } ?: default.pillSwipeUpGesture,
+            pillSwipeDownGesture = prefs[Keys.PILL_SWIPE_DOWN]?.let { runCatching { PillSwipeAction.valueOf(it) }.getOrNull() } ?: default.pillSwipeDownGesture,
+            gestureSensitivity = (prefs[Keys.GESTURE_SENSITIVITY] ?: default.gestureSensitivity).coerceIn(0.5f, 1.5f),
             expandedSwipeLeftGesture = prefs[Keys.EXPANDED_SWIPE_LEFT]?.let { runCatching { ExpandedSwipeAction.valueOf(it) }.getOrNull() } ?: default.expandedSwipeLeftGesture,
             expandedSwipeRightGesture = prefs[Keys.EXPANDED_SWIPE_RIGHT]?.let { runCatching { ExpandedSwipeAction.valueOf(it) }.getOrNull() } ?: default.expandedSwipeRightGesture,
             expandedLongPressGesture = prefs[Keys.EXPANDED_LONG_PRESS]?.let { runCatching { ExpandedSwipeAction.valueOf(it) }.getOrNull() } ?: default.expandedLongPressGesture,
@@ -428,13 +485,21 @@ class SettingsRepository(private val context: Context) {
             companionPosition = prefs[Keys.COMPANION_POSITION]?.let { runCatching { CompanionPosition.valueOf(it) }.getOrNull() } ?: default.companionPosition,
             whenIdleMode = prefs[Keys.WHEN_IDLE_MODE]?.let { runCatching { WhenIdleMode.valueOf(it) }.getOrNull() } ?: default.whenIdleMode,
             idleWidget = prefs[Keys.IDLE_WIDGET]?.let { runCatching { IdleWidgetType.valueOf(it) }.getOrNull() } ?: default.idleWidget,
-            idleLeftWidget = prefs[Keys.IDLE_LEFT_WIDGET]?.let { runCatching { IdleWidgetType.valueOf(it) }.getOrNull() } ?: default.idleLeftWidget,
-            idleRightWidget = prefs[Keys.IDLE_RIGHT_WIDGET]?.let { runCatching { IdleWidgetType.valueOf(it) }.getOrNull() } ?: default.idleRightWidget,
+            idleLeftWidget = parsedLeftWidget,
+            idleRightWidget = parsedRightWidget,
             lockScreenPreset = prefs[Keys.LOCK_SCREEN_PRESET]?.let { runCatching { LockScreenPreset.valueOf(it) }.getOrNull() } ?: default.lockScreenPreset,
             alertsDwellMs = (prefs[Keys.ALERTS_DWELL_MS] ?: default.alertsDwellMs).coerceIn(1500L, 10000L),
             reelOverlayEnabled = prefs[Keys.REEL_OVERLAY_ENABLED] ?: default.reelOverlayEnabled,
             swipeUpDismissEnabled = prefs[Keys.SWIPE_UP_DISMISS_ENABLED] ?: default.swipeUpDismissEnabled,
             hideNotifInForegroundApp = prefs[Keys.HIDE_NOTIF_IN_FG] ?: default.hideNotifInForegroundApp,
+            notifInboxGrouped = prefs[Keys.NOTIF_INBOX_GROUPED] ?: default.notifInboxGrouped,
+
+            lyricsFromInternet = prefs[Keys.LYRICS_FROM_INTERNET] ?: default.lyricsFromInternet,
+            lyricsOffsetMs = (prefs[Keys.LYRICS_OFFSET_MS] ?: default.lyricsOffsetMs).coerceIn(-5000, 5000),
+            expandedLyricsMarquee = prefs[Keys.EXPANDED_LYRICS_MARQUEE] ?: default.expandedLyricsMarquee,
+            mochiPetEnabled = prefs[Keys.MOCHI_PET_ENABLED] ?: default.mochiPetEnabled,
+            mochiHiddenUntilMs = prefs[Keys.MOCHI_HIDDEN_UNTIL_MS] ?: default.mochiHiddenUntilMs,
+            mochiQuietHoursAnimate = prefs[Keys.MOCHI_QUIET_HOURS_ANIMATE] ?: default.mochiQuietHoursAnimate,
 
             enabledTabs = prefs[Keys.ENABLED_TABS]?.let { raw ->
                 runCatching {
@@ -505,6 +570,9 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.ACCENT_THEME] = s.accentTheme.name
             prefs[Keys.ROTATE_ALBUM_ART] = s.rotateAlbumArt
             prefs[Keys.PURPLE_SIDEBAR_THEME] = s.purpleSidebarTheme
+            prefs[Keys.APPLE_WIDTH_IDLE_PILL] = s.appleWidthIdlePill
+            prefs[Keys.ENERGY_RING_ENABLED] = s.energyRingEnabled
+            prefs[Keys.PRIVACY_DOTS_ENABLED] = s.privacyDotsEnabled
 
             prefs[Keys.ANIMATION_SPEED] = s.animationSpeed.coerceIn(0.5f, 1.8f)
             prefs[Keys.ANIMATION_STYLE] = s.animationStyle.name
@@ -514,11 +582,16 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.SPRING_FEEL] = s.springFeel.name
             prefs[Keys.TWO_STAGE_OPEN] = s.twoStageOpen
             prefs[Keys.REDUCED_MOTION] = s.reducedMotion
+            prefs[Keys.METABALL_RENDER_EFFECT] = s.metaballRenderEffect
             prefs[Keys.HAPTICS_STRENGTH] = s.hapticsStrength.name
             prefs[Keys.SOUND_ENABLED] = s.soundEnabled
             prefs[Keys.SOUND_VOLUME] = s.soundVolume.coerceIn(0f, 1f)
+            prefs[Keys.SFX_MORPH_ENABLED] = s.sfxMorphEnabled
             prefs[Keys.PILL_SWIPE_LEFT] = s.pillSwipeLeftGesture.name
             prefs[Keys.PILL_SWIPE_RIGHT] = s.pillSwipeRightGesture.name
+            prefs[Keys.PILL_SWIPE_UP] = s.pillSwipeUpGesture.name
+            prefs[Keys.PILL_SWIPE_DOWN] = s.pillSwipeDownGesture.name
+            prefs[Keys.GESTURE_SENSITIVITY] = s.gestureSensitivity.coerceIn(0.5f, 1.5f)
             prefs[Keys.EXPANDED_SWIPE_LEFT] = s.expandedSwipeLeftGesture.name
             prefs[Keys.EXPANDED_SWIPE_RIGHT] = s.expandedSwipeRightGesture.name
             prefs[Keys.EXPANDED_LONG_PRESS] = s.expandedLongPressGesture.name
@@ -542,7 +615,15 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.REEL_OVERLAY_ENABLED] = s.reelOverlayEnabled
             prefs[Keys.SWIPE_UP_DISMISS_ENABLED] = s.swipeUpDismissEnabled
             prefs[Keys.HIDE_NOTIF_IN_FG] = s.hideNotifInForegroundApp
+            prefs[Keys.NOTIF_INBOX_GROUPED] = s.notifInboxGrouped
             prefs[Keys.PER_EVENT_CONFIG] = json.encodeToString(s.perEventConfig)
+
+            prefs[Keys.LYRICS_FROM_INTERNET] = s.lyricsFromInternet
+            prefs[Keys.LYRICS_OFFSET_MS] = s.lyricsOffsetMs.coerceIn(-5000, 5000)
+            prefs[Keys.EXPANDED_LYRICS_MARQUEE] = s.expandedLyricsMarquee
+            prefs[Keys.MOCHI_PET_ENABLED] = s.mochiPetEnabled
+            prefs[Keys.MOCHI_HIDDEN_UNTIL_MS] = s.mochiHiddenUntilMs
+            prefs[Keys.MOCHI_QUIET_HOURS_ANIMATE] = s.mochiQuietHoursAnimate
 
             prefs[Keys.ENABLED_TABS] = json.encodeToString(s.enabledTabs.take(IslandSettings.MAX_ISLAND_FEATURES))
             prefs[Keys.MUSIC_ENABLED] = s.musicEnabled
@@ -638,7 +719,7 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun importBackupJson(rawJson: String): Result<Unit> = runCatching {
         val decoded = json.decodeFromString<IslandSettings>(rawJson)
-        writeAll(decoded.copy(screenReadingEnabled = false)) // Enforce safe default on restore
+        writeAll(decoded.copy(screenReadingEnabled = false))
     }
 
     suspend fun resetSettings() {

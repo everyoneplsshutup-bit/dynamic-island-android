@@ -1,11 +1,13 @@
 package com.example.ocr
 
+import android.os.Build
 import android.view.HapticFeedbackConstants
+import android.widget.ImageView
+import android.widget.Magnifier
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
-import com.example.ui.theme.MotionTokens
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,15 +32,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.SelectAll
-import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -57,25 +60,23 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.example.island.OcrSelectionState
 import com.example.island.OcrTextToken
 import com.example.ui.theme.IslandColors
+import com.example.ui.theme.MotionTokens
 import kotlin.math.abs
-import kotlin.math.hypot
-import kotlin.math.roundToInt
 
 /**
- * Flicker-free iOS + native Android Blue OCR Selection Overlay:
- * - Zero global StateFlow writes during handle drags: local draft state drives graphicsLayer & Canvas
- *   and commits back via onUpdateRange only when the resolved word boundary actually changes.
- * - pointerInput is keyed ONLY on tokens so gesture detection never restarts mid-drag.
- * - Screen-anchored finger tracking eliminates the moving-origin oscillation loop.
- * - Line-aware word-boundary snapping + 22x22 dp teardrop handles + clamped Magnifier Loupe.
- * - Single tap = select word / cycle word->sentence->all / dismiss outside; triple-tap = sentence.
- * - Copy executes ONLY when user explicitly taps Copy in the floating callout menu.
+ * Tier B Frozen-Frame & Word-Token Selection Overlay (§5):
+ * - Renders frozen capture bitmap in an ImageView when available so underlying screen never scrolls mid-drag.
+ * - Non-touchable Canvas draws translucent 0x6633B5E5 highlights + vertical edge bars.
+ * - Separate 48 dp teardrop handles drive handle dragging cleanly.
+ * - Uses platform android.widget.Magnifier (API 28+) anchored to the frozen ImageView during drag,
+ *   with a Compose snippet loupe fallback when no frozen bitmap / API < 28.
+ * - Floating Callout Menu (Copy / All / Close) positioned strictly CLEAR of the selected text box.
  */
 @Composable
 fun OcrSelectionOverlay(
@@ -84,7 +85,7 @@ fun OcrSelectionOverlay(
     onFinishDrag: () -> Unit,
     onSelectAll: () -> Unit,
     onCopy: (String) -> Unit,
-    onShare: (String) -> Unit,
+    @Suppress("UNUSED_PARAMETER") onShare: (String) -> Unit,
     onDismiss: () -> Unit,
     onHapticTick: () -> Unit
 ) {
@@ -92,6 +93,26 @@ fun OcrSelectionOverlay(
     val view = LocalView.current
     val tokens = selection.tokens
     if (tokens.isEmpty()) return
+
+    val frozenBitmap = remember(tokens) { OcrBitmapHolder.getFrozenFrame() }
+    var imageViewRef by remember { mutableStateOf<ImageView?>(null) }
+    val magnifier = remember(imageViewRef, frozenBitmap) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && imageViewRef != null && frozenBitmap != null) {
+            runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    Magnifier.Builder(imageViewRef!!).setDefaultSourceToMagnifierOffset(0, -180).build()
+                } else {
+                    @Suppress("DEPRECATION")
+                    Magnifier(imageViewRef!!)
+                }
+            }.getOrNull()
+        } else null
+    }
+    DisposableEffect(magnifier) {
+        onDispose {
+            runCatching { magnifier?.dismiss() }
+        }
+    }
 
     var draftStartIdx by remember(tokens) {
         mutableIntStateOf(selection.startTokenIndex.coerceIn(0, tokens.lastIndex))
@@ -104,9 +125,18 @@ fun OcrSelectionOverlay(
     var dragFingerY by remember(tokens) { mutableFloatStateOf(selection.anchorY) }
     var lastTapTimeMs by remember { mutableLongStateOf(0L) }
     var tapStreak by remember { mutableIntStateOf(0) }
-    var cycleTier by remember(tokens) { mutableIntStateOf(0) } // 0=word, 1=sentence, 2=all
+    var cycleTier by remember(tokens) { mutableIntStateOf(0) }
 
-    // Sync external range updates (e.g. Select All button) only when user is NOT actively dragging
+    LaunchedEffect(activeHandle, dragFingerX, dragFingerY, magnifier) {
+        if (magnifier != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            if (activeHandle != 0) {
+                runCatching { magnifier.show(dragFingerX, dragFingerY) }
+            } else {
+                runCatching { magnifier.dismiss() }
+            }
+        }
+    }
+
     LaunchedEffect(tokens, selection.startTokenIndex, selection.endTokenIndex) {
         if (activeHandle == 0) {
             draftStartIdx = selection.startTokenIndex.coerceIn(0, tokens.lastIndex)
@@ -134,76 +164,13 @@ fun OcrSelectionOverlay(
     }
 
     val selectedText = remember(tokens, selection.fullText, startIdx, endIdx) {
-        val cStart = tokens[startIdx].startChar.coerceIn(0, selection.fullText.length)
-        val cEnd = tokens[endIdx].endChar.coerceIn(cStart, selection.fullText.length)
-        selection.fullText.substring(cStart, cEnd).trim().ifEmpty { selection.fullText }
+        SelectionCoordinateMapper.extractSelectedText(selection.fullText, tokens, startIdx, endIdx)
+            .ifEmpty { selection.fullText }
     }
 
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.22f))
-            .pointerInput(tokens) {
-                val handleTouchPx = with(density) { 44.dp.toPx() }
-                detectTapGestures(
-                    onTap = { pos ->
-                        val hitTokIdx = findNearestTokenIndexLineAware(
-                            tokens = tokens,
-                            x = pos.x,
-                            y = pos.y,
-                            maxDistancePx = handleTouchPx * 1.35f
-                        )
-                        if (hitTokIdx < 0 && !selection.elementBounds.contains(pos.x.toInt(), pos.y.toInt())) {
-                            currentOnDismiss()
-                            return@detectTapGestures
-                        }
-                        if (hitTokIdx >= 0) {
-                            val now = System.currentTimeMillis()
-                            tapStreak = if (now - lastTapTimeMs < 380L) (tapStreak + 1).coerceAtMost(3) else 1
-                            lastTapTimeMs = now
-                            triggerHandleHaptic()
-
-                            val tappedInsideCurrent = hitTokIdx in currentStartState..currentEndState
-                            when {
-                                tapStreak >= 3 -> {
-                                    // Triple-tap selects sentence around hit token
-                                    val (sS, sE) = findSentenceRange(tokens, hitTokIdx)
-                                    draftStartIdx = sS
-                                    draftEndIdx = sE
-                                    cycleTier = 1
-                                    currentOnUpdateRange(sS, sE, 0, pos.x, pos.y)
-                                }
-                                tapStreak == 2 -> {
-                                    // Double-tap snaps cleanly to the tapped word
-                                    draftStartIdx = hitTokIdx
-                                    draftEndIdx = hitTokIdx
-                                    cycleTier = 0
-                                    currentOnUpdateRange(hitTokIdx, hitTokIdx, 0, pos.x, pos.y)
-                                }
-                                tappedInsideCurrent -> {
-                                    // Single tap inside selection cycles word -> sentence -> all
-                                    val nextTier = (cycleTier + 1) % 3
-                                    cycleTier = nextTier
-                                    val (nS, nE) = when (nextTier) {
-                                        1 -> findSentenceRange(tokens, hitTokIdx)
-                                        2 -> 0 to tokens.lastIndex
-                                        else -> hitTokIdx to hitTokIdx
-                                    }
-                                    draftStartIdx = nS
-                                    draftEndIdx = nE
-                                    currentOnUpdateRange(nS, nE, 0, pos.x, pos.y)
-                                }
-                                else -> {
-                                    draftStartIdx = hitTokIdx
-                                    draftEndIdx = hitTokIdx
-                                    cycleTier = 0
-                                    currentOnUpdateRange(hitTokIdx, hitTokIdx, 0, pos.x, pos.y)
-                                }
-                            }
-                        }
-                    }
-                )
-            }
             .testTag("ocr_selection_overlay")
     ) {
         val screenWidthPx = with(density) { maxWidth.toPx() }.coerceAtLeast(360f)
@@ -212,19 +179,103 @@ fun OcrSelectionOverlay(
         val handleBoxSizePx = with(density) { 48.dp.toPx() }
         val loupeWidthPx = with(density) { 196.dp.toPx() }
         val loupeHeightPx = with(density) { 48.dp.toPx() }
-        val menuWidthPx = with(density) { 280.dp.toPx() }
-        val menuHeightPx = with(density) { 46.dp.toPx() }
+        val menuWidthPx = with(density) { 236.dp.toPx() }
+        val menuHeightPx = with(density) { 48.dp.toPx() }
 
-        // Group contiguous selected tokens into per-line horizontal bands so highlights hug lines cleanly
+        // Frozen screenshot backdrop if available so scrolling beneath never shifts highlight coords
+        if (frozenBitmap != null) {
+            AndroidView(
+                factory = { ctx ->
+                    ImageView(ctx).apply {
+                        scaleType = ImageView.ScaleType.FIT_XY
+                        setImageBitmap(frozenBitmap)
+                        imageViewRef = this
+                    }
+                },
+                update = { iv ->
+                    iv.setImageBitmap(frozenBitmap)
+                    imageViewRef = iv
+                },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // Dim veil + tap selection surface
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = if (frozenBitmap != null) 0.28f else 0.22f))
+                .pointerInput(tokens) {
+                    val handleTouchPx = with(density) { 44.dp.toPx() }
+                    detectTapGestures(
+                        onTap = { pos ->
+                            val hitTokIdx = SelectionCoordinateMapper.findNearestTokenIndex(
+                                tokens = tokens,
+                                x = pos.x,
+                                y = pos.y,
+                                maxDistancePx = handleTouchPx * 1.35f
+                            )
+                            if (hitTokIdx < 0 && !selection.elementBounds.contains(pos.x.toInt(), pos.y.toInt())) {
+                                currentOnDismiss()
+                                return@detectTapGestures
+                            }
+                            if (hitTokIdx >= 0) {
+                                val now = System.currentTimeMillis()
+                                tapStreak = if (now - lastTapTimeMs < 380L) (tapStreak + 1).coerceAtMost(3) else 1
+                                lastTapTimeMs = now
+                                triggerHandleHaptic()
+
+                                val tappedInsideCurrent = hitTokIdx in currentStartState..currentEndState
+                                when {
+                                    tapStreak >= 3 -> {
+                                        val (sS, sE) = findSentenceRange(tokens, hitTokIdx)
+                                        draftStartIdx = sS
+                                        draftEndIdx = sE
+                                        cycleTier = 1
+                                        currentOnUpdateRange(sS, sE, 0, pos.x, pos.y)
+                                    }
+                                    tapStreak == 2 -> {
+                                        draftStartIdx = hitTokIdx
+                                        draftEndIdx = hitTokIdx
+                                        cycleTier = 0
+                                        currentOnUpdateRange(hitTokIdx, hitTokIdx, 0, pos.x, pos.y)
+                                    }
+                                    tappedInsideCurrent -> {
+                                        val nextTier = (cycleTier + 1) % 3
+                                        cycleTier = nextTier
+                                        val (nS, nE) = when (nextTier) {
+                                            1 -> findSentenceRange(tokens, hitTokIdx)
+                                            2 -> 0 to tokens.lastIndex
+                                            else -> hitTokIdx to hitTokIdx
+                                        }
+                                        draftStartIdx = nS
+                                        draftEndIdx = nE
+                                        currentOnUpdateRange(nS, nE, 0, pos.x, pos.y)
+                                    }
+                                    else -> {
+                                        draftStartIdx = hitTokIdx
+                                        draftEndIdx = hitTokIdx
+                                        cycleTier = 0
+                                        currentOnUpdateRange(hitTokIdx, hitTokIdx, 0, pos.x, pos.y)
+                                    }
+                                }
+                            }
+                        }
+                    )
+                }
+        )
+
         val selectedLineBands = remember(tokens, startIdx, endIdx) {
             buildLineBands(tokens, startIdx, endIdx)
         }
 
-        // Line-following Android blue highlights + handle stems on Canvas
+        // Non-touchable Canvas drawing crisp 0x6633B5E5 highlights + vertical edge bars
         Canvas(modifier = Modifier.fillMaxSize()) {
+            val highlightColor = Color(0x6633B5E5)
+            val edgeColor = Color(0xFF33B5E5)
             selectedLineBands.forEach { band ->
                 drawRoundRect(
-                    color = IslandColors.SelectionBlue.copy(alpha = 0.40f),
+                    color = highlightColor,
                     topLeft = Offset(band.left.toFloat() - 3f, band.top.toFloat() - 2f),
                     size = Size(
                         width = (band.right - band.left).coerceAtLeast(16).toFloat() + 6f,
@@ -233,23 +284,21 @@ fun OcrSelectionOverlay(
                     cornerRadius = CornerRadius(6f, 6f)
                 )
             }
-            // Start vertical edge bar
             drawLine(
-                color = IslandColors.SelectionBlue,
+                color = edgeColor,
                 start = Offset(startTok.leftPx.toFloat(), startTok.topPx.toFloat() - 4f),
                 end = Offset(startTok.leftPx.toFloat(), startTok.bottomPx.toFloat() + 4f),
                 strokeWidth = 2.8.dp.toPx()
             )
-            // End vertical edge bar
             drawLine(
-                color = IslandColors.SelectionBlue,
+                color = edgeColor,
                 start = Offset(endTok.rightPx.toFloat(), endTok.topPx.toFloat() - 4f),
                 end = Offset(endTok.rightPx.toFloat(), endTok.bottomPx.toFloat() + 4f),
                 strokeWidth = 2.8.dp.toPx()
             )
         }
 
-        // Start 22x22 dp Teardrop Handle (positioned strictly above-left, moved via graphicsLayer)
+        // Start Teardrop Handle (48 dp touch target)
         val startHandleOriginX = (startTok.leftPx - handleBoxSizePx * 0.65f).coerceIn(0f, screenWidthPx - handleBoxSizePx)
         val startHandleOriginY = (startTok.topPx - handleBoxSizePx * 0.80f).coerceIn(0f, screenHeightPx - handleBoxSizePx)
 
@@ -282,7 +331,7 @@ fun OcrSelectionOverlay(
                             dragFingerX = anchorStartX
                             dragFingerY = anchorStartY
 
-                            val nearest = findNearestTokenIndexLineAware(
+                            val nearest = SelectionCoordinateMapper.findNearestTokenIndex(
                                 tokens = tokens,
                                 x = anchorStartX,
                                 y = anchorStartY,
@@ -315,7 +364,7 @@ fun OcrSelectionOverlay(
             TeardropHandle(pointBottomRight = true, sizePx = handleSizePx)
         }
 
-        // End 22x22 dp Teardrop Handle (positioned strictly bottom-right, moved via graphicsLayer)
+        // End Teardrop Handle (48 dp touch target)
         val endHandleOriginX = (endTok.rightPx - handleBoxSizePx * 0.35f).coerceIn(0f, screenWidthPx - handleBoxSizePx)
         val endHandleOriginY = (endTok.bottomPx - handleBoxSizePx * 0.20f).coerceIn(0f, screenHeightPx - handleBoxSizePx)
 
@@ -348,7 +397,7 @@ fun OcrSelectionOverlay(
                             dragFingerX = anchorEndX
                             dragFingerY = anchorEndY
 
-                            val nearest = findNearestTokenIndexLineAware(
+                            val nearest = SelectionCoordinateMapper.findNearestTokenIndex(
                                 tokens = tokens,
                                 x = anchorEndX,
                                 y = anchorEndY,
@@ -381,9 +430,9 @@ fun OcrSelectionOverlay(
             TeardropHandle(pointBottomRight = false, sizePx = handleSizePx)
         }
 
-        // Magnifier Loupe Pill strictly ABOVE drag finger, clamped to live display width
+        // Compose snippet loupe fallback when platform Magnifier isn't active
         AnimatedVisibility(
-            visible = activeHandle != 0,
+            visible = activeHandle != 0 && magnifier == null,
             enter = fadeIn() + scaleIn(initialScale = 0.88f),
             exit = fadeOut(),
             modifier = Modifier.graphicsLayer {
@@ -398,8 +447,8 @@ fun OcrSelectionOverlay(
                 modifier = Modifier
                     .widthIn(min = 140.dp, max = 216.dp)
                     .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xFA141720))
-                    .border(1.5.dp, IslandColors.SelectionBlue, RoundedCornerShape(24.dp))
+                    .background(Color(0xFA141418))
+                    .border(1.5.dp, Color(0xFF33B5E5), RoundedCornerShape(24.dp))
                     .padding(horizontal = 16.dp, vertical = 9.dp)
                     .testTag("ocr_magnifier_loupe")
             ) {
@@ -414,15 +463,19 @@ fun OcrSelectionOverlay(
             }
         }
 
-        // Floating Callout Menu ABOVE (or below if near status bar), COPY executes ONLY on tap
+        // Copy / All / Close bar strictly CLEAR of selected text box
         val selectionCenterX = ((startTok.leftPx + endTok.rightPx) / 2f)
         val selectionTopY = tokens.subList(startIdx, endIdx + 1).minOf { it.topPx }.toFloat()
         val selectionBottomY = tokens.subList(startIdx, endIdx + 1).maxOf { it.bottomPx }.toFloat()
-        val placeBelow = selectionTopY < with(density) { 140.dp.toPx() }
-        val calloutY = if (placeBelow) {
-            (selectionBottomY + with(density) { 30.dp.toPx() }).coerceAtMost(screenHeightPx - menuHeightPx - 32f)
-        } else {
-            (selectionTopY - menuHeightPx - with(density) { 26.dp.toPx() }).coerceAtLeast(with(density) { 64.dp.toPx() })
+        val gapPx = with(density) { 30.dp.toPx() }
+        val topSafePx = with(density) { 72.dp.toPx() }
+        val bottomSafePx = screenHeightPx - menuHeightPx - with(density) { 32.dp.toPx() }
+        val canPlaceAbove = (selectionTopY - menuHeightPx - gapPx) >= topSafePx
+        val canPlaceBelow = (selectionBottomY + gapPx) <= bottomSafePx
+        val calloutY = when {
+            canPlaceAbove -> selectionTopY - menuHeightPx - gapPx
+            canPlaceBelow -> selectionBottomY + gapPx
+            else -> topSafePx
         }
 
         AnimatedVisibility(
@@ -436,18 +489,18 @@ fun OcrSelectionOverlay(
         ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(Color(0xF61A1C24))
-                    .border(1.dp, Color.White.copy(alpha = 0.24f), RoundedCornerShape(14.dp))
-                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xF616161A))
+                    .border(1.dp, Color.White.copy(alpha = 0.22f), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 8.dp, vertical = 4.dp)
                     .testTag("ocr_callout_menu")
             ) {
                 CalloutActionChip(
                     label = "Copy",
                     icon = Icons.Filled.ContentCopy,
-                    accent = IslandColors.SelectionBlue,
+                    accent = Color(0xFF33B5E5),
                     testTag = "ocr_callout_copy",
                     onClick = { onCopy(selectedText) }
                 )
@@ -463,16 +516,9 @@ fun OcrSelectionOverlay(
                         onSelectAll()
                     }
                 )
-                CalloutActionChip(
-                    label = "Share",
-                    icon = Icons.Filled.Share,
-                    accent = Color.White,
-                    testTag = "ocr_callout_share",
-                    onClick = { onShare(selectedText) }
-                )
                 Box(
                     modifier = Modifier
-                        .size(34.dp)
+                        .size(44.dp)
                         .clip(CircleShape)
                         .clickable(
                             interactionSource = remember { MutableInteractionSource() },
@@ -486,7 +532,7 @@ fun OcrSelectionOverlay(
                         Icons.Filled.Close,
                         contentDescription = "Close OCR selection",
                         tint = IslandColors.TextSecondary,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
@@ -500,13 +546,13 @@ private fun TeardropHandle(
     sizePx: Float
 ) {
     val handleDp = with(LocalDensity.current) { sizePx.toDp() }
+    val handleColor = Color(0xFF33B5E5)
     Canvas(modifier = Modifier.size(handleDp)) {
         val w = size.width
         val h = size.height
         val r = w * 0.42f
         val path = Path().apply {
             if (pointBottomRight) {
-                // Start teardrop: pointed stem top-right touching edge bar, round bulb bottom-left
                 addOval(
                     androidx.compose.ui.geometry.Rect(
                         left = 0f,
@@ -520,7 +566,6 @@ private fun TeardropHandle(
                 lineTo(r * 1.4f, h - r * 0.7f)
                 close()
             } else {
-                // End teardrop: pointed stem top-left touching edge bar, round bulb bottom-right
                 addOval(
                     androidx.compose.ui.geometry.Rect(
                         left = w - r * 2f,
@@ -535,7 +580,7 @@ private fun TeardropHandle(
                 close()
             }
         }
-        drawPath(path = path, color = IslandColors.SelectionBlue)
+        drawPath(path = path, color = handleColor)
         drawCircle(
             color = Color.White.copy(alpha = 0.88f),
             radius = r * 0.34f,
@@ -557,12 +602,12 @@ private fun CalloutActionChip(
         modifier = Modifier
             .clip(RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 10.dp, vertical = 8.dp)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
             .testTag(testTag)
     ) {
-        Icon(icon, contentDescription = label, tint = accent, modifier = Modifier.size(15.dp))
-        Spacer(Modifier.width(4.dp))
-        Text(label, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+        Icon(icon, contentDescription = label, tint = accent, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(5.dp))
+        Text(label, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -619,43 +664,6 @@ private fun findSentenceRange(tokens: List<OcrTextToken>, idx: Int): Pair<Int, I
         e++
     }
     return s to e
-}
-
-/**
- * Line-aware nearest token lookup with slight hysteresis to prevent oscillation on drag boundaries.
- */
-private fun findNearestTokenIndexLineAware(
-    tokens: List<OcrTextToken>,
-    x: Float,
-    y: Float,
-    maxDistancePx: Float = Float.MAX_VALUE,
-    currentIdx: Int = -1
-): Int {
-    if (tokens.isEmpty()) return -1
-    var bestIdx = -1
-    var bestScore = Double.MAX_VALUE
-    tokens.forEachIndexed { idx, tok ->
-        val dx = when {
-            x < tok.leftPx -> (tok.leftPx - x).toDouble()
-            x > tok.rightPx -> (x - tok.rightPx).toDouble()
-            else -> 0.0
-        }
-        val dy = when {
-            y < tok.topPx -> (tok.topPx - y).toDouble()
-            y > tok.bottomPx -> (y - tok.bottomPx).toDouble()
-            else -> 0.0
-        }
-        // Weight vertical line mismatches strongly so drag follows line rows cleanly
-        var dist = hypot(dx, dy * 1.8)
-        if (idx == currentIdx) {
-            dist = (dist - 10.0).coerceAtLeast(0.0)
-        }
-        if (dist < bestScore) {
-            bestScore = dist
-            bestIdx = idx
-        }
-    }
-    return if (bestScore <= maxDistancePx.toDouble()) bestIdx else -1
 }
 
 private fun buildLoupeSnippet(tokens: List<OcrTextToken>, focusIdx: Int): String {

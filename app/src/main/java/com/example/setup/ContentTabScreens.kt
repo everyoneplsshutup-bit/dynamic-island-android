@@ -69,6 +69,7 @@ import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -101,6 +102,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
 import com.example.DynamicIslandApp
 import com.example.notes.NoteEntity
+import com.example.notifications.OtpExtractor
 import com.example.system.IslandSettings
 import com.example.system.TimerEngine
 import com.example.ui.theme.CrimsonPillButton
@@ -174,7 +176,7 @@ fun NotesTabScreen(
                             modifier = Modifier
                                 .size(44.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xAA191114))
+                                .background(IslandColors.ObsidianCard)
                                 .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
                         ) {
                             Icon(Icons.Filled.MoreVert, contentDescription = "Notes menu", tint = Color.White)
@@ -219,9 +221,9 @@ fun NotesTabScreen(
                 singleLine = true,
                 shape = CircleShape,
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = Color(0xD8150E11),
-                    unfocusedContainerColor = Color(0xCC120B0E),
-                    focusedBorderColor = IslandColors.CrimsonBorderStrong,
+                    focusedContainerColor = IslandColors.ObsidianCardElevated,
+                    unfocusedContainerColor = IslandColors.ObsidianCard,
+                    focusedBorderColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.72f),
                     unfocusedBorderColor = Color.White.copy(alpha = 0.16f),
                     focusedTextColor = Color.White,
                     unfocusedTextColor = Color.White
@@ -234,6 +236,7 @@ fun NotesTabScreen(
             Spacer(Modifier.height(10.dp))
 
             // 3-mode glass segmented pill bar (Notes / Clips / Memos)
+            val notesAccent = MaterialTheme.colorScheme.primary
             ObsidianGlassCard(
                 cornerRadius = 28.dp,
                 contentPadding = PaddingValues(4.dp),
@@ -258,11 +261,11 @@ fun NotesTabScreen(
                                 .height(40.dp)
                                 .clip(CircleShape)
                                 .background(
-                                    if (active) Brush.horizontalGradient(listOf(Color(0xFF4F0B14), Color(0xFF28070B)))
+                                    if (active) Brush.horizontalGradient(listOf(notesAccent.copy(alpha = 0.28f), notesAccent.copy(alpha = 0.16f)))
                                     else Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
                                 )
                                 .then(
-                                    if (active) Modifier.border(1.dp, IslandColors.CrimsonBorderStrong, CircleShape)
+                                    if (active) Modifier.border(1.dp, notesAccent.copy(alpha = 0.72f), CircleShape)
                                     else Modifier
                                 )
                                 .clickable { filterMode = idx }
@@ -433,7 +436,7 @@ fun NotesTabScreen(
                                             app.clipboardMonitor.copyToClipboard(clip.content)
                                             Toast.makeText(context, "Copied to clipboard", Toast.LENGTH_SHORT).show()
                                         }) {
-                                            Icon(Icons.Filled.ContentCopy, contentDescription = "Copy", tint = IslandColors.CrimsonBright)
+                                            Icon(Icons.Filled.ContentCopy, contentDescription = "Copy", tint = MaterialTheme.colorScheme.primary)
                                         }
                                         IconButton(onClick = { app.clipboardMonitor.deleteClip(clip.id) }) {
                                             Icon(Icons.Filled.DeleteOutline, contentDescription = "Delete", tint = IslandColors.TextSecondary)
@@ -503,12 +506,12 @@ fun NotesTabScreen(
                                             modifier = Modifier
                                                 .size(44.dp)
                                                 .clip(CircleShape)
-                                                .background(IslandColors.CrimsonPrimary.copy(alpha = 0.22f))
+                                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.22f))
                                         ) {
                                             Icon(
                                                 imageVector = if (playingThis) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                                                 contentDescription = if (playingThis) "Pause" else "Play",
-                                                tint = IslandColors.CrimsonBright
+                                                tint = MaterialTheme.colorScheme.primary
                                             )
                                         }
                                         Spacer(Modifier.width(12.dp))
@@ -538,7 +541,7 @@ fun NotesTabScreen(
                     editingNote = null
                     showNoteDialog = true
                 },
-                containerColor = IslandColors.CrimsonPrimary,
+                containerColor = MaterialTheme.colorScheme.primary,
                 contentColor = Color.White,
                 shape = CircleShape,
                 elevation = FloatingActionButtonDefaults.elevation(8.dp),
@@ -546,7 +549,7 @@ fun NotesTabScreen(
                     .align(Alignment.BottomEnd)
                     .padding(end = 20.dp, bottom = 104.dp)
                     .size(56.dp)
-                    .border(1.2.dp, IslandColors.CrimsonGlow, CircleShape)
+                    .border(1.2.dp, Color.White.copy(alpha = 0.25f), CircleShape)
                     .testTag("notes_add_fab")
             ) {
                 Icon(Icons.Filled.Add, contentDescription = "Add Note")
@@ -628,7 +631,7 @@ private fun NoteEditorDialog(
         confirmButton = {
             Button(
                 onClick = { onSave(title.trim(), body.trim(), pinned) },
-                colors = ButtonDefaults.buttonColors(containerColor = IslandColors.CrimsonPrimary)
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) { Text("Save") }
         },
         dismissButton = {
@@ -693,17 +696,18 @@ fun AlertsTabScreen(
                 subtitle = "Your notifications and alerts",
                 icon = Icons.Filled.Notifications,
                 trailingAction = {
+                    val alertsAccent = MaterialTheme.colorScheme.primary
                     OutlinedButton(
                         onClick = {
                             app.islandController.clearInboxWithUndo()
                             scope.launch { app.database.notificationDao().clearAll() }
                         },
                         shape = CircleShape,
-                        border = androidx.compose.foundation.BorderStroke(1.dp, IslandColors.CrimsonBorder),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, alertsAccent.copy(alpha = 0.45f)),
                         contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                         modifier = Modifier.height(40.dp)
                     ) {
-                        Icon(Icons.Filled.DeleteSweep, contentDescription = null, tint = IslandColors.CrimsonBright, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Filled.DeleteSweep, contentDescription = null, tint = alertsAccent, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("Clear all", color = Color.White, fontSize = 12.sp)
                     }
@@ -711,6 +715,7 @@ fun AlertsTabScreen(
             )
 
             // Alerts vs App Rules segmented bar
+            val alertsAccent = MaterialTheme.colorScheme.primary
             ObsidianGlassCard(
                 cornerRadius = 24.dp,
                 contentPadding = PaddingValues(4.dp),
@@ -727,8 +732,8 @@ fun AlertsTabScreen(
                                 .weight(1f)
                                 .height(38.dp)
                                 .clip(CircleShape)
-                                .background(if (active) Color(0xFF420A11) else Color.Transparent)
-                                .then(if (active) Modifier.border(1.dp, IslandColors.CrimsonBorderStrong, CircleShape) else Modifier)
+                                .background(if (active) alertsAccent.copy(alpha = 0.24f) else Color.Transparent)
+                                .then(if (active) Modifier.border(1.dp, alertsAccent.copy(alpha = 0.72f), CircleShape) else Modifier)
                                 .clickable { showRules = isRules }
                         ) {
                             Text(
@@ -772,7 +777,7 @@ fun AlertsTabScreen(
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                         Text("Inbox cleared", color = Color.White, modifier = Modifier.weight(1f))
                         TextButton(onClick = { app.islandController.undoInboxClear() }) {
-                            Text("Undo", color = IslandColors.CrimsonBright, fontWeight = FontWeight.Bold)
+                            Text("Undo", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -789,6 +794,7 @@ fun AlertsTabScreen(
                         }
                     }
                 } else {
+                    val alertsAccent = MaterialTheme.colorScheme.primary
                     LazyColumn(
                         contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 104.dp),
                         verticalArrangement = Arrangement.spacedBy(10.dp),
@@ -797,6 +803,9 @@ fun AlertsTabScreen(
                         items(mergedAlerts.size, key = { mergedAlerts[it].id }) { index ->
                             val item = mergedAlerts[index]
                             val isNewest = index == 0
+                            val otpCode = remember(item.title, item.subtitle) {
+                                OtpExtractor.extract(item.title, item.subtitle)
+                            }
                             ObsidianGlassCard(highlighted = isNewest) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     CrimsonSquircleIcon(icon = Icons.Filled.Notifications, size = 46.dp)
@@ -818,18 +827,36 @@ fun AlertsTabScreen(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                         Spacer(Modifier.height(3.dp))
-                                        Text(
-                                            text = formatTimeAgo(item.timestampMs),
-                                            color = IslandColors.TextTertiary,
-                                            fontSize = 11.sp
-                                        )
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Text(
+                                                text = formatTimeAgo(item.timestampMs),
+                                                color = IslandColors.TextTertiary,
+                                                fontSize = 11.sp
+                                            )
+                                            if (otpCode != null) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .clip(CircleShape)
+                                                        .background(alertsAccent.copy(alpha = 0.22f))
+                                                        .border(1.dp, alertsAccent.copy(alpha = 0.65f), CircleShape)
+                                                        .clickable {
+                                                            app.soundManager.playCopy()
+                                                            app.clipboardMonitor.copyToClipboard(otpCode)
+                                                            Toast.makeText(context, "Copied code $otpCode", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                        .padding(horizontal = 8.dp, vertical = 2.dp)
+                                                ) {
+                                                    Text("Copy $otpCode", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                }
+                                            }
+                                        }
                                     }
                                     if (isNewest) {
                                         Box(
                                             modifier = Modifier
                                                 .size(10.dp)
                                                 .clip(CircleShape)
-                                                .background(IslandColors.CrimsonBright)
+                                                .background(alertsAccent)
                                         )
                                     } else {
                                         IconButton(onClick = {
@@ -938,6 +965,7 @@ fun ShelfTabScreen(
                 subtitle = "10-minute auto-expiring media collection",
                 icon = Icons.Filled.Layers,
                 trailingAction = {
+                    val shelfAccent = MaterialTheme.colorScheme.primary
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         IconButton(
                             onClick = {
@@ -946,8 +974,8 @@ fun ShelfTabScreen(
                             modifier = Modifier
                                 .size(44.dp)
                                 .clip(CircleShape)
-                                .background(IslandColors.CrimsonPrimary.copy(alpha = 0.25f))
-                                .border(1.dp, IslandColors.CrimsonBorder, CircleShape)
+                                .background(shelfAccent.copy(alpha = 0.25f))
+                                .border(1.dp, shelfAccent.copy(alpha = 0.55f), CircleShape)
                         ) {
                             Icon(Icons.Filled.AddPhotoAlternate, contentDescription = "Add Photo", tint = Color.White)
                         }
@@ -957,7 +985,7 @@ fun ShelfTabScreen(
                                 modifier = Modifier
                                     .size(44.dp)
                                     .clip(CircleShape)
-                                    .background(Color(0xAA191114))
+                                    .background(IslandColors.ObsidianCard)
                                     .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
                             ) {
                                 Icon(Icons.Filled.MoreVert, contentDescription = "Shelf options", tint = Color.White)
@@ -991,6 +1019,7 @@ fun ShelfTabScreen(
             )
 
             // 3-tab filter bar matching mockup
+            val shelfAccent = MaterialTheme.colorScheme.primary
             ObsidianGlassCard(
                 cornerRadius = 26.dp,
                 contentPadding = PaddingValues(4.dp),
@@ -1011,8 +1040,8 @@ fun ShelfTabScreen(
                                 .weight(1f)
                                 .height(40.dp)
                                 .clip(CircleShape)
-                                .background(if (active) Color(0xFF440A11) else Color.Transparent)
-                                .then(if (active) Modifier.border(1.dp, IslandColors.CrimsonBorderStrong, CircleShape) else Modifier)
+                                .background(if (active) shelfAccent.copy(alpha = 0.24f) else Color.Transparent)
+                                .then(if (active) Modifier.border(1.dp, shelfAccent.copy(alpha = 0.72f), CircleShape) else Modifier)
                                 .clickable { filterTab = idx }
                         ) {
                             Text(
@@ -1042,7 +1071,7 @@ fun ShelfTabScreen(
                     }
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Filled.FolderOpen, contentDescription = null, tint = IslandColors.CrimsonBright)
+                        Icon(Icons.Filled.FolderOpen, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.width(10.dp))
                         Text(
                             "Tap to link DCIM/Screenshots for automatic 10-min Shelf capture.",
@@ -1091,10 +1120,10 @@ fun ShelfTabScreen(
                             modifier = Modifier
                                 .aspectRatio(1f)
                                 .clip(RoundedCornerShape(14.dp))
-                                .background(Color(0xFF150E12))
+                                .background(IslandColors.ObsidianCard)
                                 .border(
                                     width = if (isSelected) 2.dp else 1.dp,
-                                    color = if (isSelected) IslandColors.CrimsonBright else Color.White.copy(alpha = 0.14f),
+                                    color = if (isSelected) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.14f),
                                     shape = RoundedCornerShape(14.dp)
                                 )
                                 .clickable { selectedItemId = item.id }
@@ -1110,7 +1139,7 @@ fun ShelfTabScreen(
                                 Text(
                                     text = TimerEngine.formatDuration(remMs),
                                     color = if (remMs < 120_000L) IslandColors.AccentAmber else Color.White,
-                                    fontSize = 10.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier
                                         .align(Alignment.TopStart)

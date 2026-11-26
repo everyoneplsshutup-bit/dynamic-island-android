@@ -155,12 +155,12 @@ fun FloatingSidebarOverlay(
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.TopEnd)
-                                    .size(14.dp)
+                                    .size(16.dp)
                                     .clip(CircleShape)
                                     .background(effectiveAccent),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Text(unread.coerceAtMost(9).toString(), color = Color.Black, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                Text(unread.coerceAtMost(9).toString(), color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                             }
                         }
                     }
@@ -223,7 +223,7 @@ fun FloatingSidebarOverlay(
                 Text(
                     text = "Overlay Mini-Windows (Draggable)",
                     color = IslandColors.TextSecondary,
-                    fontSize = 10.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Medium
                 )
                 Spacer(Modifier.height(6.dp))
@@ -275,7 +275,7 @@ fun FloatingSidebarOverlay(
                         "All Apps (${selectedApps.size}) · Tap for Floating Window"
                     },
                     color = effectiveAccent,
-                    fontSize = 10.sp,
+                    fontSize = 11.sp,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -310,12 +310,12 @@ fun FloatingSidebarOverlay(
                                     Box(
                                         modifier = Modifier
                                             .align(Alignment.TopEnd)
-                                            .size(13.dp)
+                                            .size(16.dp)
                                             .clip(CircleShape)
                                             .background(effectiveAccent),
                                         contentAlignment = Alignment.Center
                                     ) {
-                                        Text(unread.coerceAtMost(9).toString(), color = Color.Black, fontSize = 8.sp, fontWeight = FontWeight.Bold)
+                                        Text(unread.coerceAtMost(9).toString(), color = Color.Black, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                     }
                                 }
                             }
@@ -374,6 +374,6 @@ private fun MiniWindowShortcut(
     ) {
         Icon(icon, contentDescription = label, tint = accentColor, modifier = Modifier.size(18.dp))
         Spacer(Modifier.height(3.dp))
-        Text(label, color = IslandColors.TextPrimary, fontSize = 10.sp, maxLines = 1)
+        Text(label, color = IslandColors.TextPrimary, fontSize = 11.sp, maxLines = 1)
     }
 }

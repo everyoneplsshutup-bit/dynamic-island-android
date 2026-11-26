@@ -19,6 +19,7 @@ import com.example.search.SearchEngine
 import com.example.system.AppDatabase
 import com.example.system.BatteryMonitor
 import com.example.system.IslandSoundManager
+import com.example.system.PrivacyOpsMonitor
 import com.example.system.QuickTogglesManager
 import com.example.system.SettingsRepository
 import com.example.system.TimerEngine
@@ -64,6 +65,8 @@ class DynamicIslandApp : Application() {
         private set
     lateinit var searchEngine: SearchEngine
         private set
+    lateinit var privacyOpsMonitor: PrivacyOpsMonitor
+        private set
 
     override fun onCreate() {
         super.onCreate()
@@ -74,18 +77,31 @@ class DynamicIslandApp : Application() {
         database = AppDatabase.getInstance(this)
         islandController = IslandController(onSoundEvent = { event -> soundManager.playWithHaptic(event) })
         timerEngine = TimerEngine(this, islandController, settingsRepository, onTimerCompletedSound = { soundManager.playTimerDone() })
-        batteryMonitor = BatteryMonitor(this, islandController, settingsRepository)
+        batteryMonitor = BatteryMonitor(
+            context = this,
+            islandController = islandController,
+            settingsRepository = settingsRepository,
+            onChargingSound = { soundManager.playCharging() },
+            onLowBatterySound = { soundManager.playLowBattery() }
+        )
         quickTogglesManager = QuickTogglesManager(this)
         mediaHub = MediaHub(this, islandController, settingsRepository)
-        vaultManager = VaultManager(this, database.vaultDao(), islandController, settingsRepository) {
-            soundManager.playVaultAdd()
-        }
+        vaultManager = VaultManager(
+            context = this,
+            vaultDao = database.vaultDao(),
+            islandController = islandController,
+            settingsRepository = settingsRepository,
+            onVaultAddedSound = { soundManager.playShelfAdd() },
+            onSilentScreenshotSound = { soundManager.playScreenshot() }
+        )
         voiceMemoManager = VoiceMemoManager(this, database.voiceMemoDao(), islandController)
         clipboardMonitor = ClipboardMonitor(this, database.clipboardDao())
         floatingWindowManager = FloatingWindowManager(this, settingsRepository)
         searchEngine = SearchEngine(this, database.noteDao(), floatingWindowManager)
+        privacyOpsMonitor = PrivacyOpsMonitor(this, islandController)
 
         batteryMonitor.start()
+        privacyOpsMonitor.start()
         publishDirectShareShortcuts()
 
         appScope.launch {

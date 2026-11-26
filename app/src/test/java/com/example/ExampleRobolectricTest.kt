@@ -20,7 +20,7 @@ import org.robolectric.annotation.Config
 class ExampleRobolectricTest {
 
     @Test
-    fun `app name matches Dynamic Island and internet permission is absent`() {
+    fun `app name matches Dynamic Island and manifest uses least-privilege permissions`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         assertEquals("Dynamic Island", context.getString(R.string.app_name))
 
@@ -29,17 +29,24 @@ class ExampleRobolectricTest {
             PackageManager.GET_PERMISSIONS
         )
         val permissions = pkgInfo.requestedPermissions?.toList().orEmpty()
-        assertFalse(
-            "App must NOT declare INTERNET permission",
+        assertTrue(
+            "INTERNET permission is declared solely for opt-in https://lrclib.net lyrics lookup",
             permissions.contains(Manifest.permission.INTERNET)
         )
+        assertFalse(permissions.contains(Manifest.permission.READ_EXTERNAL_STORAGE))
+        assertFalse(permissions.contains(Manifest.permission.ACCESS_FINE_LOCATION))
+        assertFalse(permissions.contains(Manifest.permission.SEND_SMS))
     }
 
     @Test
-    fun `screenReadingEnabled defaults to false`() {
+    fun `privacy and opt-in defaults match Round 3 contract`() {
         val defaults = IslandSettings()
         assertFalse(defaults.screenReadingEnabled)
         assertFalse(defaults.ocrTierBEnabled)
+        assertTrue(defaults.lyricsFromInternet)
+        assertFalse(defaults.appleWidthIdlePill)
+        assertFalse(defaults.reelOverlayEnabled)
+        assertFalse(defaults.sfxMorphEnabled)
     }
 
     @Test

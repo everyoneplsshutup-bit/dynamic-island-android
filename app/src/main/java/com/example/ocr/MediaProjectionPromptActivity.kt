@@ -12,7 +12,7 @@ import androidx.core.content.ContextCompat
 
 /**
  * In-context MediaProjection prompt.
- * Never launched at startup and never kept running after single-frame capture.
+ * Never launched at startup and asks fresh user consent per capture / screen recording start.
  */
 class MediaProjectionPromptActivity : ComponentActivity() {
 
@@ -20,6 +20,7 @@ class MediaProjectionPromptActivity : ComponentActivity() {
         const val EXTRA_MODE = "capture_mode"
         const val MODE_VAULT_SCREENSHOT = "vault_screenshot"
         const val MODE_OCR_TIER_B = "ocr_tier_b"
+        const val MODE_SCREEN_RECORD = "screen_record"
         const val EXTRA_BOUNDS = "crop_bounds"
         const val EXTRA_TAP_X = "tap_x"
         const val EXTRA_TAP_Y = "tap_y"
@@ -38,6 +39,14 @@ class MediaProjectionPromptActivity : ComponentActivity() {
                 putExtra(EXTRA_BOUNDS, bounds)
                 putExtra(EXTRA_TAP_X, tapX)
                 putExtra(EXTRA_TAP_Y, tapY)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(intent)
+        }
+
+        fun launchForScreenRecord(context: Context) {
+            val intent = Intent(context, MediaProjectionPromptActivity::class.java).apply {
+                putExtra(EXTRA_MODE, MODE_SCREEN_RECORD)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             context.startActivity(intent)

@@ -38,6 +38,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -47,14 +48,9 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import com.kyant.backdrop.backdrops.layerBackdrop
-import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -62,6 +58,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kyant.backdrop.backdrops.layerBackdrop
+import com.kyant.backdrop.backdrops.rememberLayerBackdrop
 
 enum class MainDockTab(
     val label: String,
@@ -75,7 +73,7 @@ enum class MainDockTab(
     MUSIC("Music", Icons.Filled.MusicNote),
     TIMER("Timer", Icons.Filled.Timer),
     SEARCH("Search", Icons.Filled.Search),
-    SETTINGS("Settings", Icons.Filled.Settings)
+    SETTINGS("Prefs", Icons.Filled.Settings)
 }
 
 @Composable
@@ -85,6 +83,7 @@ fun ObsidianCrimsonBackground(
     content: @Composable BoxScope.() -> Unit
 ) {
     val appBackdrop = rememberLayerBackdrop()
+    val accent = MaterialTheme.colorScheme.primary
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -98,170 +97,33 @@ fun ObsidianCrimsonBackground(
             val w = size.width
             val h = size.height
 
-            // Top-right & upper ambient crimson nebula glow
+            // Subtle neutral-grey + user-accent ambient atmosphere over #121212
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        IslandColors.CrimsonPrimary.copy(alpha = 0.28f),
-                        IslandColors.CrimsonDeep.copy(alpha = 0.14f),
+                        accent.copy(alpha = if (showHorizonPlanet) 0.14f else 0.10f),
+                        Color(0x0EFFFFFF),
                         Color.Transparent
                     ),
-                    center = Offset(w * 0.86f, h * 0.10f),
-                    radius = w * 0.85f
-                ),
-                radius = w * 0.85f,
-                center = Offset(w * 0.86f, h * 0.10f)
-            )
-
-            // Bottom ambient crimson wave glow
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        IslandColors.CrimsonPrimary.copy(alpha = 0.18f),
-                        IslandColors.CrimsonDeep.copy(alpha = 0.08f),
-                        Color.Transparent
-                    ),
-                    center = Offset(w * 0.30f, h * 0.94f),
+                    center = Offset(w * 0.85f, h * 0.08f),
                     radius = w * 0.78f
                 ),
                 radius = w * 0.78f,
-                center = Offset(w * 0.30f, h * 0.94f)
+                center = Offset(w * 0.85f, h * 0.08f)
             )
 
-            if (showHorizonPlanet) {
-                val planetRadius = w * 0.72f
-                val planetCenter = Offset(w * 0.44f, h * 0.28f + planetRadius * 0.46f)
-
-                // Secondary dark moon upper right
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color(0xFF1D090C),
-                            Color(0xFF0A0608),
-                            Color.Transparent
-                        ),
-                        center = Offset(w * 0.84f, h * 0.15f),
-                        radius = w * 0.085f
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        accent.copy(alpha = 0.07f),
+                        Color.Transparent
                     ),
-                    radius = w * 0.075f,
-                    center = Offset(w * 0.84f, h * 0.15f)
-                )
-
-                // Atmospheric crimson corona behind horizon planet
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            IslandColors.CrimsonBright.copy(alpha = 0.32f),
-                            IslandColors.CrimsonPrimary.copy(alpha = 0.12f),
-                            Color.Transparent
-                        ),
-                        center = Offset(planetCenter.x + w * 0.06f, planetCenter.y - planetRadius * 0.10f),
-                        radius = planetRadius * 1.18f
-                    ),
-                    radius = planetRadius * 1.18f,
-                    center = planetCenter
-                )
-
-                // Dark planet body
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color(0xFF1A0A0E),
-                            Color(0xFF090608),
-                            Color(0xFF040406)
-                        ),
-                        center = Offset(planetCenter.x - planetRadius * 0.25f, planetCenter.y - planetRadius * 0.25f),
-                        radius = planetRadius
-                    ),
-                    radius = planetRadius,
-                    center = planetCenter
-                )
-
-                // Bright crimson lit top horizon arc
-                drawArc(
-                    brush = Brush.sweepGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            IslandColors.CrimsonPrimary.copy(alpha = 0.55f),
-                            IslandColors.CrimsonBright.copy(alpha = 0.95f),
-                            Color(0xFFFF8890),
-                            IslandColors.CrimsonPrimary.copy(alpha = 0.45f),
-                            Color.Transparent
-                        ),
-                        center = planetCenter
-                    ),
-                    startAngle = 205f,
-                    sweepAngle = 125f,
-                    useCenter = false,
-                    topLeft = Offset(planetCenter.x - planetRadius, planetCenter.y - planetRadius),
-                    size = androidx.compose.ui.geometry.Size(planetRadius * 2f, planetRadius * 2f),
-                    style = Stroke(width = 3.2.dp.toPx(), cap = StrokeCap.Round)
-                )
-            } else {
-                // Upper sweeping silk crimson light-wave
-                val topWave = Path().apply {
-                    moveTo(-w * 0.08f, h * 0.20f)
-                    cubicTo(
-                        w * 0.28f, h * 0.12f,
-                        w * 0.62f, h * 0.24f,
-                        w * 1.08f, h * 0.08f
-                    )
-                }
-                drawPath(
-                    path = topWave,
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            IslandColors.CrimsonDeep.copy(alpha = 0.16f),
-                            IslandColors.CrimsonBright.copy(alpha = 0.34f),
-                            Color(0xFFFF7A85).copy(alpha = 0.42f)
-                        )
-                    ),
-                    style = Stroke(width = 16.dp.toPx(), cap = StrokeCap.Round)
-                )
-                drawPath(
-                    path = topWave,
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            IslandColors.CrimsonBright.copy(alpha = 0.82f),
-                            Color(0xFFFFA5AC).copy(alpha = 0.92f)
-                        )
-                    ),
-                    style = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round)
-                )
-
-                // Lower sweeping silk crimson light-wave
-                val botWave = Path().apply {
-                    moveTo(-w * 0.06f, h * 0.90f)
-                    cubicTo(
-                        w * 0.34f, h * 0.80f,
-                        w * 0.70f, h * 0.92f,
-                        w * 1.08f, h * 0.72f
-                    )
-                }
-                drawPath(
-                    path = botWave,
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            IslandColors.CrimsonDeep.copy(alpha = 0.12f),
-                            IslandColors.CrimsonPrimary.copy(alpha = 0.24f),
-                            IslandColors.CrimsonBright.copy(alpha = 0.26f)
-                        )
-                    ),
-                    style = Stroke(width = 14.dp.toPx(), cap = StrokeCap.Round)
-                )
-                drawPath(
-                    path = botWave,
-                    brush = Brush.horizontalGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            IslandColors.CrimsonPrimary.copy(alpha = 0.65f),
-                            Color(0xFFFF7C87).copy(alpha = 0.70f)
-                        )
-                    ),
-                    style = Stroke(width = 1.6.dp.toPx(), cap = StrokeCap.Round)
-                )
-            }
+                    center = Offset(w * 0.18f, h * 0.92f),
+                    radius = w * 0.72f
+                ),
+                radius = w * 0.72f,
+                center = Offset(w * 0.18f, h * 0.92f)
+            )
         }
 
         CompositionLocalProvider(LocalAppBackdrop provides appBackdrop) {
@@ -273,30 +135,29 @@ fun ObsidianCrimsonBackground(
 @Composable
 fun ObsidianGlassCard(
     modifier: Modifier = Modifier,
-    cornerRadius: Dp = 20.dp,
+    cornerRadius: Dp = 24.dp,
     highlighted: Boolean = false,
-    accentColor: Color = IslandColors.CrimsonBright,
-    contentPadding: PaddingValues = PaddingValues(14.dp),
+    accentColor: Color = MaterialTheme.colorScheme.primary,
+    contentPadding: PaddingValues = PaddingValues(18.dp),
     onClick: (() -> Unit)? = null,
     content: @Composable ColumnScope.() -> Unit
 ) {
     val shape = RoundedCornerShape(cornerRadius)
     val bgBrush = Brush.verticalGradient(
         colors = if (highlighted) {
-            listOf(Color(0xE6280B10), Color(0xEC120A0D))
+            listOf(Color(0xFF23252C), Color(0xFF1A1B20))
         } else {
-            listOf(Color(0xD81A1216), Color(0xE40E090B))
+            listOf(Color(0xFF1D1D21), Color(0xFF161619))
         }
     )
     val borderBrush = if (highlighted) {
         Brush.linearGradient(
-            colors = listOf(accentColor, accentColor.copy(alpha = 0.55f), accentColor)
+            colors = listOf(accentColor.copy(alpha = 0.85f), accentColor.copy(alpha = 0.45f), accentColor.copy(alpha = 0.85f))
         )
     } else {
         Brush.linearGradient(
             colors = listOf(
-                Color.White.copy(alpha = 0.18f),
-                accentColor.copy(alpha = 0.14f),
+                Color.White.copy(alpha = 0.14f),
                 Color.White.copy(alpha = 0.06f)
             )
         )
@@ -319,12 +180,12 @@ fun ObsidianGlassCard(
 fun CrimsonSquircleIcon(
     icon: ImageVector,
     modifier: Modifier = Modifier,
-    size: Dp = 42.dp,
+    size: Dp = 44.dp,
     iconSize: Dp = 22.dp,
-    tint: Color = IslandColors.CrimsonBright,
+    tint: Color = MaterialTheme.colorScheme.primary,
     contentDescription: String? = null
 ) {
-    val shape = RoundedCornerShape(13.dp)
+    val shape = RoundedCornerShape(14.dp)
     Box(
         contentAlignment = Alignment.Center,
         modifier = modifier
@@ -333,16 +194,16 @@ fun CrimsonSquircleIcon(
             .background(
                 Brush.radialGradient(
                     colors = listOf(
-                        tint.copy(alpha = 0.34f),
-                        Color(0xFF1F080C),
-                        Color(0xFF110609)
+                        tint.copy(alpha = 0.24f),
+                        Color(0xFF222227),
+                        Color(0xFF18181C)
                     )
                 )
             )
             .border(
                 width = 1.dp,
                 brush = Brush.linearGradient(
-                    colors = listOf(tint.copy(alpha = 0.72f), Color.White.copy(alpha = 0.14f))
+                    colors = listOf(tint.copy(alpha = 0.52f), Color.White.copy(alpha = 0.12f))
                 ),
                 shape = shape
             )
@@ -361,8 +222,8 @@ fun CrimsonCircularHaloIcon(
     icon: ImageVector,
     modifier: Modifier = Modifier,
     size: Dp = 54.dp,
-    iconSize: Dp = 26.dp,
-    tint: Color = IslandColors.CrimsonBright,
+    iconSize: Dp = 24.dp,
+    tint: Color = MaterialTheme.colorScheme.primary,
     isActive: Boolean = false,
     contentDescription: String? = null
 ) {
@@ -374,9 +235,9 @@ fun CrimsonCircularHaloIcon(
             .background(
                 Brush.radialGradient(
                     colors = listOf(
-                        tint.copy(alpha = if (isActive) 0.42f else 0.24f),
-                        Color(0xFF1E0B0F),
-                        Color(0xFF0E080B)
+                        tint.copy(alpha = if (isActive) 0.34f else 0.16f),
+                        Color(0xFF232328),
+                        Color(0xFF18181C)
                     )
                 )
             )
@@ -384,8 +245,8 @@ fun CrimsonCircularHaloIcon(
                 width = if (isActive) 1.4.dp else 1.dp,
                 brush = Brush.linearGradient(
                     colors = listOf(
-                        if (isActive) tint else Color.White.copy(alpha = 0.24f),
-                        tint.copy(alpha = if (isActive) 0.75f else 0.22f)
+                        if (isActive) tint else Color.White.copy(alpha = 0.18f),
+                        tint.copy(alpha = if (isActive) 0.65f else 0.16f)
                     )
                 ),
                 shape = CircleShape
@@ -410,21 +271,22 @@ fun MockupScreenHeader(
     backTestTag: String? = null,
     trailingAction: @Composable (() -> Unit)? = null
 ) {
+    val accent = MaterialTheme.colorScheme.primary
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
             .fillMaxWidth()
             .statusBarsPadding()
-            .padding(horizontal = 16.dp, vertical = 10.dp)
+            .padding(horizontal = 20.dp, vertical = 12.dp)
     ) {
         if (onBack != null) {
             IconButton(
                 onClick = onBack,
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(48.dp)
                     .clip(CircleShape)
-                    .background(Color(0xAA191114))
-                    .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
+                    .background(IslandColors.ObsidianCard)
+                    .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape)
                     .let { if (backTestTag != null) it.testTag(backTestTag) else it }
             ) {
                 Icon(
@@ -435,15 +297,15 @@ fun MockupScreenHeader(
             }
             Spacer(Modifier.width(12.dp))
         } else {
-            CrimsonSquircleIcon(icon = icon)
+            CrimsonSquircleIcon(icon = icon, tint = accent)
             Spacer(Modifier.width(12.dp))
         }
 
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                color = Color.White,
-                fontSize = 21.sp,
+                color = IslandColors.TextPrimary,
+                fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -451,7 +313,7 @@ fun MockupScreenHeader(
             Text(
                 text = subtitle,
                 color = IslandColors.TextSecondary,
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -472,18 +334,19 @@ fun CrimsonPillButton(
     icon: ImageVector? = null,
     enabled: Boolean = true
 ) {
+    val accent = MaterialTheme.colorScheme.primary
     Button(
         onClick = onClick,
         enabled = enabled,
         shape = CircleShape,
         colors = ButtonDefaults.buttonColors(
-            containerColor = IslandColors.CrimsonPrimary,
+            containerColor = accent,
             contentColor = Color.White,
-            disabledContainerColor = IslandColors.CrimsonDeep.copy(alpha = 0.5f),
+            disabledContainerColor = Color(0xFF28282E),
             disabledContentColor = Color.White.copy(alpha = 0.45f)
         ),
-        border = BorderStroke(1.dp, IslandColors.CrimsonGlow.copy(alpha = 0.72f)),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.22f)),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
         modifier = modifier.height(48.dp)
     ) {
         if (icon != null) {
@@ -502,20 +365,21 @@ fun ObsidianPillButton(
     icon: ImageVector? = null,
     enabled: Boolean = true
 ) {
+    val accent = MaterialTheme.colorScheme.primary
     OutlinedButton(
         onClick = onClick,
         enabled = enabled,
         shape = CircleShape,
         colors = ButtonDefaults.outlinedButtonColors(
-            containerColor = Color(0xCC181014),
-            contentColor = Color.White
+            containerColor = IslandColors.ObsidianCard,
+            contentColor = IslandColors.TextPrimary
         ),
-        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.20f)),
-        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
+        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
         modifier = modifier.height(48.dp)
     ) {
         if (icon != null) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = IslandColors.CrimsonBright)
+            Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp), tint = accent)
             Spacer(Modifier.width(8.dp))
         }
         Text(text, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
@@ -528,7 +392,8 @@ fun FloatingGlassBottomDock(
     onSelectTab: (MainDockTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val dockShape = RoundedCornerShape(24.dp)
+    val accent = MaterialTheme.colorScheme.primary
+    val dockShape = RoundedCornerShape(26.dp)
     Surface(
         shape = dockShape,
         color = Color.Transparent,
@@ -539,16 +404,16 @@ fun FloatingGlassBottomDock(
             .clip(dockShape)
             .background(
                 Brush.verticalGradient(
-                    colors = listOf(Color(0xEE1A1014), Color(0xF50C080A))
+                    colors = listOf(Color(0xF21E1E22), Color(0xF8151518))
                 )
             )
             .border(
                 width = 1.dp,
                 brush = Brush.linearGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = 0.22f),
-                        IslandColors.CrimsonBorder,
-                        Color.White.copy(alpha = 0.10f)
+                        Color.White.copy(alpha = 0.16f),
+                        accent.copy(alpha = 0.35f),
+                        Color.White.copy(alpha = 0.08f)
                     )
                 ),
                 shape = dockShape
@@ -558,13 +423,13 @@ fun FloatingGlassBottomDock(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 5.dp),
+                .padding(horizontal = 4.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
             MainDockTab.entries.forEach { tab ->
                 val isSelected = tab == selectedTab
-                val itemColor = if (isSelected) IslandColors.CrimsonBright else Color(0xFFA0A2AC)
+                val itemColor = if (isSelected) accent else IslandColors.TextMuted
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center,
@@ -580,13 +445,13 @@ fun FloatingGlassBottomDock(
                         imageVector = tab.icon,
                         contentDescription = tab.label,
                         tint = itemColor,
-                        modifier = Modifier.size(19.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
                         text = tab.label,
                         color = itemColor,
-                        fontSize = 9.sp,
+                        fontSize = 11.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                         maxLines = 1,
                         softWrap = false,
@@ -595,10 +460,10 @@ fun FloatingGlassBottomDock(
                     Spacer(Modifier.height(2.dp))
                     Box(
                         modifier = Modifier
-                            .width(18.dp)
+                            .width(16.dp)
                             .height(2.5.dp)
                             .clip(CircleShape)
-                            .background(if (isSelected) IslandColors.CrimsonBright else Color.Transparent)
+                            .background(if (isSelected) accent else Color.Transparent)
                     )
                 }
             }

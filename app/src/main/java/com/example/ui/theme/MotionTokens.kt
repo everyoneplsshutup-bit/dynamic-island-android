@@ -52,12 +52,38 @@ object MotionTokens {
     const val GLASS_FADE_MS = 180
     const val CONTENT_ENTER_MS = 300
     const val CONTENT_ENTER_DELAY_MS = 300
+    const val CONTENT_FADE_DELAY_MS = 150
+    const val CONTENT_EXIT_MS = 80
     const val CONTENT_STAGGER_MS = 200
     const val TILE_STAGGER_MS = 40
     const val COLLAPSE_MS = 240
     const val CONTENT_CROSSFADE_MS = 180
     const val TIMER_TICK_CROSSFADE_MS = 140
     val ContentCrossfadeEasing = CubicBezierEasing(0.16f, 1.0f, 0.30f, 1.0f)
+    val AppleEase = CubicBezierEasing(0.32f, 0.72f, 0f, 1f)
+
+    // Round 3 Apple / per-feature spring constants
+    const val APPLE_EXPAND_DAMPING = 0.75f
+    const val APPLE_EXPAND_STIFFNESS = 400f
+    const val ALERT_BOUNCE_DAMPING = 0.8f
+    const val ALERT_BOUNCE_STIFFNESS = 800f
+    const val TILE_POP_DAMPING = 0.6f
+    const val TILE_POP_STIFFNESS = 800f
+
+    fun <T> appleSpring(durationScale: Float = 1.0f): SpringSpec<T> = spring(
+        dampingRatio = APPLE_EXPAND_DAMPING,
+        stiffness = APPLE_EXPAND_STIFFNESS * durationScale.coerceIn(0.5f, 1.8f)
+    )
+
+    fun <T> alertBounceSpring(): SpringSpec<T> = spring(
+        dampingRatio = ALERT_BOUNCE_DAMPING,
+        stiffness = ALERT_BOUNCE_STIFFNESS
+    )
+
+    fun <T> tilePopSpring(): SpringSpec<T> = spring(
+        dampingRatio = TILE_POP_DAMPING,
+        stiffness = TILE_POP_STIFFNESS
+    )
 
     fun <T> m3SpatialDefault(): SpringSpec<T> = spring(
         dampingRatio = SPATIAL_DEFAULT_DAMPING,

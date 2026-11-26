@@ -1,6 +1,9 @@
 package com.example.ocr
 
 import android.accessibilityservice.AccessibilityService
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.graphics.Rect
 import android.graphics.RectF
 import android.os.Build
@@ -13,6 +16,11 @@ import com.example.island.OcrTextToken
 import kotlin.math.hypot
 
 sealed interface TierAResult {
+    data class DelegatedToHost(
+        val bounds: Rect,
+        val copiedText: String
+    ) : TierAResult
+
     data class TextFound(
         val text: String,
         val bounds: Rect,
@@ -24,10 +32,13 @@ sealed interface TierAResult {
 }
 
 /**
- * Tier A OCR: Privacy-first Accessibility single-node reader.
- * Strictly reads ONLY the exact leaf element containing the user's pressed point (x, y).
- * Never invoked unless OcrPrivacyGate.isScreenReadingAllowed() is true.
- * Skips bare contentDescription on ImageView/Image nodes so Tier B ML Kit extracts photo text.
+ * Tier A Text Selection (§5):
+ * - Re-reads fresh windows / rootInActiveWindow and skips huge containers (>= 75% screen area).
+ * - Picks the smallest leaf element containing the pressed point (x, y).
+ * - Path A (native selectable/editable text): delegates selection via ACTION_SET_SELECTION /
+ *   ACTION_LONG_CLICK using EXTRA_DATA_TEXT_CHARACTER_LOCATION_KEY, strictly checks the
+ *   performAction() boolean, refreshes, copies ONLY text[start, end), and draws NOTHING on top.
+ * - Non-selectable leaf nodes return TextFound (word-token overlay) or NoText -> Path B (frozen ML Kit).
  */
 object TierAAccessibilityReader {
 
@@ -45,15 +56,19 @@ object TierAAccessibilityReader {
         screenReadingAllowed: Boolean,
         x: Int,
         y: Int,
-        ownPackageName: String
+        ownPackageName: String,
+        context: Context? = service
     ): TierAResult {
-        // HARD PRIVACY CONSTRAINT: Never inspect nodes when OFF
         if (!screenReadingAllowed) {
             return TierAResult.Refused("Screen reading is OFF in Privacy Settings")
         }
         if (service == null) {
             return TierAResult.NoText(null)
         }
+
+        val dm = (context ?: service).resources.displayMetrics
+        val screenW = dm.widthPixels.coerceAtLeast(360)
+        val screenH = dm.heightPixels.coerceAtLeast(640)
 
         val orderedWindows = runCatching { service.windows }
             .getOrNull()
@@ -110,10 +125,11 @@ object TierAAccessibilityReader {
                 className.contains("TextureView", ignoreCase = true) ||
                 className.contains("PlayerView", ignoreCase = true) ||
                 className.contains("Video", ignoreCase = true)
-            val isHugeContainer = !isTextWidget && (rect.width() > 760 || rect.height() > 780)
+
+            val isHugeContainer = SelectionCoordinateMapper.isOversizeSelection(rect, screenW, screenH, 0.75f) ||
+                (!isTextWidget && (rect.width() > (screenW * 0.78f) || rect.height() > (screenH * 0.65f)))
             val isLargeNonTextDesc = text == null && !isTextWidget && (rect.height() > 280 || rect.width() > 700)
 
-            // Do not let alt/accessibility labels on pure images or full-screen video/Reel containers shadow burned-in text (handled by Tier B ML Kit)
             val desc = if ((isImageOrVideoWidget && text == null) || isHugeContainer || isLargeNonTextDesc) {
                 null
             } else {
@@ -144,7 +160,6 @@ object TierAAccessibilityReader {
             return TierAResult.NoText(smallestBounds)
         }
 
-        // Prefer nodes with explicit text over bare contentDescription, smallest bounding box (deepest leaf)
         val withText = candidates.filter { it.text != null }
         val chosen = (if (withText.isNotEmpty()) withText else candidates)
             .minWithOrNull(compareBy<CandidateNode> { it.area }.thenByDescending { it.depth })!!
@@ -153,6 +168,22 @@ object TierAAccessibilityReader {
         val charRects = if (chosen.text != null) {
             queryCharacterLocations(chosen.node, extracted)
         } else null
+
+        // Path A: Try native host selection delegation when the leaf node supports text selection
+        if (chosen.text != null && (chosen.node.isTextSelectable || chosen.node.isEditable)) {
+            val delegated = tryNativeDelegateSelection(
+                node = chosen.node,
+                text = extracted,
+                bounds = chosen.bounds,
+                charLocations = charRects,
+                tapX = x,
+                tapY = y,
+                context = context
+            )
+            if (delegated != null) {
+                return delegated
+            }
+        }
 
         val selectionState = buildSelectionState(
             text = extracted,
@@ -163,6 +194,66 @@ object TierAAccessibilityReader {
             isFromTierB = false
         )
         return TierAResult.TextFound(extracted, chosen.bounds, selectionState)
+    }
+
+    /**
+     * Attempts native host text selection delegation.
+     * Returns DelegatedToHost ONLY if performAction() returned true and a valid non-empty
+     * substring slice was obtained; otherwise returns null so caller falls back cleanly.
+     */
+    fun tryNativeDelegateSelection(
+        node: AccessibilityNodeInfo,
+        text: String,
+        bounds: Rect,
+        charLocations: Array<RectF>?,
+        tapX: Int,
+        tapY: Int,
+        context: Context?
+    ): TierAResult.DelegatedToHost? {
+        if (text.isEmpty()) return null
+        val (wordStart, wordEnd) = SelectionCoordinateMapper.computeCharIndexAtPoint(
+            text = text,
+            nodeBounds = bounds,
+            charLocations = charLocations,
+            tapX = tapX,
+            tapY = tapY
+        )
+
+        val setSelectionArgs = Bundle().apply {
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, wordStart)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, wordEnd)
+        }
+
+        val actionAccepted = runCatching {
+            val setOk = node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, setSelectionArgs)
+            if (setOk) {
+                true
+            } else {
+                node.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)
+            }
+        }.getOrDefault(false)
+
+        if (!actionAccepted) return null
+
+        runCatching { node.refresh() }
+        val selStart = node.textSelectionStart
+        val selEnd = node.textSelectionEnd
+        val (copyStart, copyEnd) = if (selStart >= 0 && selEnd > selStart && selEnd <= text.length) {
+            selStart to selEnd
+        } else {
+            wordStart to wordEnd
+        }
+
+        val slice = text.substring(copyStart.coerceIn(0, text.length), copyEnd.coerceIn(0, text.length)).trim()
+        if (slice.isEmpty()) return null
+
+        if (context != null) {
+            runCatching {
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                cm?.setPrimaryClip(ClipData.newPlainText("Selected text", slice))
+            }
+        }
+        return TierAResult.DelegatedToHost(bounds = bounds, copiedText = slice)
     }
 
     private fun queryCharacterLocations(node: AccessibilityNodeInfo, text: String): Array<RectF>? {
@@ -213,7 +304,6 @@ object TierAAccessibilityReader {
             val lineHeight = (safeBounds.height().toFloat() / lineCount).coerceIn(24f, 84f)
             val width = safeBounds.width().coerceAtLeast(40)
 
-            // Map char index -> (lineIndex, offsetInLine, lineLength)
             val lineStarts = IntArray(lineCount)
             var running = 0
             for (li in 0 until lineCount) {
@@ -280,7 +370,6 @@ object TierAAccessibilityReader {
             }
         }
 
-        // Find token nearest to tap point
         val hitIdx = tokens.indexOfFirst { tok ->
             tapX in (tok.leftPx - 12)..(tok.rightPx + 12) && tapY in (tok.topPx - 18)..(tok.bottomPx + 18)
         }.takeIf { it >= 0 } ?: tokens.indices.minByOrNull { idx ->

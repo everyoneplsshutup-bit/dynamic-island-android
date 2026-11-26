@@ -86,12 +86,23 @@ data class ApprovalPromptState(
     val actionLabel: String = "Allow"
 )
 
+data class PrivacyIndicatorState(
+    val cameraActive: Boolean = false,
+    val micActive: Boolean = false,
+    val locationActive: Boolean = false,
+    val activeApps: List<String> = emptyList()
+) {
+    val anyActive: Boolean get() = cameraActive || micActive || locationActive
+}
+
 data class DiagnosticsSnapshot(
     val lastNotificationApp: String = "None yet",
     val lastNotificationTitle: String = "",
     val lastNotificationTimeMs: Long = 0L,
     val lastSuppressionReason: String = "None",
-    val deadZoneCollisionCount: Int = 0
+    val deadZoneCollisionCount: Int = 0,
+    val hiddenReason: String = "Visible",
+    val serviceAlive: Boolean = true
 )
 
 data class OcrTextToken(
@@ -192,6 +203,29 @@ sealed interface IslandActivity {
         override val timestamp: Long = System.currentTimeMillis(),
         val elapsedMs: Long
     ) : IslandActivity
+
+    data class DownloadProgress(
+        override val id: String,
+        override val priority: Int = 85,
+        override val timestamp: Long = System.currentTimeMillis(),
+        val packageName: String,
+        val appName: String,
+        val title: String,
+        val progress: Int,
+        val max: Int,
+        val indeterminate: Boolean,
+        val speedText: String = "",
+        val etaText: String = ""
+    ) : IslandActivity
+
+    data class ScreenRecording(
+        override val id: String = "screen_rec",
+        override val priority: Int = 96,
+        override val timestamp: Long = System.currentTimeMillis(),
+        val elapsedMs: Long = 0L,
+        val isCountdown: Boolean = false,
+        val countdownSec: Int = 0
+    ) : IslandActivity
 }
 
 data class IslandState(
@@ -222,6 +256,10 @@ data class IslandState(
     val currentForegroundPackage: String? = null,
     val approvalPrompt: ApprovalPromptState? = null,
     val diagnostics: DiagnosticsSnapshot = DiagnosticsSnapshot(),
+    val privacyIndicator: PrivacyIndicatorState = PrivacyIndicatorState(),
+    val isScreenRecording: Boolean = false,
+    val isMochiMenuOpen: Boolean = false,
+    val mochiJumpTrigger: Int = 0,
     val dwellTargetActivityId: String? = null,
     val dwellTotalMs: Long = 0L,
     val dwellRemainingMs: Long = 0L,

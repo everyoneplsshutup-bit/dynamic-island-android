@@ -54,6 +54,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -153,10 +154,10 @@ fun HomeHubScreen(
                         .clip(RoundedCornerShape(13.dp))
                         .background(
                             Brush.radialGradient(
-                                colors = listOf(IslandColors.CrimsonPrimary.copy(alpha = 0.35f), Color(0xFF1A070B))
+                                colors = listOf(accentColor.copy(alpha = 0.30f), IslandColors.ObsidianCard)
                             )
                         )
-                        .border(1.dp, IslandColors.CrimsonBorder, RoundedCornerShape(13.dp))
+                        .border(1.dp, accentColor.copy(alpha = 0.50f), RoundedCornerShape(13.dp))
                 ) {
                     Box(
                         modifier = Modifier
@@ -164,7 +165,7 @@ fun HomeHubScreen(
                             .height(11.dp)
                             .clip(CircleShape)
                             .background(Color.Black)
-                            .border(1.8.dp, IslandColors.CrimsonBright, CircleShape)
+                            .border(1.8.dp, accentColor, CircleShape)
                     )
                 }
                 Spacer(Modifier.width(12.dp))
@@ -186,7 +187,7 @@ fun HomeHubScreen(
                     modifier = Modifier
                         .size(46.dp)
                         .clip(CircleShape)
-                        .background(Color(0xBB191114))
+                        .background(IslandColors.ObsidianGlassDark)
                         .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
                         .testTag("open_settings_button")
                 ) {
@@ -296,6 +297,9 @@ fun HomeHubScreen(
                                     IslandTab.MUSIC -> MusicExpandedView(
                                         state = mediaState,
                                         accentColor = musicAccent,
+                                        rotateAlbumArt = settings.rotateAlbumArt,
+                                        expandedMarqueeEnabled = settings.expandedLyricsMarquee,
+                                        lyricsOffsetMs = settings.lyricsOffsetMs,
                                         onTogglePlayPause = {
                                             if (mediaState.isPlaying) app.soundManager.playMusicPause() else app.soundManager.playMusicPlay()
                                             app.mediaHub.togglePlayPause()
@@ -324,7 +328,8 @@ fun HomeHubScreen(
                                         onOpenPlayer = {
                                             app.soundManager.playTap()
                                             app.mediaHub.openPlayerApp()
-                                        }
+                                        },
+                                        onOpenLyricsSettings = onOpenSettings
                                     )
                                     IslandTab.TIMER -> TimerStopwatchPanel(
                                         state = timerState,
@@ -342,7 +347,14 @@ fun HomeHubScreen(
                                         onStartSleepTimer = { durationMs -> app.timerEngine.startSleepTimer(durationMs) }
                                     )
                                     IslandTab.SEARCH -> SearchIslandPanel(app = app, accentColor = accentColor, onCollapse = {})
-                                    IslandTab.TOOLS -> ToolsIslandPanel(app = app, settings = settings, accentColor = accentColor, onHaptic = {}, onCollapse = {})
+                                    IslandTab.TOOLS -> ToolsIslandPanel(
+                                        app = app,
+                                        settings = settings,
+                                        accentColor = accentColor,
+                                        isScreenRecording = islandState.activityQueue.any { it is com.example.island.IslandActivity.ScreenRecording },
+                                        onHaptic = {},
+                                        onCollapse = {}
+                                    )
                                     IslandTab.VAULT -> VaultIslandPanel(app = app, accentColor = accentColor, onCollapse = {})
                                     IslandTab.CLIPS -> ClipsIslandPanel(app = app, accentColor = accentColor)
                                     IslandTab.NOTES -> NotesIslandPanel(app = app, accentColor = accentColor)
@@ -380,21 +392,21 @@ fun HomeHubScreen(
                                 .background(
                                     Brush.radialGradient(
                                         colors = listOf(
-                                            (if (overlayActive) IslandColors.AccentGreen else IslandColors.CrimsonBright).copy(alpha = 0.36f),
-                                            Color(0xFF0E1310)
+                                            (if (overlayActive) IslandColors.AccentGreen else IslandColors.AccentOrange).copy(alpha = 0.34f),
+                                            IslandColors.ObsidianCard
                                         )
                                     )
                                 )
                                 .border(
                                     1.2.dp,
-                                    if (overlayActive) IslandColors.AccentGreen else IslandColors.CrimsonBright,
+                                    if (overlayActive) IslandColors.AccentGreen else IslandColors.AccentOrange,
                                     CircleShape
                                 )
                         ) {
                             Icon(
                                 imageVector = if (overlayActive) Icons.Filled.Check else Icons.Filled.Warning,
                                 contentDescription = null,
-                                tint = if (overlayActive) IslandColors.AccentGreen else IslandColors.CrimsonBright
+                                tint = if (overlayActive) IslandColors.AccentGreen else IslandColors.AccentOrange
                             )
                         }
                         Spacer(Modifier.width(12.dp))
@@ -404,7 +416,7 @@ fun HomeHubScreen(
                                     append("Dynamic Island is ")
                                     withStyle(
                                         SpanStyle(
-                                            color = if (overlayActive) IslandColors.AccentGreen else IslandColors.CrimsonBright,
+                                            color = if (overlayActive) IslandColors.AccentGreen else IslandColors.AccentOrange,
                                             fontWeight = FontWeight.Bold
                                         )
                                     ) {
@@ -436,7 +448,7 @@ fun HomeHubScreen(
                 if (settings.accessibilityWasEnabled && !isServiceRunning) {
                     ObsidianGlassCard(highlighted = true) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Filled.Warning, contentDescription = null, tint = IslandColors.CrimsonBright)
+                            Icon(Icons.Filled.Warning, contentDescription = null, tint = IslandColors.AccentOrange)
                             Spacer(Modifier.width(10.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text("Accessibility was switched off", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -444,7 +456,7 @@ fun HomeHubScreen(
                             }
                             Button(
                                 onClick = { runCatching { context.startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) } },
-                                colors = ButtonDefaults.buttonColors(containerColor = IslandColors.CrimsonPrimary),
+                                colors = ButtonDefaults.buttonColors(containerColor = accentColor),
                                 shape = CircleShape
                             ) { Text("Enable", fontSize = 12.sp) }
                         }
@@ -517,8 +529,8 @@ fun HomeHubScreen(
                                     Box(
                                         modifier = Modifier
                                             .clip(CircleShape)
-                                            .background(Color(0xFF470B13))
-                                            .border(1.dp, IslandColors.CrimsonBorderStrong, CircleShape)
+                                            .background(accentColor.copy(alpha = 0.24f))
+                                            .border(1.dp, accentColor.copy(alpha = 0.72f), CircleShape)
                                             .padding(horizontal = 10.dp, vertical = 4.dp)
                                     ) {
                                         Text("Reorder >", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
@@ -684,6 +696,12 @@ fun HomeHubScreen(
                     }
                     Spacer(Modifier.height(8.dp))
                     Text(
+                        "Status: ${diag.hiddenReason} · Service alive: ${diag.serviceAlive}",
+                        color = IslandColors.TextPrimary,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
                         "Cross-Window Blur: ${if (crossBlurSupported) "Supported" else "Layer Fallback"} · Collisions: ${diag.deadZoneCollisionCount}",
                         color = IslandColors.TextSecondary,
                         fontSize = 11.sp
@@ -709,6 +727,7 @@ private fun BentoQuickTile(
     modifier: Modifier = Modifier,
     badgeCount: Int = 0
 ) {
+    val badgeColor = MaterialTheme.colorScheme.primary
     Box(modifier = modifier.height(108.dp)) {
         ObsidianGlassCard(
             cornerRadius = 18.dp,
@@ -740,14 +759,14 @@ private fun BentoQuickTile(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(8.dp)
-                    .size(20.dp)
+                    .size(22.dp)
                     .clip(CircleShape)
-                    .background(IslandColors.CrimsonBright)
+                    .background(badgeColor)
             ) {
                 Text(
                     text = if (badgeCount > 99) "99+" else "$badgeCount",
                     color = Color.White,
-                    fontSize = 10.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -766,6 +785,6 @@ private fun StatusCell(
         Icon(icon, contentDescription = null, tint = IslandColors.TextSecondary, modifier = Modifier.size(18.dp))
         Spacer(Modifier.height(4.dp))
         Text(primary, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(secondary, color = IslandColors.TextTertiary, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(secondary, color = IslandColors.TextTertiary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }

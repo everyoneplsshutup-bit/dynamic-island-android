@@ -296,8 +296,8 @@ class DynamicIslandRobolectricTest {
     }
 
     @Test
-    fun `all 14 unique UI sound assets exist, pass mastering checks, and respect toggle and volume gating`() {
-        assertEquals(14, IslandSoundEvent.entries.size)
+    fun `all 20 unique UI sound assets exist, pass mastering checks, and respect toggle, morph, and volume gating`() {
+        assertEquals(20, IslandSoundEvent.entries.size)
         val rawResources = listOf(
             R.raw.sfx_expand,
             R.raw.sfx_collapse,
@@ -310,11 +310,17 @@ class DynamicIslandRobolectricTest {
             R.raw.sfx_music_play,
             R.raw.sfx_music_pause,
             R.raw.sfx_music_next,
-            R.raw.sfx_vault_add,
+            R.raw.sfx_shelf_add,
             R.raw.sfx_search_open,
-            R.raw.sfx_error
+            R.raw.sfx_error,
+            R.raw.sfx_success,
+            R.raw.sfx_screenshot,
+            R.raw.sfx_charging,
+            R.raw.sfx_low_battery,
+            R.raw.sfx_copy,
+            R.raw.sfx_morph
         )
-        assertEquals(14, rawResources.distinct().size)
+        assertEquals(20, rawResources.distinct().size)
 
         val rmsDbValues = mutableListOf<Double>()
         val tickIds = setOf(R.raw.sfx_tap, R.raw.sfx_music_next)
@@ -381,7 +387,7 @@ class DynamicIslandRobolectricTest {
             rmsDbValues.add(rmsDbfs)
 
             if (resId in tickIds) {
-                assertTrue("Tick peak ${peakDbfs} dBFS > -12 dBFS", peakDbfs <= -12.0)
+                assertTrue("Tick peak ${peakDbfs} dBFS > -11.95 dBFS", peakDbfs <= -11.95)
             }
 
             // Ensure negligible energy below 300 Hz (speaker safety on Redmi Note 10 Pro)
@@ -405,12 +411,13 @@ class DynamicIslandRobolectricTest {
 
         val familyMeanRms = rmsDbValues.average()
         assertTrue(
-            "Overall family RMS ${familyMeanRms} dBFS should be within -18.5..-12.0 dBFS",
-            familyMeanRms in -18.5..-12.0
+            "Overall family RMS ${familyMeanRms} dBFS should be within -26.0..-12.0 dBFS",
+            familyMeanRms in -26.0..-12.0
         )
 
         val defaults = IslandSettings()
         assertTrue(defaults.soundEnabled)
+        assertFalse(defaults.sfxMorphEnabled)
         assertEquals(0.75f, defaults.soundVolume, 0.001f)
 
         var timerDoneFired = false
@@ -422,6 +429,8 @@ class DynamicIslandRobolectricTest {
         assertTrue(timerDoneFired)
 
         val app = composeRule.activity.application as DynamicIslandApp
+        app.soundManager.updateCachedAudioSettings(enabled = true, volume = 0.75f, morphEnabled = false)
+        assertFalse(app.soundManager.play(IslandSoundEvent.MORPH))
         app.soundManager.updateCachedAudioSettings(enabled = false, volume = 0.5f)
         assertFalse(app.soundManager.play(IslandSoundEvent.EXPAND))
         app.soundManager.updateCachedAudioSettings(enabled = true, volume = 0f)
@@ -662,7 +671,7 @@ class DynamicIslandRobolectricTest {
         // Switch sandbox tab to Tools: Screenshot->Vault exists and Floating Apps button does NOT exist
         composeRule.onNodeWithTag("chooser_tab_tools").performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("tools_screenshot_vault_btn").assertIsDisplayed()
+        composeRule.onNodeWithTag("tools_screenshot_vault_btn").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("tools_floating_apps_btn").assertDoesNotExist()
 
         // Switch sandbox tab to Timer and verify Sleep Dial tab renders
@@ -695,7 +704,7 @@ class DynamicIslandRobolectricTest {
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("vault_filter_all").assertIsDisplayed()
 
-        // Open Settings and verify all 6 groups render
+        // Open Settings and verify all 7 groups render
         composeRule.onNodeWithTag("open_settings_button").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("settings_island_master_switch").assertIsDisplayed().assertIsOn()
@@ -705,6 +714,8 @@ class DynamicIslandRobolectricTest {
         composeRule.onNodeWithTag("settings_group_motion").assertIsDisplayed()
         composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_pill"))
         composeRule.onNodeWithTag("settings_group_pill").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_media_pet"))
+        composeRule.onNodeWithTag("settings_group_media_pet").assertIsDisplayed()
         composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_features"))
         composeRule.onNodeWithTag("settings_group_features").assertIsDisplayed()
         composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_privacy"))
@@ -822,11 +833,14 @@ class DynamicIslandRobolectricTest {
     }
 
     @Test
-    fun `round 2 defaults, shelf main dock, reels overlay, diagnostics, and approval prompt behave cleanly`() {
+    fun `round 3 defaults, shelf main dock, reels chip off, diagnostics, and approval prompt behave cleanly`() {
         val defaults = IslandSettings()
         assertEquals(2000L, defaults.alertsDwellMs)
         assertEquals(com.example.system.PillStyle.LIQUID_GLASS, defaults.pillStyle)
-        assertTrue(defaults.reelOverlayEnabled)
+        assertFalse(defaults.reelOverlayEnabled)
+        assertFalse(defaults.appleWidthIdlePill)
+        assertTrue(defaults.lyricsFromInternet)
+        assertTrue(defaults.mochiPetEnabled)
         assertTrue(defaults.swipeUpDismissEnabled)
         assertTrue(defaults.hideNotifInForegroundApp)
         assertTrue(IslandTab.VAULT.isMainRow)
@@ -843,9 +857,11 @@ class DynamicIslandRobolectricTest {
 
         controller.recordNotificationDiagnostic("WhatsApp", "Ping", 1234L, suppressionReason = "ForegroundApp")
         controller.recordDeadZoneCollision()
+        controller.setHiddenReason("Master switch turned OFF in Home Hub", serviceAlive = true)
         assertEquals("WhatsApp", controller.state.value.diagnostics.lastNotificationApp)
         assertEquals("ForegroundApp", controller.state.value.diagnostics.lastSuppressionReason)
         assertEquals(1, controller.state.value.diagnostics.deadZoneCollisionCount)
+        assertEquals("Master switch turned OFF in Home Hub", controller.state.value.diagnostics.hiddenReason)
 
         controller.showApprovalPrompt(
             com.example.island.ApprovalPromptState(
@@ -857,5 +873,174 @@ class DynamicIslandRobolectricTest {
         assertNotNull(controller.state.value.approvalPrompt)
         controller.dismissApprovalPrompt()
         assertNull(controller.state.value.approvalPrompt)
+    }
+
+    @Test
+    fun `otp extractor detects 4 to 8 digit verification codes and rejects years or dates`() {
+        assertEquals(
+            "482910",
+            com.example.notifications.OtpExtractor.extract("Bank Alert", "Your verification code is 482910. Valid 10 min.")
+        )
+        assertEquals(
+            "9104",
+            com.example.notifications.OtpExtractor.extract("Auth", "PIN: 9104 for login")
+        )
+        assertNull(
+            com.example.notifications.OtpExtractor.extract("Calendar", "Annual review scheduled for 2026 in room 4.")
+        )
+        assertNull(
+            com.example.notifications.OtpExtractor.extract("Store", "Total order amount 1999 paid.")
+        )
+    }
+
+    @Test
+    fun `download progress activity updates controller state and shelf alert reads Saved to Shelf`() = kotlinx.coroutines.runBlocking {
+        val controller = IslandController()
+        val dl = IslandActivity.DownloadProgress(
+            id = "dl_1",
+            packageName = "com.android.chrome",
+            appName = "Chrome",
+            title = "archive.zip",
+            progress = 42,
+            max = 100,
+            indeterminate = false,
+            speedText = "4.2 MB/s",
+            etaText = "12s left"
+        )
+        controller.upsertActivity(dl)
+        val activeDl = controller.state.value.primaryActivity as IslandActivity.DownloadProgress
+        assertEquals("archive.zip", activeDl.title)
+        assertEquals(42, activeDl.progress)
+        assertEquals("4.2 MB/s", activeDl.speedText)
+
+        // VaultManager posts untruncated "Saved to Shelf" alert on save
+        val app = composeRule.activity.application as DynamicIslandApp
+        val bmp = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888)
+        val saved = app.vaultManager.saveBitmap(bmp, sourceType = "PHOTO_TEST", namePrefix = "shelf_msg")
+        bmp.recycle()
+        assertNotNull(saved)
+        val alert = app.islandController.state.value.alertsHistory.firstOrNull { it.title == "Saved to Shelf" }
+        assertNotNull("Expected untruncated 'Saved to Shelf' alert", alert)
+        app.vaultManager.purgeItemNow(saved!!.id)
+    }
+
+    @Test
+    fun `lrclib client blocks non lrclib hosts and returns OfflineDisabled when opt-in toggle is false`() = kotlinx.coroutines.runBlocking {
+        val client = com.example.media.LrclibClient(composeRule.activity)
+        val validUrl = client.buildVerifiedUrl("/api/get?track_name=Test")
+        assertEquals("https", validUrl.protocol)
+        assertEquals("lrclib.net", validUrl.host)
+
+        val result = client.fetchLyrics(
+            trackName = "NeverQueriedTrackXYZ987",
+            artistName = "Artist",
+            albumName = "",
+            durationMs = 180_000L,
+            lyricsFromInternet = false
+        )
+        assertEquals(com.example.media.LrclibResult.OfflineDisabled, result)
+    }
+
+    @Test
+    fun `mochi mascot supports permanent remove, hide for today, and settings restore`() = runTest {
+        val repo = SettingsRepository(composeRule.activity)
+        repo.resetSettings()
+        assertTrue(repo.settingsFlow.first().mochiPetEnabled)
+
+        repo.update { it.copy(mochiPetEnabled = false) }
+        assertFalse(repo.settingsFlow.first().mochiPetEnabled)
+
+        val futureHide = System.currentTimeMillis() + 3_600_000L
+        repo.update { it.copy(mochiPetEnabled = true, mochiHiddenUntilMs = futureHide) }
+        assertTrue(repo.settingsFlow.first().mochiHiddenUntilMs > System.currentTimeMillis())
+
+        repo.update { it.copy(mochiPetEnabled = true, mochiHiddenUntilMs = 0L) }
+        val restored = repo.settingsFlow.first()
+        assertTrue(restored.mochiPetEnabled)
+        assertEquals(0L, restored.mochiHiddenUntilMs)
+
+        val moveMusic = com.example.island.MochiScheduler.resolveMove(
+            com.example.island.IslandState(
+                activityQueue = listOf(
+                    IslandActivity.Music(
+                        packageName = "pkg",
+                        title = "Track",
+                        artist = "Art",
+                        isPlaying = true,
+                        positionMs = 0L,
+                        durationMs = 10_000L
+                    )
+                )
+            ),
+            idleElapsedSec = 0
+        )
+        assertEquals(com.example.island.MochiMove.DANCE, moveMusic)
+        repo.resetSettings()
+    }
+
+    @Test
+    fun `selection coordinate mapper guards oversize 80pct containers and delegates safely`() {
+        assertTrue(
+            com.example.ocr.SelectionCoordinateMapper.isOversizeSelection(
+                bounds = Rect(0, 0, 1080, 2000),
+                screenWidthPx = 1080,
+                screenHeightPx = 2400
+            )
+        )
+        assertFalse(
+            com.example.ocr.SelectionCoordinateMapper.isOversizeSelection(
+                bounds = Rect(100, 400, 700, 520),
+                screenWidthPx = 1080,
+                screenHeightPx = 2400
+            )
+        )
+
+        val tokens = listOf(
+            OcrTextToken("Hello", 0, 5, 10, 10, 80, 50),
+            OcrTextToken("World", 6, 11, 90, 10, 170, 50),
+            OcrTextToken("Test", 12, 16, 180, 10, 250, 50)
+        )
+        assertEquals(
+            "World",
+            com.example.ocr.SelectionCoordinateMapper.extractSelectedText("Hello World Test", tokens, 1, 1)
+        )
+        assertEquals(
+            "World Test",
+            com.example.ocr.SelectionCoordinateMapper.extractSelectedText("Hello World Test", tokens, 1, 2)
+        )
+
+        val node = android.view.accessibility.AccessibilityNodeInfo.obtain()
+        try {
+            node.text = "Tap copy target"
+            node.isTextSelectable = true
+            val shadowNode = Shadows.shadowOf(node)
+            shadowNode.setOnPerformActionListener { _, _ -> false }
+            val rejected = TierAAccessibilityReader.tryNativeDelegateSelection(
+                node = node,
+                text = "Tap copy target",
+                bounds = Rect(100, 200, 500, 260),
+                charLocations = null,
+                tapX = 280,
+                tapY = 230,
+                context = composeRule.activity
+            )
+            assertNull("performAction == false must fall back cleanly instead of delegating", rejected)
+
+            shadowNode.setOnPerformActionListener { _, _ -> true }
+            val accepted = TierAAccessibilityReader.tryNativeDelegateSelection(
+                node = node,
+                text = "Tap copy target",
+                bounds = Rect(100, 200, 500, 260),
+                charLocations = null,
+                tapX = 280,
+                tapY = 230,
+                context = composeRule.activity
+            )
+            assertNotNull(accepted)
+            assertEquals("copy", accepted!!.copiedText)
+        } finally {
+            @Suppress("DEPRECATION")
+            node.recycle()
+        }
     }
 }

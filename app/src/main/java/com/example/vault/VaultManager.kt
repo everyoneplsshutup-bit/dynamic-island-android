@@ -41,7 +41,8 @@ class VaultManager(
     private val vaultDao: VaultDao,
     private val islandController: IslandController,
     private val settingsRepository: SettingsRepository? = null,
-    private val onVaultAddedSound: () -> Unit = {}
+    private val onVaultAddedSound: () -> Unit = {},
+    private val onSilentScreenshotSound: () -> Unit = {}
 ) {
     private val vaultDir: File by lazy {
         File(context.filesDir, "vault").apply { if (!exists()) mkdirs() }
@@ -199,7 +200,11 @@ class VaultManager(
         val id = vaultDao.insert(entity)
         val saved = entity.copy(id = id)
         scheduleExpiryWork(id, VaultConstants.EXPIRY_MILLIS)
-        onVaultAddedSound()
+        if (sourceType.startsWith("SCREENSHOT")) {
+            onSilentScreenshotSound()
+        } else {
+            onVaultAddedSound()
+        }
 
         val vaultCfg = settingsRepository?.settingsFlow?.first()?.eventConfig(EventKind.VAULT)
         if (vaultCfg?.enabled != false) {

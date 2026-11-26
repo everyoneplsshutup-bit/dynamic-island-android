@@ -18,10 +18,18 @@ import androidx.compose.runtime.mutableFloatStateOf
 import com.example.DynamicIslandApp
 import com.example.keepalive.IslandKeepAliveService
 import com.example.ocr.MediaProjectionPromptActivity
+import com.example.ocr.OcrBitmapHolder
 import com.example.ocr.OcrPrivacyGate
 import com.example.ocr.TierAAccessibilityReader
 import com.example.ocr.TierAResult
+import com.example.ocr.TierBMlKitOcr
 import com.example.system.IslandSettings
+import com.example.system.WhenIdleMode
+import android.graphics.Bitmap
+import android.os.Build
+import android.view.Display
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -205,12 +213,27 @@ class IslandService : AccessibilityService() {
                     if (!host.isAttached.value) {
                         val attached = host.attach(app, settings, latestState, latestKeepAwake)
                         _isHostingOverlay.value = attached
+                        app.islandController.setHiddenReason(
+                            if (attached) "Visible" else "Overlay permission blocked",
+                            serviceAlive = true
+                        )
                     } else {
                         host.updateLayout(latestState, settings, latestKeepAwake, _liveExclusionZone.value, forceTouch = true)
+                        val hiddenMsg = when {
+                            latestState.isDeviceLocked && settings.lockScreenPreset == com.example.system.LockScreenPreset.HIDDEN ->
+                                "Hidden on lock screen"
+                            latestState.mode == IslandMode.IDLE && settings.whenIdleMode == WhenIdleMode.HIDDEN ->
+                                "Idle mode set to Hidden"
+                            else -> "Visible"
+                        }
+                        app.islandController.setHiddenReason(hiddenMsg, serviceAlive = true)
                     }
-                } else if (host.isAttached.value) {
-                    host.detach()
-                    _isHostingOverlay.value = false
+                } else {
+                    if (host.isAttached.value) {
+                        host.detach()
+                        _isHostingOverlay.value = false
+                    }
+                    app.islandController.setHiddenReason("Master switch turned OFF in Home Hub", serviceAlive = true)
                 }
             }
         }
@@ -221,6 +244,16 @@ class IslandService : AccessibilityService() {
                     state.mode == IslandMode.EXPANDED && latestSettings.clipboardHistoryEnabled
                 )
                 overlayHost?.updateLayout(state, latestSettings, latestKeepAwake, _liveExclusionZone.value)
+                val updatedReason = when {
+                    !latestSettings.islandEnabled -> "Master switch turned OFF in Home Hub"
+                    overlayHost?.isAttached?.value != true -> "Overlay permission blocked"
+                    state.isDeviceLocked && latestSettings.lockScreenPreset == com.example.system.LockScreenPreset.HIDDEN ->
+                        "Hidden on lock screen"
+                    state.mode == IslandMode.IDLE && latestSettings.whenIdleMode == WhenIdleMode.HIDDEN ->
+                        "Idle mode set to Hidden"
+                    else -> "Visible"
+                }
+                app.islandController.setHiddenReason(updatedReason, serviceAlive = true)
             }
         }
         serviceScope.launch {
@@ -253,11 +286,17 @@ class IslandService : AccessibilityService() {
                 screenReadingAllowed = true,
                 x = rawX,
                 y = rawY,
-                ownPackageName = packageName
+                ownPackageName = packageName,
+                context = this@IslandService
             )
 
             when (result) {
+                is TierAResult.DelegatedToHost -> {
+                    app.soundManager.playCopy()
+                    app.islandController.showTransientBanner("Copied: ${result.copiedText.take(40)}")
+                }
                 is TierAResult.TextFound -> {
+                    OcrBitmapHolder.clear()
                     app.islandController.setOcrSelection(result.selectionState)
                 }
                 is TierAResult.Refused -> {
@@ -265,17 +304,75 @@ class IslandService : AccessibilityService() {
                 }
                 is TierAResult.NoText -> {
                     val tierBAllowed = OcrPrivacyGate.isTierBAllowed(app.settingsRepository)
-                    if (tierBAllowed) {
-                        MediaProjectionPromptActivity.launchForTierBOcr(
-                            context = this@IslandService,
-                            bounds = result.bounds,
-                            tapX = rawX,
-                            tapY = rawY
-                        )
-                    } else {
+                    if (!tierBAllowed) {
                         app.islandController.showTransientBanner("No text at pressed point (Enable Tier B OCR for image text)")
+                        return@launch
                     }
+
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        overlayHost?.setOverlayHiddenForCapture(true)
+                        delay(60L)
+                        val captured = captureDisplayScreenshotR()
+                        overlayHost?.setOverlayHiddenForCapture(false)
+                        if (captured != null) {
+                            val recognized = TierBMlKitOcr.recognizeSelectionAtPoint(
+                                fullFrame = captured,
+                                elementBounds = result.bounds,
+                                tapX = rawX,
+                                tapY = rawY,
+                                preserveFrozenFrameForOverlay = true
+                            )
+                            if (recognized != null) {
+                                app.soundManager.playTap()
+                                app.islandController.setOcrSelection(recognized.selectionState)
+                            } else {
+                                OcrBitmapHolder.clear()
+                                if (!captured.isRecycled) captured.recycle()
+                                app.islandController.showTransientBanner("No text detected at pressed point")
+                            }
+                            return@launch
+                        }
+                    }
+
+                    MediaProjectionPromptActivity.launchForTierBOcr(
+                        context = this@IslandService,
+                        bounds = result.bounds,
+                        tapX = rawX,
+                        tapY = rawY
+                    )
                 }
+            }
+        }
+    }
+
+    private suspend fun captureDisplayScreenshotR(): Bitmap? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        return suspendCancellableCoroutine { cont ->
+            runCatching {
+                takeScreenshot(
+                    Display.DEFAULT_DISPLAY,
+                    mainExecutor,
+                    object : TakeScreenshotCallback {
+                        override fun onSuccess(screenshot: ScreenshotResult) {
+                            val bmp = runCatching {
+                                val hw = screenshot.hardwareBuffer
+                                val cs = screenshot.colorSpace
+                                val wrapped = Bitmap.wrapHardwareBuffer(hw, cs)
+                                val soft = wrapped?.copy(Bitmap.Config.ARGB_8888, false)
+                                wrapped?.recycle()
+                                hw.close()
+                                soft
+                            }.getOrNull()
+                            if (cont.isActive) cont.resume(bmp)
+                        }
+
+                        override fun onFailure(errorCode: Int) {
+                            if (cont.isActive) cont.resume(null)
+                        }
+                    }
+                )
+            }.onFailure {
+                if (cont.isActive) cont.resume(null)
             }
         }
     }

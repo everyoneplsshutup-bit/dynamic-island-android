@@ -36,6 +36,16 @@ data class LyricLine(
     val text: String
 )
 
+enum class LyricsLookupStatus {
+    IDLE,
+    LOADING,
+    LOADED_SYNCED,
+    LOADED_PLAIN,
+    NEEDS_INTERNET_STREAMED,
+    NO_LYRICS_FOUND,
+    RATE_LIMITED
+}
+
 data class MediaUiState(
     val hasActiveSession: Boolean = false,
     val hasNotificationAccess: Boolean = false,
@@ -43,6 +53,7 @@ data class MediaUiState(
     val appLabel: String = "",
     val title: String = "Nothing Playing",
     val artist: String = "",
+    val album: String = "",
     val albumArt: Bitmap? = null,
     val artworkAccentArgb: Int? = null,
     val isPlaying: Boolean = false,
@@ -56,7 +67,9 @@ data class MediaUiState(
     val isShuffled: Boolean = false,
     val repeatModeLabel: String = "Off",
     val isLiked: Boolean = false,
-    val lyrics: List<LyricLine> = emptyList()
+    val lyrics: List<LyricLine> = emptyList(),
+    val lyricsStatus: LyricsLookupStatus = LyricsLookupStatus.IDLE,
+    val lyricsSource: LyricsSource = LyricsSource.NONE
 )
 
 class MediaHub(
@@ -85,7 +98,10 @@ class MediaHub(
     private var activeController: MediaController? = null
     private var progressJob: Job? = null
     private var accentJob: Job? = null
+    private var lyricsJob: Job? = null
+    private var lastLyricsFetchedTrackKey: String? = null
     private var sessionsListenerRegistered = false
+    private val lrclibClient = LrclibClient(context)
 
     private data class OptimisticOverrides(
         val trackKey: String,
@@ -105,9 +121,20 @@ class MediaHub(
             scope.launch {
                 repo.settingsFlow.collectLatest { settings ->
                     val prevAllowed = latestSettings.allowedMusicPackages
+                    val prevInternet = latestSettings.lyricsFromInternet
                     latestSettings = settings
                     if (prevAllowed != settings.allowedMusicPackages) {
                         refreshSessions()
+                    } else if (!prevInternet && settings.lyricsFromInternet && _state.value.hasActiveSession) {
+                        lastLyricsFetchedTrackKey = null
+                        resolveLyricsAsync(
+                            trackKey = trackKeyFor(_state.value.packageName, _state.value.title, _state.value.artist),
+                            title = _state.value.title,
+                            artist = _state.value.artist,
+                            album = _state.value.album,
+                            durationMs = _state.value.durationMs,
+                            mediaUriStr = null
+                        )
                     }
                 }
             }
@@ -217,6 +244,8 @@ class MediaHub(
     private fun detachController() {
         progressJob?.cancel()
         accentJob?.cancel()
+        lyricsJob?.cancel()
+        lastLyricsFetchedTrackKey = null
         activeController?.let { runCatching { it.unregisterCallback(controllerCallback) } }
         activeController = null
     }
@@ -332,14 +361,32 @@ class MediaHub(
         } ?: rawLiked
 
         val pos = computeSmoothPosition(playback, prevState, currentTrackKey, reportedPos, duration)
+        val album = metadata?.getString(MediaMetadata.METADATA_KEY_ALBUM).orEmpty()
 
-        // Strictly on-device lyrics only (embedded tags or local sidecar .lrc; never network).
+        // 1. Metadata/extras embedded first, else keep already-resolved lyrics if same track
         val mediaUriStr = metadata?.getString(MediaMetadata.METADATA_KEY_MEDIA_URI)
-        val lyricsRaw = extras?.getString("lyrics")
+        val extraLyricsRaw = extras?.getString("lyrics")
             ?: extras?.getString("lrc")
             ?: metadata?.getString("android.media.metadata.LYRICS")
             ?: readSidecarLrcIfLocal(mediaUriStr)
-        val parsedLyrics = parseLyrics(lyricsRaw)
+        val syncParsedLyrics = LocalLyricsReader.parseLyricsText(extraLyricsRaw)
+        val sameTrackLoaded = lastLyricsFetchedTrackKey == currentTrackKey
+        val immediateLyrics = when {
+            syncParsedLyrics.isNotEmpty() -> syncParsedLyrics
+            sameTrackLoaded -> prevState.lyrics
+            else -> emptyList()
+        }
+        val immediateStatus = when {
+            syncParsedLyrics.isNotEmpty() ->
+                if (syncParsedLyrics.any { it.timestampMs >= 0L }) LyricsLookupStatus.LOADED_SYNCED else LyricsLookupStatus.LOADED_PLAIN
+            sameTrackLoaded -> prevState.lyricsStatus
+            else -> LyricsLookupStatus.LOADING
+        }
+        val immediateSource = when {
+            syncParsedLyrics.isNotEmpty() -> LyricsSource.EMBEDDED_ID3
+            sameTrackLoaded -> prevState.lyricsSource
+            else -> LyricsSource.NONE
+        }
 
         val appLabel = runCatching {
             val pm = context.packageManager
@@ -353,6 +400,7 @@ class MediaHub(
             appLabel = appLabel,
             title = title,
             artist = artist,
+            album = album,
             albumArt = art,
             artworkAccentArgb = _state.value.artworkAccentArgb,
             isPlaying = resolvedIsPlaying,
@@ -365,8 +413,21 @@ class MediaHub(
             isShuffled = resolvedShuffled,
             repeatModeLabel = resolvedRepeat,
             isLiked = resolvedLiked,
-            lyrics = parsedLyrics
+            lyrics = immediateLyrics,
+            lyricsStatus = immediateStatus,
+            lyricsSource = immediateSource
         )
+
+        if (syncParsedLyrics.isEmpty() && !sameTrackLoaded) {
+            resolveLyricsAsync(
+                trackKey = currentTrackKey,
+                title = title,
+                artist = artist,
+                album = album,
+                durationMs = duration,
+                mediaUriStr = mediaUriStr
+            )
+        }
 
         if (art != null) {
             extractArtworkAccentAsync(art)
@@ -391,6 +452,86 @@ class MediaHub(
         }
 
         if (resolvedIsPlaying) startProgressTicker() else progressJob?.cancel()
+    }
+
+    private fun resolveLyricsAsync(
+        trackKey: String,
+        title: String,
+        artist: String,
+        album: String,
+        durationMs: Long,
+        mediaUriStr: String?
+    ) {
+        lyricsJob?.cancel()
+        lastLyricsFetchedTrackKey = trackKey
+        lyricsJob = scope.launch {
+            val local = withContext(Dispatchers.IO) {
+                LocalLyricsReader.readLocalLyrics(context, mediaUriStr, title, artist)
+            }
+            if (_state.value.let { trackKeyFor(it.packageName, it.title, it.artist) } != trackKey) return@launch
+            if (local != null && local.lines.isNotEmpty()) {
+                _state.update {
+                    it.copy(
+                        lyrics = local.lines,
+                        lyricsStatus = if (local.isSynced) LyricsLookupStatus.LOADED_SYNCED else LyricsLookupStatus.LOADED_PLAIN,
+                        lyricsSource = local.source
+                    )
+                }
+                return@launch
+            }
+
+            val remote = lrclibClient.fetchLyrics(
+                trackName = title,
+                artistName = artist,
+                albumName = album,
+                durationMs = durationMs,
+                lyricsFromInternet = latestSettings.lyricsFromInternet
+            )
+            if (_state.value.let { trackKeyFor(it.packageName, it.title, it.artist) } != trackKey) return@launch
+            when (remote) {
+                is LrclibResult.Found -> {
+                    _state.update {
+                        it.copy(
+                            lyrics = remote.lyrics.lines,
+                            lyricsStatus = if (remote.lyrics.isSynced) LyricsLookupStatus.LOADED_SYNCED else LyricsLookupStatus.LOADED_PLAIN,
+                            lyricsSource = LyricsSource.LRCLIB
+                        )
+                    }
+                }
+                LrclibResult.OfflineDisabled -> {
+                    val isLikelyStreamed = mediaUriStr.isNullOrBlank() || mediaUriStr.startsWith("http", ignoreCase = true)
+                    _state.update {
+                        it.copy(
+                            lyrics = emptyList(),
+                            lyricsStatus = if (isLikelyStreamed) {
+                                LyricsLookupStatus.NEEDS_INTERNET_STREAMED
+                            } else {
+                                LyricsLookupStatus.NO_LYRICS_FOUND
+                            },
+                            lyricsSource = LyricsSource.NONE
+                        )
+                    }
+                }
+                is LrclibResult.RateLimited -> {
+                    _state.update {
+                        it.copy(
+                            lyrics = emptyList(),
+                            lyricsStatus = LyricsLookupStatus.RATE_LIMITED,
+                            lyricsSource = LyricsSource.NONE
+                        )
+                    }
+                }
+                LrclibResult.NotFound, LrclibResult.NetworkError -> {
+                    _state.update {
+                        it.copy(
+                            lyrics = emptyList(),
+                            lyricsStatus = LyricsLookupStatus.NO_LYRICS_FOUND,
+                            lyricsSource = LyricsSource.NONE
+                        )
+                    }
+                }
+            }
+        }
     }
 
     private fun computeSmoothPosition(

@@ -33,6 +33,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -75,6 +76,7 @@ fun FeaturePickerScreen(
     val scope = rememberCoroutineScope()
     var capBanner by remember { mutableStateOf<String?>(null) }
     var activeDragTab by remember { mutableStateOf<IslandTab?>(null) }
+    val accent = MaterialTheme.colorScheme.primary
 
     val enabledList = settings.enabledTabs
     val disabledList = IslandTab.entries.filterNot { it in enabledList }
@@ -96,8 +98,8 @@ fun FeaturePickerScreen(
                     Box(
                         modifier = Modifier
                             .clip(CircleShape)
-                            .background(Color(0xFF470B13))
-                            .border(1.dp, IslandColors.CrimsonBorderStrong, CircleShape)
+                            .background(accent.copy(alpha = 0.24f))
+                            .border(1.dp, accent.copy(alpha = 0.72f), CircleShape)
                             .padding(horizontal = 12.dp, vertical = 6.dp)
                             .testTag("feature_cap_badge")
                     ) {
@@ -131,14 +133,14 @@ fun FeaturePickerScreen(
                             modifier = Modifier
                                 .clip(CircleShape)
                                 .background(Color.Black)
-                                .border(1.dp, IslandColors.CrimsonBorderStrong, CircleShape)
+                                .border(1.dp, accent.copy(alpha = 0.65f), CircleShape)
                                 .padding(horizontal = 12.dp, vertical = 6.dp)
                         ) {
                             enabledList.take(3).forEach { tab ->
-                                Icon(tabIcon(tab), contentDescription = null, tint = IslandColors.CrimsonBright, modifier = Modifier.size(14.dp))
+                                Icon(tabIcon(tab), contentDescription = null, tint = accent, modifier = Modifier.size(14.dp))
                                 Spacer(Modifier.width(5.dp))
                             }
-                            Box(Modifier.size(18.dp).clip(CircleShape).background(Color(0xFF221317)))
+                            Box(Modifier.size(18.dp).clip(CircleShape).background(IslandColors.ObsidianCardElevated))
                             enabledList.drop(3).take(5).forEach { tab ->
                                 Spacer(Modifier.width(5.dp))
                                 Icon(tabIcon(tab), contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
@@ -158,7 +160,7 @@ fun FeaturePickerScreen(
                     ) {
                         Text(
                             text = capBanner ?: "8 / 8 features active. Turn one off before adding another.",
-                            color = IslandColors.CrimsonBright,
+                            color = accent,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Medium
                         )
@@ -172,7 +174,7 @@ fun FeaturePickerScreen(
                     item(key = "section_active_hdr") {
                         Text(
                             text = "Active in Dock (${enabledList.size}) · Drag handle to reorder",
-                            color = IslandColors.CrimsonBright,
+                            color = accent,
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(top = 4.dp, bottom = 2.dp)
@@ -235,7 +237,7 @@ fun FeaturePickerScreen(
                                     Icon(
                                         imageVector = Icons.Filled.DragIndicator,
                                         contentDescription = "Drag to reorder ${tab.title}",
-                                        tint = if (isDraggingThis) IslandColors.CrimsonBright else IslandColors.TextSecondary
+                                        tint = if (isDraggingThis) accent else IslandColors.TextSecondary
                                     )
                                 }
 
@@ -247,8 +249,8 @@ fun FeaturePickerScreen(
                                         Text(tab.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                                         Text(
                                             text = if (enabledIdx < 5) "Main #${enabledIdx + 1}" else "More",
-                                            fontSize = 10.sp,
-                                            color = if (enabledIdx < 5) IslandColors.CrimsonBright else IslandColors.TextSecondary,
+                                            fontSize = 11.sp,
+                                            color = if (enabledIdx < 5) accent else IslandColors.TextSecondary,
                                             modifier = Modifier
                                                 .clip(RoundedCornerShape(6.dp))
                                                 .background(Color.White.copy(alpha = 0.08f))

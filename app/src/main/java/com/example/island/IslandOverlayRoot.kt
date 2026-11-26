@@ -1,11 +1,10 @@
 package com.example.island
 
 import android.app.AlarmManager
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import android.net.TrafficStats
 import android.net.Uri
 import android.os.Build
@@ -13,6 +12,7 @@ import android.provider.Settings
 import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
@@ -27,6 +27,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -63,8 +64,11 @@ import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.DoNotDisturbOn
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -78,13 +82,12 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
@@ -94,6 +97,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -137,19 +141,18 @@ import com.example.floating.FloatingSidebarOverlay
 import com.example.media.MediaUiState
 import com.example.media.MusicCompactWaveform
 import com.example.media.MusicExpandedView
-import com.example.ocr.MediaProjectionPromptActivity
+import com.example.notifications.OtpExtractor
+import com.example.ocr.OcrBitmapHolder
 import com.example.ocr.OcrSelectionOverlay
-import com.example.system.AccentTheme
 import com.example.system.AnimationStyle
 import com.example.system.CompanionPosition
-import com.example.system.ContentEffect
 import com.example.system.ExpandedSwipeAction
 import com.example.system.IdleWidgetType
 import com.example.system.IslandSettings
 import com.example.system.IslandTab
 import com.example.system.LockScreenPreset
-import com.example.system.OpeningEffect
 import com.example.system.PillStyle
+import com.example.system.ScreenRecorderManager
 import com.example.system.TimerEngine
 import com.example.system.TimerStopwatchPanel
 import com.example.system.TimerUiState
@@ -159,6 +162,7 @@ import com.example.ui.theme.LocalAppBackdrop
 import com.example.ui.theme.MotionTokens
 import com.example.ui.theme.WavyProgressBar
 import com.example.ui.theme.islandGlassChrome
+import com.example.ui.theme.metaballParentLayer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -399,16 +403,30 @@ fun IslandOverlayRoot(
     // Single M3 Expressive integrator: one updateTransition drives width, height, corner radius, and position
     val holeW = exclusionZone.holeWidthDp.coerceAtLeast(settings.cutoutWidthDp)
     val holeH = exclusionZone.holeHeightDp.coerceAtLeast(settings.cutoutHeightDp)
-    val compactMetrics = remember(holeW, holeH, exclusionZone.isLandscape, settings.pillSizePreset) {
-        DeadZoneGeometry.compactSlotMetrics(
-            holeWidthDp = holeW,
-            holeHeightDp = holeH,
-            isLandscape = exclusionZone.isLandscape,
-            slotWidthDp = settings.pillSizePreset.slotWidthDp
-        )
+    val primaryActivity = state.primaryActivity
+    val compactMetrics = remember(holeW, holeH, exclusionZone.isLandscape, settings.pillSizePreset, primaryActivity) {
+        when (primaryActivity) {
+            is IslandActivity.Music -> DeadZoneGeometry.musicCompactPillMetrics(
+                holeWidthDp = holeW,
+                holeHeightDp = holeH,
+                isLandscape = exclusionZone.isLandscape
+            )
+            is IslandActivity.Alert -> DeadZoneGeometry.compactSlotMetrics(
+                holeWidthDp = holeW,
+                holeHeightDp = holeH,
+                isLandscape = exclusionZone.isLandscape,
+                slotWidthDp = maxOf(settings.pillSizePreset.slotWidthDp, 112f)
+            )
+            else -> DeadZoneGeometry.compactSlotMetrics(
+                holeWidthDp = holeW,
+                holeHeightDp = holeH,
+                isLandscape = exclusionZone.isLandscape,
+                slotWidthDp = settings.pillSizePreset.slotWidthDp
+            )
+        }
     }
-    val idleMetrics = remember(holeW, holeH) {
-        DeadZoneGeometry.idleCameraPillMetrics(holeW, holeH)
+    val idleMetrics = remember(holeW, holeH, settings.appleWidthIdlePill) {
+        DeadZoneGeometry.idleCameraPillMetrics(holeW, holeH, appleWidth = settings.appleWidthIdlePill)
     }
     val idleWidthDp = remember(settings.whenIdleMode, compactMetrics.totalWidthDp, idleMetrics.widthDp) {
         when (settings.whenIdleMode) {
@@ -619,7 +637,7 @@ fun IslandOverlayRoot(
             }
         }
 
-        if (state.mode == IslandMode.EXPANDED || state.mode == IslandMode.MEDIUM) {
+        if (state.mode == IslandMode.EXPANDED || state.mode == IslandMode.MEDIUM || state.isMochiMenuOpen) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -628,7 +646,11 @@ fun IslandOverlayRoot(
                         indication = null
                     ) {
                         onRequestHaptic()
-                        app.islandController.collapse()
+                        if (state.isMochiMenuOpen) {
+                            app.islandController.setMochiMenuOpen(false)
+                        } else {
+                            app.islandController.collapse()
+                        }
                     }
             )
         }
@@ -887,6 +909,7 @@ fun IslandOverlayRoot(
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier
                             .offset { IntOffset(0, (morphPosYDpState.value * densityPx).roundToInt()) }
+                            .metaballParentLayer(settings.metaballRenderEffect && showCompanion && !reduceMotion)
                             .graphicsLayer {
                                 val pull = pullDownProgressProvider()
                                 val boost = pressScaleState.value * (1f + pull * 0.14f)
@@ -918,6 +941,99 @@ fun IslandOverlayRoot(
                 }
             }
         }
+
+        // Privacy Dots indicator (Camera green / Mic orange / Location blue) beside collapsed pill
+        if (settings.privacyDotsEnabled &&
+            state.privacyIndicator.anyActive &&
+            (state.mode == IslandMode.IDLE || state.mode == IslandMode.COMPACT || state.mode == IslandMode.SPLIT) &&
+            !exclusionZone.isLandscape
+        ) {
+            val activeHalfW = when (state.mode) {
+                IslandMode.IDLE -> idleWidthDp / 2f
+                IslandMode.SPLIT -> (compactMetrics.totalWidthDp + 44f) / 2f
+                else -> compactMetrics.totalWidthDp / 2f
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .align(anchorAlign)
+                    .offset(x = anchorOffsetX - (activeHalfW + 18f).dp, y = (anchorOffsetY + 11.dp))
+                    .testTag("privacy_dots_row")
+            ) {
+                if (state.privacyIndicator.cameraActive) {
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(IslandColors.PrivacyCameraGreen))
+                }
+                if (state.privacyIndicator.micActive) {
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(IslandColors.PrivacyMicOrange))
+                }
+                if (state.privacyIndicator.locationActive) {
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(IslandColors.PrivacyLocBlue))
+                }
+            }
+        }
+
+        // Mochi Pixel Panda Mascot (§12): outside music/alert cards, never overlaps cutout or text, removable in 1 tap
+        val mochiVisible = settings.mochiPetEnabled &&
+            System.currentTimeMillis() >= settings.mochiHiddenUntilMs &&
+            (state.mode == IslandMode.IDLE || state.mode == IslandMode.COMPACT || state.mode == IslandMode.SPLIT) &&
+            !state.isCalibrationPreview &&
+            !exclusionZone.isLandscape
+        if (mochiVisible) {
+            val activeHalfW = when (state.mode) {
+                IslandMode.IDLE -> idleWidthDp / 2f
+                IslandMode.SPLIT -> (compactMetrics.totalWidthDp + 44f) / 2f
+                else -> compactMetrics.totalWidthDp / 2f
+            }
+            val mochiOffsetY = if (exclusionZone.cutoutRectDp.top >= 28f) {
+                (anchorOffsetY - 26.dp).coerceAtLeast(2.dp)
+            } else {
+                anchorOffsetY + 2.dp
+            }
+            val mochiOffsetX = if (exclusionZone.cutoutRectDp.top >= 28f) {
+                anchorOffsetX
+            } else {
+                anchorOffsetX + (activeHalfW + 22f).dp
+            }
+            MochiPandaPet(
+                state = state,
+                quietHoursAnimate = settings.mochiQuietHoursAnimate,
+                onTapMochi = {
+                    onRequestHaptic()
+                    app.islandController.triggerMochiJump()
+                },
+                onOpenMenu = {
+                    onRequestHaptic()
+                    app.islandController.setMochiMenuOpen(true)
+                },
+                modifier = Modifier
+                    .align(anchorAlign)
+                    .offset(x = mochiOffsetX, y = mochiOffsetY)
+            )
+        }
+
+        val mochiScope = rememberCoroutineScope()
+        MochiActionMenuCard(
+            visible = state.isMochiMenuOpen,
+            onRemovePermanently = {
+                app.islandController.setMochiMenuOpen(false)
+                mochiScope.launch {
+                    app.settingsRepository.update { it.copy(mochiPetEnabled = false) }
+                }
+            },
+            onHideForToday = {
+                app.islandController.setMochiMenuOpen(false)
+                val until = MochiScheduler.nextSevenAmMillis()
+                mochiScope.launch {
+                    app.settingsRepository.update { it.copy(mochiHiddenUntilMs = until) }
+                }
+                app.islandController.showTransientBanner("Mochi hidden until tomorrow 7:00 AM")
+            },
+            onDismiss = { app.islandController.setMochiMenuOpen(false) },
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = (cardTopClearanceDp + 12f).dp)
+        )
 
         val miniTab = state.activeFloatingMiniTab
         if (miniTab != null) {
@@ -971,8 +1087,9 @@ fun IslandOverlayRoot(
                 onFinishDrag = { app.islandController.finishOcrHandleDrag() },
                 onSelectAll = { app.islandController.selectAllOcrTokens() },
                 onCopy = { selected ->
-                    app.soundManager.playTap()
+                    app.soundManager.playCopy()
                     app.clipboardMonitor.copyToClipboard(selected)
+                    OcrBitmapHolder.clear()
                     app.islandController.dismissOcrSelection()
                     app.islandController.upsertActivity(
                         IslandActivity.Alert(
@@ -982,70 +1099,16 @@ fun IslandOverlayRoot(
                             subtitle = selected.take(56)
                         ),
                         autoShowCompact = true,
-                        autoDismissMs = 3500L
+                        autoDismissMs = 2000L
                     )
                 },
-                onShare = { selected ->
-                    app.soundManager.playTap()
-                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
-                        type = "text/plain"
-                        putExtra(Intent.EXTRA_TEXT, selected)
-                        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    }
-                    runCatching {
-                        context.startActivity(
-                            Intent.createChooser(shareIntent, "Share text")
-                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                        )
-                    }
+                onShare = {},
+                onDismiss = {
+                    OcrBitmapHolder.clear()
                     app.islandController.dismissOcrSelection()
                 },
-                onDismiss = { app.islandController.dismissOcrSelection() },
                 onHapticTick = onRequestHaptic
             )
-        }
-
-        // Floating Reels/Shorts Shelf Shortcut Pill when user is inside Instagram / TikTok / YouTube
-        AnimatedVisibility(
-            visible = state.mode == IslandMode.IDLE &&
-                settings.reelOverlayEnabled &&
-                settings.vaultEnabled &&
-                state.isReelAppForeground &&
-                !state.isDeviceLocked &&
-                !state.isCalibrationPreview,
-            enter = fadeIn(tween(150)) + scaleIn(initialScale = 0.9f),
-            exit = fadeOut(tween(120)),
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = (cardTopClearanceDp + 10f).dp, end = 12.dp)
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .height(36.dp)
-                    .islandGlassChrome(
-                        shape = CircleShape,
-                        pillStyle = effectivePillStyle,
-                        glassDensity = settings.glassDensity,
-                        reduceGlass = settings.reduceGlass,
-                        solidFallback = settings.solidFallback,
-                        accentColor = accentColor,
-                        backdrop = LocalAppBackdrop.current,
-                        crossWindowBlurActive = crossWindowBlurSupported
-                    )
-                    .clickable {
-                        onRequestHaptic()
-                        app.soundManager.playVaultAdd()
-                        MediaProjectionPromptActivity.launchForVaultScreenshot(context)
-                        app.islandController.showTransientBanner("Saving frame to Shelf...")
-                    }
-                    .padding(horizontal = 12.dp)
-                    .testTag("reels_save_shelf_chip")
-            ) {
-                Icon(Icons.Filled.PhotoLibrary, contentDescription = "Save to Shelf", tint = accentColor, modifier = Modifier.size(16.dp))
-                Spacer(Modifier.width(6.dp))
-                Text("Save to Shelf", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
-            }
         }
 
         // Floating Liquid Glass Permission Approval Prompt
@@ -1138,7 +1201,7 @@ fun IslandOverlayRoot(
             Box(
                 modifier = Modifier
                     .clip(CircleShape)
-                    .background(Color(0xF016171E))
+                    .background(IslandColors.ObsidianCard)
                     .border(1.dp, accentColor.copy(alpha = 0.65f), CircleShape)
                     .padding(horizontal = 16.dp, vertical = 8.dp)
             ) {
@@ -1161,7 +1224,8 @@ private fun activityAccent(
     is IslandActivity.Timer -> defaultAccent
     is IslandActivity.Charging -> IslandColors.AccentGreen
     is IslandActivity.Music -> musicAccent
-    is IslandActivity.VoiceRecording -> IslandColors.AccentRed
+    is IslandActivity.VoiceRecording, is IslandActivity.ScreenRecording -> IslandColors.AccentRed
+    is IslandActivity.DownloadProgress -> IslandColors.AccentCyan
     is IslandActivity.Alert -> if (activity.kind == AlertKind.LOW_BATTERY) IslandColors.AccentRed else defaultAccent
     else -> defaultAccent
 }
@@ -1258,27 +1322,52 @@ fun IdlePillView(
         return
     }
 
-    val idleMetrics = remember(holeW, holeH) {
-        DeadZoneGeometry.idleCameraPillMetrics(holeW, holeH)
+    val idleMetrics = remember(holeW, holeH, settings.appleWidthIdlePill) {
+        DeadZoneGeometry.idleCameraPillMetrics(holeW, holeH, appleWidth = settings.appleWidthIdlePill)
     }
+    val hasExplicitBorder = isCalibrationPreview || isDragOverIsland || isLowBatteryWarning
     val idleBorder = when {
         isCalibrationPreview || isLowBatteryWarning -> IslandColors.AccentRed.copy(alpha = 0.90f)
         isDragOverIsland -> accentColor
-        else -> Color.White.copy(alpha = 0.14f)
+        else -> Color.Transparent
+    }
+    val energyRingColor = when {
+        state.batteryLevelPercent <= 15 -> IslandColors.AccentRed
+        state.batteryLevelPercent <= 30 -> IslandColors.AccentAmber
+        else -> IslandColors.AccentGreen
     }
 
-    // Idle CAMERA_ONLY state: compact black pill hugging ONLY the camera punch-hole (never a wide bar)
+    // Idle CAMERA_ONLY state (§0): pure #000000 100% opacity, ZERO shadow, ZERO border,
+    // hugging only the camera hole (48-58 dp) or optional Apple-width (125 dp).
     Box(
         modifier = Modifier
             .width(idleMetrics.widthDp.dp)
             .height(idleMetrics.heightDp.dp)
             .clip(CircleShape)
             .background(IslandColors.PillBlack)
-            .border(
-                width = if (isDragOverIsland || isCalibrationPreview || isLowBatteryWarning) 1.4.dp else 0.75.dp,
-                color = idleBorder,
-                shape = CircleShape
+            .then(
+                if (hasExplicitBorder) {
+                    Modifier.border(width = 1.4.dp, color = idleBorder, shape = CircleShape)
+                } else {
+                    Modifier
+                }
             )
+            .drawBehind {
+                if (settings.energyRingEnabled && !isCalibrationPreview && !isDragOverIsland) {
+                    val frac = (state.batteryLevelPercent / 100f).coerceIn(0.04f, 1f)
+                    val strokeW = 1.6.dp.toPx()
+                    val inset = strokeW * 0.7f
+                    drawArc(
+                        color = energyRingColor.copy(alpha = 0.88f),
+                        startAngle = -90f,
+                        sweepAngle = 360f * frac,
+                        useCenter = false,
+                        topLeft = Offset(inset, inset),
+                        size = Size((size.width - inset * 2f).coerceAtLeast(1f), (size.height - inset * 2f).coerceAtLeast(1f)),
+                        style = Stroke(width = strokeW, cap = StrokeCap.Round)
+                    )
+                }
+            }
             .testTag("idle_camera_ring")
     )
 }
@@ -1323,7 +1412,7 @@ private fun IdleWidgetSlot(
                 drawArc(color = Color.White.copy(alpha = 0.2f), startAngle = -90f, sweepAngle = 360f, useCenter = false, style = Stroke(2.dp.toPx()))
                 drawArc(color = color, startAngle = -90f, sweepAngle = 360f * frac, useCenter = false, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
             }
-            Text("${state.batteryLevelPercent}%", color = color, fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            Text("${state.batteryLevelPercent}%", color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
         }
         IdleWidgetType.NEXT_ALARM -> {
             val nextAlarm = remember(nowMs) {
@@ -1333,29 +1422,34 @@ private fun IdleWidgetSlot(
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
                 Icon(Icons.Filled.Alarm, contentDescription = "Next alarm", tint = accentColor, modifier = Modifier.size(12.dp))
-                Text(nextAlarm, color = Color.White, fontSize = 10.sp, maxLines = 1)
+                Text(nextAlarm, color = Color.White, fontSize = 11.sp, maxLines = 1)
             }
         }
         IdleWidgetType.UNREAD_COUNT -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
             Icon(Icons.Filled.Notifications, contentDescription = "Unread", tint = accentColor, modifier = Modifier.size(12.dp))
             Text("${state.notificationsHistory.size}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
-        IdleWidgetType.NETWORK -> {
-            val netLabel = remember(nowMs) {
+        IdleWidgetType.DND_STATUS -> {
+            val isDndOn = remember(nowMs) {
                 runCatching {
-                    val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
-                    val caps = cm?.getNetworkCapabilities(cm.activeNetwork)
-                    when {
-                        caps == null -> "Offline"
-                        caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "Wi-Fi"
-                        caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "5G/4G"
-                        else -> "Online"
-                    }
-                }.getOrDefault("Online")
+                    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                    val filter = nm?.currentInterruptionFilter
+                    filter != null && filter != NotificationManager.INTERRUPTION_FILTER_ALL
+                }.getOrDefault(false)
             }
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                Icon(Icons.Filled.Wifi, contentDescription = "Network", tint = accentColor, modifier = Modifier.size(12.dp))
-                Text(netLabel, color = Color.White, fontSize = 10.sp, maxLines = 1)
+                Icon(
+                    Icons.Filled.DoNotDisturbOn,
+                    contentDescription = "Do Not Disturb",
+                    tint = if (isDndOn) IslandColors.AccentAmber else IslandColors.TextSecondary,
+                    modifier = Modifier.size(12.dp)
+                )
+                Text(
+                    text = if (isDndOn) "DND" else "Ring",
+                    color = if (isDndOn) IslandColors.AccentAmber else Color.White,
+                    fontSize = 11.sp,
+                    maxLines = 1
+                )
             }
         }
         IdleWidgetType.NET_SPEED -> {
@@ -1366,15 +1460,15 @@ private fun IdleWidgetSlot(
                 prevBytes = cur
                 "${kbps}K/s"
             }
-            Text(speedLabel, color = accentColor, fontSize = 10.sp, fontWeight = FontWeight.Medium, maxLines = 1)
+            Text(speedLabel, color = accentColor, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
         }
         IdleWidgetType.SEARCH_SHORTCUT -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
             Icon(Icons.Filled.Search, contentDescription = "Search", tint = accentColor, modifier = Modifier.size(12.dp))
-            Text("Search", color = IslandColors.TextSecondary, fontSize = 10.sp, maxLines = 1)
+            Text("Search", color = IslandColors.TextSecondary, fontSize = 11.sp, maxLines = 1)
         }
         IdleWidgetType.QUICK_NOTE -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
             Icon(Icons.Filled.Edit, contentDescription = "Quick note", tint = IslandColors.AccentLime, modifier = Modifier.size(12.dp))
-            Text("Note", color = IslandColors.TextSecondary, fontSize = 10.sp, maxLines = 1)
+            Text("Note", color = IslandColors.TextSecondary, fontSize = 11.sp, maxLines = 1)
         }
     }
 }
@@ -1395,12 +1489,25 @@ fun CompactPillView(
     val hideTextOnLock = state.isDeviceLocked && settings.lockScreenPreset == LockScreenPreset.PRIVACY_HIDE_TEXT
     val holeW = exclusionZone.holeWidthDp.coerceAtLeast(settings.cutoutWidthDp)
     val holeH = exclusionZone.holeHeightDp.coerceAtLeast(settings.cutoutHeightDp)
-    val metrics = DeadZoneGeometry.compactSlotMetrics(
-        holeWidthDp = holeW,
-        holeHeightDp = holeH,
-        isLandscape = exclusionZone.isLandscape,
-        slotWidthDp = settings.pillSizePreset.slotWidthDp
-    )
+    val metrics = when (activity) {
+        is IslandActivity.Music -> DeadZoneGeometry.musicCompactPillMetrics(
+            holeWidthDp = holeW,
+            holeHeightDp = holeH,
+            isLandscape = exclusionZone.isLandscape
+        )
+        is IslandActivity.Alert -> DeadZoneGeometry.compactSlotMetrics(
+            holeWidthDp = holeW,
+            holeHeightDp = holeH,
+            isLandscape = exclusionZone.isLandscape,
+            slotWidthDp = maxOf(settings.pillSizePreset.slotWidthDp, 112f)
+        )
+        else -> DeadZoneGeometry.compactSlotMetrics(
+            holeWidthDp = holeW,
+            holeHeightDp = holeH,
+            isLandscape = exclusionZone.isLandscape,
+            slotWidthDp = settings.pillSizePreset.slotWidthDp
+        )
+    }
     val context = LocalContext.current
 
     val notifAppIcon: Bitmap? = remember(activity) {
@@ -1413,17 +1520,52 @@ fun CompactPillView(
     val isLowBattery = (activity is IslandActivity.Alert && activity.kind == AlertKind.LOW_BATTERY) ||
         (state.isLowBatteryWarning && activity is IslandActivity.Charging)
 
-    val pillModifier = Modifier.islandGlassChrome(
-        shape = CircleShape,
-        pillStyle = effectivePillStyle,
-        glassDensity = settings.glassDensity,
-        reduceGlass = settings.reduceGlass,
-        solidFallback = settings.solidFallback,
-        accentColor = if (isLowBattery) IslandColors.AccentRed else accentColor,
-        isHighlighted = state.isDragOverIsland || state.isCalibrationPreview || isLowBattery,
-        backdrop = LocalAppBackdrop.current,
-        crossWindowBlurActive = crossWindowBlurSupported
-    )
+    // Per-feature animation signatures (§2): Alert top-bounce + glow pulse, Music stretch-X lead
+    val alertBounceY = remember(activity?.id) { Animatable(if (activity is IslandActivity.Alert) -10f else 0f) }
+    val alertGlowAlpha = remember(activity?.id) { Animatable(0f) }
+    val musicScaleX = remember(activity?.id) { Animatable(if (activity is IslandActivity.Music) 0.90f else 1f) }
+    LaunchedEffect(activity?.id) {
+        if (activity is IslandActivity.Alert) {
+            alertBounceY.snapTo(-10f)
+            alertBounceY.animateTo(0f, animationSpec = MotionTokens.alertBounceSpring())
+            alertGlowAlpha.snapTo(0.35f)
+            alertGlowAlpha.animateTo(0f, animationSpec = tween(550))
+        } else {
+            alertBounceY.snapTo(0f)
+            alertGlowAlpha.snapTo(0f)
+        }
+        if (activity is IslandActivity.Music) {
+            musicScaleX.snapTo(0.88f)
+            musicScaleX.animateTo(1f, animationSpec = MotionTokens.appleSpring())
+        } else {
+            musicScaleX.snapTo(1f)
+        }
+    }
+
+    val pillModifier = Modifier
+        .graphicsLayer {
+            translationY = alertBounceY.value * density
+            scaleX = musicScaleX.value
+        }
+        .drawBehind {
+            if (alertGlowAlpha.value > 0.01f) {
+                drawRoundRect(
+                    color = accentColor.copy(alpha = alertGlowAlpha.value),
+                    cornerRadius = CornerRadius(size.height / 2f, size.height / 2f)
+                )
+            }
+        }
+        .islandGlassChrome(
+            shape = CircleShape,
+            pillStyle = effectivePillStyle,
+            glassDensity = settings.glassDensity,
+            reduceGlass = settings.reduceGlass,
+            solidFallback = settings.solidFallback,
+            accentColor = if (isLowBattery) IslandColors.AccentRed else accentColor,
+            isHighlighted = state.isDragOverIsland || state.isCalibrationPreview || isLowBattery,
+            backdrop = LocalAppBackdrop.current,
+            crossWindowBlurActive = crossWindowBlurSupported
+        )
 
     if (metrics.isVerticalLandscape) {
         // Landscape camera-around vertical pill: top slot (44dp) -> cutout spacer -> bottom slot (44dp)
@@ -1460,14 +1602,14 @@ fun CompactPillView(
                     is IslandActivity.Timer -> Text(
                         text = TimerEngine.formatDuration(activity.remainingMs),
                         color = accentColor,
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         maxLines = 1
                     )
                     is IslandActivity.Charging -> Text(
                         text = "${activity.levelPercent}%",
                         color = if (isLowBattery) IslandColors.AccentRed else IslandColors.AccentGreen,
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         maxLines = 1
                     )
@@ -1479,7 +1621,8 @@ fun CompactPillView(
         return
     }
 
-    // Portrait: symmetrical leftSlotDp (88dp) + centerSpacerDp (holeW+16dp) + rightSlotDp (88dp)
+    // Portrait: symmetrical leftSlotDp + centerSpacerDp (holeW+16dp) + rightSlotDp.
+    // §0 HARD CAP: Music pill is strictly 180-200 dp (never >210 dp) and displays Album Art + Visualizer ONLY.
     Box(
         modifier = pillModifier
             .width(metrics.totalWidthDp.dp)
@@ -1520,88 +1663,61 @@ fun CompactPillView(
             ) {
                 when (activity) {
                     is IslandActivity.Music -> {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            if (activity.title.isNotBlank() && !hideTextOnLock) {
-                                Text(
-                                    text = activity.title,
-                                    color = IslandColors.TextPrimary,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                    modifier = Modifier
-                                        .widthIn(max = metrics.musicTitleMaxDp.dp)
-                                        .debugCameraDeadZoneGuard(exclusionZone, "music_title")
-                                )
-                            }
-                            MusicCompactWaveform(isPlaying = isPlaying, accentColor = musicAccent, positionMs = activity.positionMs)
-                        }
+                        // §0 CRITICAL RULE: NO song title text in the compact pill EVER — visualizer bars ONLY.
+                        MusicCompactWaveform(isPlaying = isPlaying, accentColor = musicAccent, positionMs = activity.positionMs)
                     }
                     is IslandActivity.Timer -> {
+                        val secText = TimerEngine.formatDuration(activity.remainingMs)
+                        AnimatedContent(
+                            targetState = secText,
+                            transitionSpec = {
+                                (fadeIn(tween(140)) + slideInVertically(tween(150)) { it / 2 })
+                                    .togetherWith(fadeOut(tween(100)) + slideOutVertically(tween(120)) { -it / 2 })
+                            },
+                            label = "timer_compact_digits"
+                        ) { digit ->
+                            Text(
+                                text = digit,
+                                style = TextStyle(
+                                    color = accentColor,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    fontFeatureSettings = "tnum"
+                                ),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .widthIn(max = (metrics.rightSlotDp - metrics.innerSafetyInsetDp).dp)
+                                    .debugCameraDeadZoneGuard(exclusionZone, "timer_text")
+                            )
+                        }
+                    }
+                    is IslandActivity.Charging -> {
+                        // §3 P0-3 Glimpse: single live value (e.g. "100% · 99W" or "92%") cleanly right of camera
+                        val wattsText = activity.wattageWatts?.takeIf { it > 0.5f && activity.levelPercent < 100 }
+                            ?.let { " · ${it.roundToInt()}W" }.orEmpty()
+                        val barColor = if (isLowBattery) IslandColors.AccentRed else IslandColors.AccentGreen
                         Text(
-                            text = TimerEngine.formatDuration(activity.remainingMs),
+                            text = "${activity.levelPercent}%$wattsText",
                             style = TextStyle(
-                                color = accentColor,
+                                color = barColor,
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                fontWeight = FontWeight.Bold,
                                 fontFeatureSettings = "tnum"
                             ),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
                                 .widthIn(max = (metrics.rightSlotDp - metrics.innerSafetyInsetDp).dp)
-                                .debugCameraDeadZoneGuard(exclusionZone, "timer_text")
+                                .debugCameraDeadZoneGuard(exclusionZone, "charging_text")
                         )
                     }
-                    is IslandActivity.Charging -> {
-                        val wattsText = activity.wattageWatts?.takeIf { it > 0.5f && activity.levelPercent < 100 }
-                            ?.let { " ${it.roundToInt()}W" }.orEmpty()
-                        val frac = (activity.levelPercent / 100f).coerceIn(0.05f, 1f)
-                        val barColor = if (isLowBattery) IslandColors.AccentRed else IslandColors.AccentGreen
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .width(20.dp)
-                                    .height(9.dp)
-                                    .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.16f))
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth(frac)
-                                        .height(9.dp)
-                                        .clip(CircleShape)
-                                        .background(barColor)
-                                )
-                            }
-                            Text(
-                                text = "${activity.levelPercent}%$wattsText",
-                                style = TextStyle(
-                                    color = barColor,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFeatureSettings = "tnum"
-                                ),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier
-                                    .widthIn(max = (metrics.rightSlotDp - 26f).dp)
-                                    .debugCameraDeadZoneGuard(exclusionZone, "charging_text")
-                            )
-                        }
-                    }
                     is IslandActivity.NotificationPreview -> {
-                        // Notification compact pill: app name ONLY (never title/body!), ellipsis at 80dp
+                        // Notification compact pill: app name ONLY (never title/body)
                         Text(
-                            text = activity.appName.ifBlank { "Notification" },
+                            text = activity.appName.ifBlank { "Alert" },
                             color = IslandColors.TextPrimary,
-                            fontSize = 11.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
@@ -1610,23 +1726,58 @@ fun CompactPillView(
                                 .debugCameraDeadZoneGuard(exclusionZone, "notif_app_name")
                         )
                     }
+                    is IslandActivity.DownloadProgress -> {
+                        val pct = if (activity.max > 0) ((activity.progress * 100) / activity.max).coerceIn(0, 100) else 0
+                        Text(
+                            text = if (activity.indeterminate) "Saving" else "$pct%",
+                            style = TextStyle(
+                                color = IslandColors.AccentCyan,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                fontFeatureSettings = "tnum"
+                            ),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .widthIn(max = (metrics.rightSlotDp - metrics.innerSafetyInsetDp).dp)
+                                .debugCameraDeadZoneGuard(exclusionZone, "download_pct")
+                        )
+                    }
+                    is IslandActivity.ScreenRecording -> {
+                        val recText = if (activity.isCountdown) "REC ${activity.countdownSec}" else TimerEngine.formatDuration(activity.elapsedMs)
+                        Text(
+                            text = recText,
+                            style = TextStyle(
+                                color = IslandColors.AccentRed,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFeatureSettings = "tnum"
+                            ),
+                            maxLines = 1,
+                            modifier = Modifier.debugCameraDeadZoneGuard(exclusionZone, "screen_rec_text")
+                        )
+                    }
                     is IslandActivity.VoiceRecording -> {
                         Text(
                             text = TimerEngine.formatDuration(activity.elapsedMs),
-                            color = IslandColors.AccentRed,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
+                            style = TextStyle(
+                                color = IslandColors.AccentRed,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                fontFeatureSettings = "tnum"
+                            ),
                             maxLines = 1
                         )
                     }
                     is IslandActivity.Alert -> {
-                        val alertColor = if (activity.kind == AlertKind.LOW_BATTERY) IslandColors.AccentRed else Color.White
+                        // Clean white text (§1) and full text width for "Saved to Shelf" (never "Saved to S...")
                         Text(
                             text = if (hideTextOnLock) "Alert" else activity.title,
-                            color = alertColor,
-                            fontSize = 11.sp,
+                            color = Color.White,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
+                            softWrap = false,
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
                                 .widthIn(max = metrics.notificationAppNameMaxDp.dp)
@@ -1668,24 +1819,31 @@ private fun CompactLeftGlyph(
                 Image(
                     bitmap = albumArt.asImageBitmap(),
                     contentDescription = "Album art",
+                    contentScale = ContentScale.Crop,
                     modifier = Modifier
-                        .size(22.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .border(0.6.dp, musicAccent.copy(alpha = 0.65f), RoundedCornerShape(6.dp))
+                        .size(26.dp)
+                        .clip(RoundedCornerShape(8.dp))
                 )
             } else {
-                Icon(Icons.Filled.MusicNote, contentDescription = "Music", tint = musicAccent, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.MusicNote, contentDescription = "Music", tint = musicAccent, modifier = Modifier.size(20.dp))
             }
         }
         is IslandActivity.Timer -> {
-            Icon(Icons.Filled.Timer, contentDescription = "Timer", tint = accentColor, modifier = Modifier.size(18.dp))
+            val frac = if (activity.totalMs > 0L) (activity.remainingMs.toFloat() / activity.totalMs.toFloat()).coerceIn(0f, 1f) else 0f
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.size(24.dp)) {
+                Canvas(modifier = Modifier.matchParentSize()) {
+                    drawArc(color = Color.White.copy(alpha = 0.2f), startAngle = -90f, sweepAngle = 360f, useCenter = false, style = Stroke(2.2.dp.toPx()))
+                    drawArc(color = IslandColors.AccentRed, startAngle = -90f, sweepAngle = 360f * frac, useCenter = false, style = Stroke(2.2.dp.toPx(), cap = StrokeCap.Round))
+                }
+                Icon(Icons.Filled.Timer, contentDescription = "Timer", tint = accentColor, modifier = Modifier.size(13.dp))
+            }
         }
         is IslandActivity.Charging -> {
             Icon(
                 imageVector = if (isLowBattery) Icons.Filled.BatteryAlert else Icons.Filled.BatteryChargingFull,
                 contentDescription = "Battery",
                 tint = if (isLowBattery) IslandColors.AccentRed else IslandColors.AccentGreen,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(20.dp)
             )
         }
         is IslandActivity.NotificationPreview -> {
@@ -1694,16 +1852,21 @@ private fun CompactLeftGlyph(
                     bitmap = notifAppIcon.asImageBitmap(),
                     contentDescription = activity.appName,
                     modifier = Modifier
-                        .size(20.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .border(0.6.dp, IslandColors.CrimsonBorder.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
+                        .size(22.dp)
+                        .clip(RoundedCornerShape(7.dp))
                 )
             } else {
-                Icon(Icons.Filled.Notifications, contentDescription = activity.appName, tint = accentColor, modifier = Modifier.size(18.dp))
+                Icon(Icons.Filled.Notifications, contentDescription = activity.appName, tint = accentColor, modifier = Modifier.size(20.dp))
             }
         }
+        is IslandActivity.DownloadProgress -> {
+            Icon(Icons.Filled.Download, contentDescription = activity.title, tint = IslandColors.AccentCyan, modifier = Modifier.size(20.dp))
+        }
+        is IslandActivity.ScreenRecording -> {
+            Icon(Icons.Filled.FiberManualRecord, contentDescription = "Screen recording", tint = IslandColors.AccentRed, modifier = Modifier.size(18.dp))
+        }
         is IslandActivity.VoiceRecording -> {
-            Icon(Icons.Filled.Mic, contentDescription = "Voice Recording", tint = IslandColors.AccentRed, modifier = Modifier.size(17.dp))
+            Icon(Icons.Filled.Mic, contentDescription = "Voice Recording", tint = IslandColors.AccentRed, modifier = Modifier.size(18.dp))
         }
         is IslandActivity.Alert -> {
             val isLow = activity.kind == AlertKind.LOW_BATTERY
@@ -1711,7 +1874,7 @@ private fun CompactLeftGlyph(
                 imageVector = if (isLow) Icons.Filled.BatteryAlert else Icons.Filled.Notifications,
                 contentDescription = activity.title,
                 tint = if (isLow) IslandColors.AccentRed else accentColor,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(20.dp)
             )
         }
         null -> Spacer(Modifier.width(12.dp))
@@ -1734,7 +1897,7 @@ private fun SplitSecondaryBubble(
     Box(modifier = Modifier.clickable(onClick = onClick).testTag("split_companion_bubble")) {
         Box(
             modifier = Modifier
-                .size(36.dp)
+                .size(37.dp)
                 .islandGlassChrome(
                     shape = CircleShape,
                     pillStyle = effectivePillStyle,
@@ -1755,7 +1918,9 @@ private fun SplitSecondaryBubble(
                     fontWeight = FontWeight.Bold
                 )
                 is IslandActivity.Music -> Icon(Icons.Filled.MusicNote, contentDescription = null, tint = accentColor, modifier = Modifier.size(16.dp))
-                is IslandActivity.Charging -> Text("${activity.levelPercent}%", color = IslandColors.AccentGreen, fontSize = 10.sp)
+                is IslandActivity.Charging -> Text("${activity.levelPercent}%", color = IslandColors.AccentGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                is IslandActivity.DownloadProgress -> Icon(Icons.Filled.Download, contentDescription = null, tint = IslandColors.AccentCyan, modifier = Modifier.size(16.dp))
+                is IslandActivity.ScreenRecording -> Icon(Icons.Filled.FiberManualRecord, contentDescription = null, tint = IslandColors.AccentRed, modifier = Modifier.size(14.dp))
                 else -> Icon(Icons.Filled.Notifications, contentDescription = null, tint = accentColor, modifier = Modifier.size(16.dp))
             }
         }
@@ -1763,7 +1928,7 @@ private fun SplitSecondaryBubble(
             Box(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .size(15.dp)
+                    .size(16.dp)
                     .clip(CircleShape)
                     .background(accentColor),
                 contentAlignment = Alignment.Center
@@ -1771,7 +1936,7 @@ private fun SplitSecondaryBubble(
                 Text(
                     text = "+$companionCount",
                     color = Color.Black,
-                    fontSize = 8.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.ExtraBold
                 )
             }
@@ -1949,14 +2114,15 @@ fun MediumPillView(
                             Text(
                                 text = mediaState.title.ifBlank { "No track playing" },
                                 color = Color.White,
-                                fontSize = 15.sp,
+                                fontSize = 16.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                maxLines = 1,
+                                maxLines = 2,
+                                lineHeight = 20.sp,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
                                 text = mediaState.artist.ifBlank { "Tap to open music" },
-                                color = Color.White.copy(alpha = 0.72f),
+                                color = IslandColors.TextSecondary,
                                 fontSize = 13.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -2027,9 +2193,8 @@ fun MediumPillView(
                 val richBitmap = remember(primary.id, primary.hasPicture) {
                     if (primary.hasPicture) NotificationMediaCache.getPicture(primary.id)?.takeIf { !it.isRecycled } else null
                 }
-                val otpMatch = remember(primary.text, hideTextOnLock) {
-                    if (hideTextOnLock) null
-                    else Regex("\\b\\d{4,8}\\b").find(primary.text)?.value
+                val otpMatch = remember(primary.title, primary.text, hideTextOnLock) {
+                    if (hideTextOnLock) null else OtpExtractor.extract(primary.title, primary.text)
                 }
 
                 Column(
@@ -2300,6 +2465,99 @@ fun MediumPillView(
                 }
             }
 
+            is IslandActivity.DownloadProgress -> {
+                val pct = if (primary.max > 0) ((primary.progress * 100) / primary.max).coerceIn(0, 100) else 0
+                val frac = if (primary.max > 0) (primary.progress.toFloat() / primary.max.toFloat()).coerceIn(0.04f, 1f) else 0.5f
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = primary.title.ifBlank { primary.appName },
+                                color = Color.White,
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = listOf(primary.appName, primary.speedText, primary.etaText).filter { it.isNotBlank() }.joinToString(" · "),
+                                color = IslandColors.TextSecondary,
+                                fontSize = 13.sp,
+                                maxLines = 1
+                            )
+                        }
+                        Text(
+                            text = if (primary.indeterminate) "..." else "$pct%",
+                            color = IslandColors.AccentCyan,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(6.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.14f))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(frac)
+                                .height(6.dp)
+                                .clip(CircleShape)
+                                .background(IslandColors.AccentCyan)
+                        )
+                    }
+                }
+            }
+
+            is IslandActivity.ScreenRecording -> {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Icon(Icons.Filled.FiberManualRecord, contentDescription = null, tint = IslandColors.AccentRed, modifier = Modifier.size(22.dp))
+                        Column {
+                            Text("Screen Recording", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                            Text(
+                                text = if (primary.isCountdown) "Starting in ${primary.countdownSec}..." else TimerEngine.formatDuration(primary.elapsedMs),
+                                color = IslandColors.AccentRed,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier
+                            .height(44.dp)
+                            .clip(CircleShape)
+                            .background(IslandColors.AccentRed)
+                            .clickable {
+                                onRequestHaptic()
+                                app.soundManager.playToggle(isOn = false)
+                                ScreenRecorderManager.stopRecording(context)
+                                app.islandController.collapse()
+                            }
+                            .padding(horizontal = 16.dp)
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Filled.Stop, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                            Text("Stop", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                }
+            }
+
             else -> {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -2350,7 +2608,8 @@ fun MediumPillView(
     }
 }
 
-private fun maxPanelHeightForTab(@Suppress("UNUSED_PARAMETER") tab: IslandTab) = 234.dp
+private fun maxPanelHeightForTab(tab: IslandTab) =
+    if (tab == IslandTab.TOOLS) 240.dp else 234.dp
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -2483,36 +2742,39 @@ fun ExpandedIslandCard(
                         is IslandActivity.Music -> IslandTab.MUSIC
                         is IslandActivity.Timer -> IslandTab.TIMER
                         is IslandActivity.VoiceRecording -> IslandTab.MEMO
-                        is IslandActivity.Alert, is IslandActivity.NotificationPreview -> IslandTab.ALERTS
+                        is IslandActivity.ScreenRecording -> IslandTab.TOOLS
+                        is IslandActivity.Alert, is IslandActivity.NotificationPreview, is IslandActivity.DownloadProgress -> IslandTab.ALERTS
                         else -> state.activeTab
                     }
                     val liveText = when (primaryLive) {
-                        is IslandActivity.Music -> primaryLive.title.ifBlank { "Music" }
+                        is IslandActivity.Music -> if (mediaState.isPlaying) "Playing" else "Paused"
                         is IslandActivity.Timer -> TimerEngine.formatDuration(primaryLive.remainingMs)
                         is IslandActivity.Charging -> "${primaryLive.levelPercent}%"
                         is IslandActivity.NotificationPreview -> primaryLive.appName.ifBlank { primaryLive.title }
                         is IslandActivity.Alert -> primaryLive.title
                         is IslandActivity.VoiceRecording -> TimerEngine.formatDuration(primaryLive.elapsedMs)
+                        is IslandActivity.DownloadProgress -> if (primaryLive.max > 0) "${(primaryLive.progress * 100 / primaryLive.max).coerceIn(0, 100)}%" else "Saving"
+                        is IslandActivity.ScreenRecording -> if (primaryLive.isCountdown) "REC ${primaryLive.countdownSec}" else TimerEngine.formatDuration(primaryLive.elapsedMs)
                     }
                     val liveColor = activityAccent(primaryLive, accentColor, musicAccent)
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .widthIn(max = 76.dp)
+                            .widthIn(max = 88.dp)
                             .clip(CircleShape)
                             .background(liveColor.copy(alpha = 0.20f))
                             .clickable {
                                 onRequestHaptic()
                                 app.islandController.selectTab(liveTab)
                             }
-                            .padding(horizontal = 6.dp, vertical = 2.dp)
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
-                        Box(Modifier.size(5.dp).clip(CircleShape).background(liveColor))
+                        Box(Modifier.size(6.dp).clip(CircleShape).background(liveColor))
                         Spacer(Modifier.width(4.dp))
                         Text(
                             text = liveText,
                             color = IslandColors.TextPrimary,
-                            fontSize = 10.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -2527,7 +2789,7 @@ fun ExpandedIslandCard(
                         app.islandController.collapse()
                         onOpenAppSettings()
                     },
-                    modifier = Modifier.size(30.dp)
+                    modifier = Modifier.size(34.dp)
                 ) {
                     Icon(Icons.Filled.Settings, contentDescription = "Open Settings", tint = IslandColors.TextSecondary, modifier = Modifier.size(16.dp))
                 }
@@ -2597,6 +2859,8 @@ fun ExpandedIslandCard(
                         state = mediaState,
                         accentColor = musicAccent,
                         rotateAlbumArt = settings.rotateAlbumArt,
+                        expandedMarqueeEnabled = settings.expandedLyricsMarquee,
+                        lyricsOffsetMs = settings.lyricsOffsetMs,
                         onTogglePlayPause = {
                             onRequestHaptic()
                             if (mediaState.isPlaying) app.soundManager.playMusicPause() else app.soundManager.playMusicPlay()
@@ -2633,6 +2897,11 @@ fun ExpandedIslandCard(
                             app.soundManager.playTap()
                             app.mediaHub.openPlayerApp()
                             app.islandController.collapse()
+                        },
+                        onOpenLyricsSettings = {
+                            onRequestHaptic()
+                            app.islandController.collapse()
+                            onOpenAppSettings()
                         }
                     )
 
@@ -2663,6 +2932,7 @@ fun ExpandedIslandCard(
                         app = app,
                         settings = settings,
                         accentColor = accentColor,
+                        isScreenRecording = state.activityQueue.any { it is IslandActivity.ScreenRecording },
                         onHaptic = onRequestHaptic,
                         onCollapse = { app.islandController.collapse() }
                     )
@@ -2748,7 +3018,7 @@ private fun DraggableFloatingMiniWindow(
             .heightIn(max = DeadZoneGeometry.FULL_MAX_HEIGHT_DP.dp)
             .fillMaxWidth()
             .clip(RoundedCornerShape(IslandColors.CardRadius))
-            .background(Color(0xF50C0D12))
+            .background(IslandColors.ObsidianCard)
             .border(1.dp, accentColor.copy(alpha = 0.65f), RoundedCornerShape(IslandColors.CardRadius))
             .padding(bottom = 6.dp)
             .testTag("floating_mini_window")
@@ -2892,8 +3162,8 @@ fun BottomChooserBar(
                         )
                         Text(
                             text = if (morePage) "Back" else "More",
-                            fontSize = 10.sp,
-                            lineHeight = 11.sp,
+                            fontSize = 11.sp,
+                            lineHeight = 12.sp,
                             color = if (morePage) accentColor else IslandColors.TextSecondary
                         )
                     }
@@ -2950,8 +3220,8 @@ private fun ChooserChip(
         )
         Text(
             text = tab.title,
-            fontSize = 10.sp,
-            lineHeight = 11.sp,
+            fontSize = 11.sp,
+            lineHeight = 12.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             color = if (selected) accentColor else IslandColors.TextSecondary,
             maxLines = 1

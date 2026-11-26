@@ -283,6 +283,16 @@ class OverlayWindowHost(
                     onSelectModePoint(e.rawX.toInt(), e.rawY.toInt())
                     return true
                 }
+                if (isMochiShoulderHit(e.x, density)) {
+                    // Top-right corner of the Mochi area opens the Remove / Hide menu; body tap makes Mochi jump
+                    if (e.y < 18f * density && e.x > ((touchView?.width ?: 0) - 18f * density)) {
+                        app.islandController.setMochiMenuOpen(true)
+                    } else {
+                        performSelectionHaptic()
+                        app.islandController.triggerMochiJump()
+                    }
+                    return true
+                }
                 handlePillTap(app)
                 return true
             }
@@ -291,6 +301,8 @@ class OverlayWindowHost(
                 performSelectionHaptic()
                 if (latestState.isSelectModeActive) {
                     onSelectModePoint(e.rawX.toInt(), e.rawY.toInt())
+                } else if (isMochiShoulderHit(e.x, density)) {
+                    app.islandController.setMochiMenuOpen(true)
                 } else {
                     handlePillLongPress(app)
                 }
@@ -305,49 +317,24 @@ class OverlayWindowHost(
                 if (latestState.isSelectModeActive) return false
                 val absX = kotlin.math.abs(velocityX)
                 val absY = kotlin.math.abs(velocityY)
-                if (absX > absY && absX > 420f) {
+                val sensitivity = latestSettings.gestureSensitivity.coerceIn(0.5f, 1.5f)
+                val xThreshold = (420f / sensitivity)
+                val yThreshold = (500f / sensitivity)
+                if (absX > absY && absX > xThreshold) {
                     performSelectionHaptic()
                     val isLeft = velocityX < 0f
                     val swipeAction = if (isLeft) latestSettings.pillSwipeLeftGesture else latestSettings.pillSwipeRightGesture
-                    if (latestState.primaryActivity is IslandActivity.NotificationPreview &&
-                        swipeAction == PillSwipeAction.TRACK_OR_NOTIF
-                    ) {
-                        if (isLeft) app.islandController.dismissActiveNotification() else app.islandController.nextNotification()
-                        return true
-                    }
-                    when (swipeAction) {
-                        PillSwipeAction.TRACK_OR_NOTIF -> {
-                            when (latestState.primaryActivity) {
-                                is IslandActivity.Music -> {
-                                    app.soundManager.playMusicNext()
-                                    if (isLeft) app.mediaHub.skipNext() else app.mediaHub.skipPrevious()
-                                }
-                                is IslandActivity.NotificationPreview -> app.islandController.nextNotification()
-                                else -> app.islandController.expand(IslandTab.SEARCH)
-                            }
-                        }
-                        PillSwipeAction.VOLUME -> {
-                            val am = serviceContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
-                            val dir = if (isLeft) AudioManager.ADJUST_LOWER else AudioManager.ADJUST_RAISE
-                            am?.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir, AudioManager.FLAG_SHOW_UI)
-                        }
-                        PillSwipeAction.SEARCH -> app.islandController.expand(IslandTab.SEARCH)
-                        PillSwipeAction.NONE -> Unit
-                    }
+                    executePillSwipeAction(app, swipeAction, isLeft = isLeft)
                     return true
                 }
-                if (velocityY > 520f && absY > absX) {
+                if (velocityY > yThreshold && absY > absX) {
                     performSelectionHaptic()
-                    app.islandController.openFromPill(latestSettings.twoStageOpen)
+                    executePillSwipeAction(app, latestSettings.pillSwipeDownGesture, isLeft = false)
                     return true
                 }
-                if (velocityY < -520f && absY > absX && latestSettings.swipeUpDismissEnabled) {
+                if (velocityY < -yThreshold && absY > absX && latestSettings.swipeUpDismissEnabled) {
                     performSelectionHaptic()
-                    if (latestState.primaryActivity is IslandActivity.NotificationPreview) {
-                        app.islandController.dismissActiveNotification()
-                    } else {
-                        app.islandController.collapse()
-                    }
+                    executePillSwipeAction(app, latestSettings.pillSwipeUpGesture, isLeft = true)
                     return true
                 }
                 return false
@@ -441,6 +428,15 @@ class OverlayWindowHost(
         lastTouchSignature = "GONE"
     }
 
+    fun setOverlayHiddenForCapture(hidden: Boolean) {
+        drawingComposeView?.visibility = if (hidden) View.INVISIBLE else View.VISIBLE
+        if (hidden) {
+            hideTouchForSelectCapture()
+        } else {
+            updateTouchWindowBounds(latestState, latestSettings, liveExclusionZone.value, force = true)
+        }
+    }
+
     fun detach() {
         unregisterBlurListener()
         val wm = windowManager
@@ -493,7 +489,8 @@ class OverlayWindowHost(
             state.isFlashlightCardOpen ||
             state.isFloatingSidebarOpen ||
             state.activeFloatingMiniTab != null ||
-            state.approvalPrompt != null
+            state.approvalPrompt != null ||
+            state.isMochiMenuOpen
         val needsIme = isInteractive && state.needsKeyboardFocus
 
         // Keep home screen & wallpaper crisp behind the MATCH_PARENT drawing canvas so translucent
@@ -576,7 +573,8 @@ class OverlayWindowHost(
             state.isFlashlightCardOpen ||
             state.isFloatingSidebarOpen ||
             state.activeFloatingMiniTab != null ||
-            state.approvalPrompt != null
+            state.approvalPrompt != null ||
+            state.isMochiMenuOpen
 
         if (hideTouchWindow) {
             val sig = "GONE"
@@ -587,16 +585,26 @@ class OverlayWindowHost(
             return
         }
 
-        val metrics = DeadZoneGeometry.compactSlotMetrics(
-            holeWidthDp = zone.holeWidthDp,
-            holeHeightDp = zone.holeHeightDp,
-            isLandscape = zone.isLandscape,
-            slotWidthDp = settings.pillSizePreset.slotWidthDp
-        )
+        val isMusicPrimary = state.primaryActivity is IslandActivity.Music && state.mode == IslandMode.COMPACT
+        val metrics = if (isMusicPrimary) {
+            DeadZoneGeometry.musicCompactPillMetrics(zone.holeWidthDp, zone.holeHeightDp, zone.isLandscape)
+        } else {
+            DeadZoneGeometry.compactSlotMetrics(
+                holeWidthDp = zone.holeWidthDp,
+                holeHeightDp = zone.holeHeightDp,
+                isLandscape = zone.isLandscape,
+                slotWidthDp = settings.pillSizePreset.slotWidthDp
+            )
+        }
         val idleCameraMetrics = DeadZoneGeometry.idleCameraPillMetrics(
             holeWidthDp = zone.holeWidthDp,
-            holeHeightDp = zone.holeHeightDp
+            holeHeightDp = zone.holeHeightDp,
+            appleWidth = settings.appleWidthIdlePill
         )
+
+        val mochiActive = isMochiCurrentlyActive(state, settings)
+        val mochiExtraTopDp = if (mochiActive) 28f else 0f
+        val mochiExtraRightDp = if (mochiActive && !zone.isLandscape) 42f else 0f
 
         if (!zone.isLandscape) {
             val idleWidthDp = when (settings.whenIdleMode) {
@@ -607,16 +615,16 @@ class OverlayWindowHost(
             val pillWidthDp = when (state.mode) {
                 IslandMode.IDLE -> idleWidthDp
                 IslandMode.COMPACT -> metrics.totalWidthDp
-                IslandMode.SPLIT -> metrics.totalWidthDp + 52f
+                IslandMode.SPLIT -> metrics.totalWidthDp + 48f
                 IslandMode.MEDIUM -> DeadZoneGeometry.MEDIUM_MAX_WIDTH_DP
                 IslandMode.EXPANDED -> DeadZoneGeometry.FULL_MAX_WIDTH_DP
             }
-            val touchW = ((pillWidthDp + 12f) * density).toInt()
-            val touchH = ((metrics.pillHeightDp + 12f).coerceAtLeast(48f) * density).toInt()
+            val touchW = ((pillWidthDp + 12f + mochiExtraRightDp * 2f) * density).toInt()
+            val touchH = ((metrics.pillHeightDp + 12f + mochiExtraTopDp).coerceAtLeast(48f) * density).toInt()
             val targetX = ((zone.cutoutRectPx.centerX() - zone.screenWidthPx / 2f)).toInt()
             val targetY = (zone.cutoutRectPx.top - (2f * density).toInt()).coerceAtLeast(0)
 
-            val sig = "PORTRAIT:$touchW:$touchH:$targetX:$targetY"
+            val sig = "PORTRAIT:$touchW:$touchH:$targetX:$targetY:$mochiActive"
             if (!force && lastTouchSignature == sig) return
             lastTouchSignature = sig
 
@@ -649,6 +657,23 @@ class OverlayWindowHost(
         view.setBackgroundColor(android.graphics.Color.TRANSPARENT)
         view.visibility = View.VISIBLE
         runCatching { wm.updateViewLayout(view, params) }
+    }
+
+    private fun isMochiCurrentlyActive(state: IslandState, settings: IslandSettings): Boolean {
+        if (!settings.mochiPetEnabled || System.currentTimeMillis() < settings.mochiHiddenUntilMs) return false
+        if (state.mode != IslandMode.IDLE && state.mode != IslandMode.COMPACT && state.mode != IslandMode.SPLIT) return false
+        if (state.primaryActivity is IslandActivity.Music || state.primaryActivity is IslandActivity.Alert) {
+            // Mochi stays beside/outside the pill rather than inside music/alert cards
+            return true
+        }
+        return true
+    }
+
+    private fun isMochiShoulderHit(localX: Float, density: Float): Boolean {
+        if (!isMochiCurrentlyActive(latestState, latestSettings)) return false
+        val w = touchView?.width ?: return false
+        val shoulderWidthPx = 42f * density
+        return localX >= (w - shoulderWidthPx).coerceAtLeast(0f)
     }
 
     private fun handlePillTap(app: DynamicIslandApp) {
@@ -685,6 +710,51 @@ class OverlayWindowHost(
             IslandGesture.EXPAND, IslandGesture.OPEN_CUSTOMISE, IslandGesture.SELECT_OCR -> {
                 app.islandController.openFromPill(latestSettings.twoStageOpen)
             }
+        }
+    }
+
+    private fun executePillSwipeAction(
+        app: DynamicIslandApp,
+        action: PillSwipeAction,
+        isLeft: Boolean
+    ) {
+        if (latestState.primaryActivity is IslandActivity.NotificationPreview &&
+            action == PillSwipeAction.TRACK_OR_NOTIF
+        ) {
+            if (isLeft) app.islandController.dismissActiveNotification() else app.islandController.nextNotification()
+            return
+        }
+        when (action) {
+            PillSwipeAction.TRACK_OR_NOTIF -> {
+                when (latestState.primaryActivity) {
+                    is IslandActivity.Music -> {
+                        app.soundManager.playMusicNext()
+                        if (isLeft) app.mediaHub.skipNext() else app.mediaHub.skipPrevious()
+                    }
+                    is IslandActivity.NotificationPreview -> app.islandController.nextNotification()
+                    else -> app.islandController.expand(IslandTab.SEARCH)
+                }
+            }
+            PillSwipeAction.VOLUME -> {
+                val am = serviceContext.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+                val dir = if (isLeft) AudioManager.ADJUST_LOWER else AudioManager.ADJUST_RAISE
+                am?.adjustStreamVolume(AudioManager.STREAM_MUSIC, dir, AudioManager.FLAG_SHOW_UI)
+            }
+            PillSwipeAction.SEARCH -> app.islandController.expand(IslandTab.SEARCH)
+            PillSwipeAction.EXPAND -> app.islandController.openFromPill(latestSettings.twoStageOpen)
+            PillSwipeAction.COLLAPSE -> {
+                if (latestState.primaryActivity is IslandActivity.NotificationPreview) {
+                    app.islandController.dismissActiveNotification()
+                } else {
+                    app.islandController.collapse()
+                }
+            }
+            PillSwipeAction.TORCH -> {
+                val ok = app.quickTogglesManager.toggleFlashlight()
+                app.soundManager.playToggle(ok && app.quickTogglesManager.state.value.isTorchOn)
+            }
+            PillSwipeAction.OPEN_SHELF -> app.islandController.expand(IslandTab.VAULT)
+            PillSwipeAction.NONE -> Unit
         }
     }
 

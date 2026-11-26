@@ -29,7 +29,9 @@ data class BatteryUiState(
 class BatteryMonitor(
     private val context: Context,
     private val islandController: IslandController,
-    private val settingsRepository: SettingsRepository? = null
+    private val settingsRepository: SettingsRepository? = null,
+    private val onChargingSound: () -> Unit = {},
+    private val onLowBatterySound: () -> Unit = {}
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val batteryManager = context.getSystemService(Context.BATTERY_SERVICE) as? BatteryManager
@@ -229,6 +231,7 @@ class BatteryMonitor(
     }
 
     private fun emitLowBatteryCapsule(pct: Int, autoExpand: Boolean) {
+        onLowBatterySound()
         islandController.upsertActivity(
             IslandActivity.Alert(
                 id = "alert_low_battery_$pct",
@@ -251,6 +254,7 @@ class BatteryMonitor(
     ) {
         val cfg = latestSettings.eventConfig(EventKind.CHARGING)
         if (!latestSettings.batteryEnabled || !cfg.enabled) return
+        if (isFreshConnect) onChargingSound()
         val capsuleDuration = 2000L
         islandController.upsertActivity(
             IslandActivity.Charging(

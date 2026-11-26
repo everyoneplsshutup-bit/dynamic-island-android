@@ -20,6 +20,7 @@ import com.example.MainActivity
 import com.example.R
 import com.example.island.DeadZoneGeometry
 import com.example.island.ExclusionZone
+import com.example.island.IslandMode
 import com.example.island.IslandService
 import com.example.island.IslandState
 import com.example.island.OverlayWindowHost
@@ -152,12 +153,35 @@ class IslandKeepAliveService : Service() {
                         if (!host.isAttached.value) {
                             val ok = host.attach(app, settings, latestState, latestKeepAwake)
                             _isFallbackHosting.value = ok
+                            app.islandController.setHiddenReason(
+                                if (ok) "Visible (Keep-Alive overlay)" else "Overlay attach blocked by system",
+                                serviceAlive = true
+                            )
                         } else {
                             host.updateLayout(latestState, settings, latestKeepAwake, zone, forceTouch = true)
+                            val reason = when {
+                                latestState.isDeviceLocked && settings.lockScreenPreset == com.example.system.LockScreenPreset.HIDDEN ->
+                                    "Hidden on lock screen"
+                                latestState.mode == IslandMode.IDLE && settings.whenIdleMode == com.example.system.WhenIdleMode.HIDDEN ->
+                                    "Idle mode set to Hidden"
+                                else -> "Visible (Keep-Alive overlay)"
+                            }
+                            app.islandController.setHiddenReason(reason, serviceAlive = true)
                         }
                     } else if (host.isAttached.value) {
                         host.detach()
                         _isFallbackHosting.value = false
+                        if (!accHosting && !settings.islandEnabled) {
+                            app.islandController.setHiddenReason("Master switch turned OFF in Home Hub", serviceAlive = true)
+                        }
+                    } else if (!accHosting) {
+                        val reason = when {
+                            !settings.islandEnabled -> "Master switch turned OFF in Home Hub"
+                            !Settings.canDrawOverlays(this@IslandKeepAliveService) ->
+                                "Draw-over-other-apps & Accessibility both inactive"
+                            else -> "Waiting for overlay host"
+                        }
+                        app.islandController.setHiddenReason(reason, serviceAlive = true)
                     }
                 }
             }

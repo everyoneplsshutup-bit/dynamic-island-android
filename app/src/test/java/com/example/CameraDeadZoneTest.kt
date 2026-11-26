@@ -404,7 +404,71 @@ class CameraDeadZoneTest {
         composeRule.waitForIdle()
         val idleBounds = composeRule.onNodeWithTag("idle_camera_ring").fetchSemanticsNode().boundsInRoot
         val idleWidthDp = idleBounds.width / 2.75f
-        assertTrue("Rendered idle_camera_ring must be tight around camera (<70dp), got $idleWidthDp", idleWidthDp < 70f)
+        assertTrue("Rendered idle_camera_ring must be tight around camera (<65dp), got $idleWidthDp", idleWidthDp < 65f)
+
+        val appleIdle = DeadZoneGeometry.idleCameraPillMetrics(zone.holeWidthDp, zone.holeHeightDp, appleWidth = true)
+        assertTrue("Apple-width idle pill must be 125dp, got ${appleIdle.widthDp}", kotlin.math.abs(appleIdle.widthDp - 125f) <= 0.5f)
+    }
+
+    @Test
+    fun `active music compact pill stays under 210dp and never renders song title text`() {
+        val longTitle = "VeryLongTrackTitleShouldNeverStretchPill"
+        val zone = DeadZoneGeometry.fromSyntheticHole(
+            holeWidthDp = 27f,
+            holeHeightDp = 34f,
+            screenWidthDp = 393f,
+            density = 2.75f
+        )
+        val musicMetrics = DeadZoneGeometry.musicCompactPillMetrics(zone.holeWidthDp, zone.holeHeightDp)
+        assertTrue(
+            "Music compact pill totalWidthDp must be <= 210dp, got ${musicMetrics.totalWidthDp}",
+            musicMetrics.totalWidthDp <= 210f
+        )
+
+        val state = IslandState(
+            mode = IslandMode.COMPACT,
+            activityQueue = listOf(
+                IslandActivity.Music(
+                    packageName = "com.unshoo.pixelmusic",
+                    title = longTitle,
+                    artist = "Muse",
+                    isPlaying = true,
+                    positionMs = 15_000L,
+                    durationMs = 240_000L
+                )
+            )
+        )
+        composeRule.setContent {
+            CompositionLocalProvider(LocalDensity provides Density(2.75f, fontScale = 1f)) {
+                Box(modifier = Modifier.width(393.dp), contentAlignment = Alignment.TopCenter) {
+                    CompactPillView(
+                        state = state,
+                        settings = IslandSettings(cutoutWidthDp = 27f, cutoutHeightDp = 34f),
+                        exclusionZone = zone,
+                        accentColor = Color(0xFF4A9EFF),
+                        isPlaying = true
+                    )
+                }
+            }
+        }
+        composeRule.waitForIdle()
+
+        val pillBounds = composeRule.onNodeWithTag("compact_pill_portrait").fetchSemanticsNode().boundsInRoot
+        val pillWidthDp = pillBounds.width / 2.75f
+        assertTrue("Rendered music compact_pill_portrait must stay <= 210dp, got $pillWidthDp", pillWidthDp <= 210f)
+
+        val textNodes = mutableListOf<String>()
+        fun collectTexts(node: SemanticsNode) {
+            if (node.config.contains(SemanticsProperties.Text)) {
+                textNodes += node.config[SemanticsProperties.Text].joinToString { it.text }
+            }
+            node.children.forEach { collectTexts(it) }
+        }
+        collectTexts(composeRule.onRoot(useUnmergedTree = true).fetchSemanticsNode())
+        assertFalse(
+            "Music compact pill must NEVER render track title text, found: $textNodes",
+            textNodes.any { it.contains("VeryLongTrack") || it == longTitle }
+        )
     }
 
     private fun assertNoTextIntersectsExclusionZone(

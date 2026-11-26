@@ -37,6 +37,7 @@ import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -87,6 +88,7 @@ fun CalibrationScreen(
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val view = LocalView.current
+    val accent = MaterialTheme.colorScheme.primary
 
     var previewExpanded by remember { mutableStateOf(true) }
     var worstCaseFixture by remember { mutableIntStateOf(0) }
@@ -194,11 +196,11 @@ fun CalibrationScreen(
                             val marginPx = DeadZoneGeometry.REQUIRED_MARGIN_DP.dp.toPx()
                             val centerPt = Offset(cx, holeCy)
 
-                            // Concentric glowing crimson radar rings
+                            // Concentric radar rings
                             listOf(1.1f, 1.8f, 2.7f).forEachIndexed { idx, scale ->
                                 val rad = (maxOf(holeW, holeH) * scale).coerceAtLeast(24f)
                                 drawCircle(
-                                    color = IslandColors.CrimsonBright.copy(alpha = (0.34f - idx * 0.09f).coerceAtLeast(0.08f)),
+                                    color = accent.copy(alpha = (0.34f - idx * 0.09f).coerceAtLeast(0.08f)),
                                     radius = rad,
                                     center = centerPt,
                                     style = Stroke(width = 1.4.dp.toPx())
@@ -207,13 +209,13 @@ fun CalibrationScreen(
 
                             // Crosshair dashed lines
                             drawLine(
-                                color = IslandColors.CrimsonBright.copy(alpha = 0.45f),
+                                color = accent.copy(alpha = 0.45f),
                                 start = Offset(cx, 0f),
                                 end = Offset(cx, size.height),
                                 strokeWidth = 1.2.dp.toPx()
                             )
                             drawLine(
-                                color = IslandColors.CrimsonBright.copy(alpha = 0.35f),
+                                color = accent.copy(alpha = 0.35f),
                                 start = Offset(0f, holeCy),
                                 end = Offset(size.width, holeCy),
                                 strokeWidth = 1.dp.toPx(),
@@ -222,14 +224,14 @@ fun CalibrationScreen(
 
                             // Punch-hole camera outline & +8dp dashed Safe Zone
                             drawRoundRect(
-                                color = IslandColors.CrimsonBright,
+                                color = accent,
                                 topLeft = Offset(cx - holeW / 2f, topY),
                                 size = Size(holeW, holeH),
                                 cornerRadius = CornerRadius(settings.cutoutCornerRadiusDp.dp.toPx()),
                                 style = Stroke(width = 1.6.dp.toPx())
                             )
                             drawRoundRect(
-                                color = IslandColors.CrimsonBright.copy(alpha = 0.72f),
+                                color = accent.copy(alpha = 0.72f),
                                 topLeft = Offset(cx - holeW / 2f - marginPx, (topY - marginPx).coerceAtLeast(2f)),
                                 size = Size(holeW + marginPx * 2f, holeH + marginPx * 2f),
                                 cornerRadius = CornerRadius((settings.cutoutCornerRadiusDp + 6f).dp.toPx()),
@@ -251,7 +253,7 @@ fun CalibrationScreen(
                                     settings = settings,
                                     state = previewState,
                                     exclusionZone = previewZone,
-                                    accentColor = IslandColors.CrimsonBright,
+                                    accentColor = accent,
                                     isCalibrationPreview = true,
                                     isDragOverIsland = false,
                                     isLowBatteryWarning = false
@@ -261,20 +263,20 @@ fun CalibrationScreen(
                                     state = previewState,
                                     settings = settings,
                                     exclusionZone = previewZone,
-                                    accentColor = IslandColors.CrimsonBright
+                                    accentColor = accent
                                 )
                             }
                         }
 
-                        // "Safe Zone" pill toggle matching everyoneplsshutup-calibration.png
+                        // Safe Zone pill toggle
                         Button(
                             onClick = { previewExpanded = !previewExpanded },
                             shape = CircleShape,
                             colors = ButtonDefaults.buttonColors(
-                                containerColor = if (previewExpanded) IslandColors.CrimsonPrimary else Color(0xCC241216),
+                                containerColor = if (previewExpanded) accent else IslandColors.ObsidianCard,
                                 contentColor = Color.White
                             ),
-                            border = BorderStroke(1.dp, IslandColors.CrimsonGlow.copy(alpha = 0.7f)),
+                            border = BorderStroke(1.dp, accent.copy(alpha = 0.65f)),
                             contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
                             modifier = Modifier
                                 .align(Alignment.BottomCenter)
@@ -313,7 +315,7 @@ fun CalibrationScreen(
                                 val pad = sw / 2f + 2.dp.toPx()
                                 val sz = Size(size.width - pad * 2f, size.height - pad * 2f)
                                 drawArc(
-                                    color = Color(0xFF2B0B10),
+                                    color = IslandColors.ObsidianCardElevated,
                                     startAngle = -90f,
                                     sweepAngle = 360f,
                                     useCenter = false,
@@ -322,7 +324,7 @@ fun CalibrationScreen(
                                     style = Stroke(width = sw, cap = StrokeCap.Round)
                                 )
                                 drawArc(
-                                    brush = Brush.sweepGradient(listOf(IslandColors.CrimsonPrimary, IslandColors.CrimsonBright, Color(0xFFFF7A85))),
+                                    brush = Brush.sweepGradient(listOf(accent.copy(alpha = 0.72f), accent, accent.copy(alpha = 0.92f))),
                                     startAngle = -90f,
                                     sweepAngle = (alignmentScore / 100f) * 360f,
                                     useCenter = false,
@@ -333,7 +335,7 @@ fun CalibrationScreen(
                             }
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("$alignmentScore%", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                                Text("aligned", color = IslandColors.TextSecondary, fontSize = 10.sp)
+                                Text("aligned", color = IslandColors.TextSecondary, fontSize = 11.sp)
                             }
                         }
                         Spacer(Modifier.width(14.dp))
@@ -365,7 +367,7 @@ fun CalibrationScreen(
                                         }
                                     },
                                     shape = CircleShape,
-                                    colors = ButtonDefaults.buttonColors(containerColor = IslandColors.CrimsonPrimary),
+                                    colors = ButtonDefaults.buttonColors(containerColor = accent),
                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                                     modifier = Modifier.height(36.dp).testTag("calibration_autodetect")
                                 ) {
@@ -388,7 +390,7 @@ fun CalibrationScreen(
                                         }
                                     },
                                     shape = CircleShape,
-                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF23161B)),
+                                    colors = ButtonDefaults.buttonColors(containerColor = IslandColors.ObsidianCardElevated),
                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                                     modifier = Modifier.height(36.dp).testTag("calibration_reset")
                                 ) {
@@ -411,8 +413,8 @@ fun CalibrationScreen(
                                 .weight(1f)
                                 .height(36.dp)
                                 .clip(CircleShape)
-                                .background(if (active) Color(0xFF470B13) else Color(0xCC160F13))
-                                .border(1.dp, if (active) IslandColors.CrimsonBorderStrong else Color.White.copy(alpha = 0.14f), CircleShape)
+                                .background(if (active) accent.copy(alpha = 0.28f) else IslandColors.ObsidianCard)
+                                .border(1.dp, if (active) accent else Color.White.copy(alpha = 0.14f), CircleShape)
                                 .clickable { worstCaseFixture = idx }
                         ) {
                             Text(label, color = Color.White, fontSize = 11.sp, fontWeight = if (active) FontWeight.Bold else FontWeight.Medium)
@@ -509,7 +511,7 @@ private fun TelemetryCell(
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
         Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
         Spacer(Modifier.height(4.dp))
-        Text(label, color = IslandColors.TextSecondary, fontSize = 10.sp)
+        Text(label, color = IslandColors.TextSecondary, fontSize = 11.sp)
         Text(value, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
     }
 }
@@ -523,6 +525,7 @@ private fun CrimsonSliderCard(
     unit: String,
     onValueChange: (Float) -> Unit
 ) {
+    val accent = MaterialTheme.colorScheme.primary
     ObsidianGlassCard(contentPadding = PaddingValues(14.dp), modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
             CrimsonSquircleIcon(icon = Icons.Filled.Tune, size = 38.dp, iconSize = 19.dp)
@@ -534,7 +537,7 @@ private fun CrimsonSliderCard(
             Box(
                 modifier = Modifier
                     .clip(CircleShape)
-                    .background(Color(0xFF1F161A))
+                    .background(IslandColors.ObsidianCardElevated)
                     .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape)
                     .padding(horizontal = 10.dp, vertical = 4.dp)
             ) {
@@ -547,9 +550,9 @@ private fun CrimsonSliderCard(
             onValueChange = onValueChange,
             valueRange = range,
             colors = SliderDefaults.colors(
-                thumbColor = IslandColors.CrimsonBright,
-                activeTrackColor = IslandColors.CrimsonPrimary,
-                inactiveTrackColor = Color(0xFF2D1B20)
+                thumbColor = accent,
+                activeTrackColor = accent,
+                inactiveTrackColor = IslandColors.ObsidianCardElevated
             )
         )
     }

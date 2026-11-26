@@ -12,6 +12,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -44,6 +45,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SegmentedButton
@@ -70,6 +72,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -251,7 +254,7 @@ fun SettingsGroupDetailScreen(
                                                     Text(
                                                         text = style.label,
                                                         color = Color.White,
-                                                        fontSize = 10.sp,
+                                                        fontSize = 11.sp,
                                                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                                                         maxLines = 1
                                                     )
@@ -374,7 +377,7 @@ fun SettingsGroupDetailScreen(
                                             Text(
                                                 text = theme.label,
                                                 color = if (active) Color.White else IslandColors.TextSecondary,
-                                                fontSize = 10.sp,
+                                                fontSize = 11.sp,
                                                 fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
                                                 maxLines = 1
                                             )
@@ -382,6 +385,30 @@ fun SettingsGroupDetailScreen(
                                     }
                                 }
                             }
+                        }
+                        item {
+                            SwitchRow(
+                                title = "Apple-width idle pill (125 dp)",
+                                helper = "Use 125 dp Apple capsule width when idle instead of compact 56 dp camera-hug pill.",
+                                checked = settings.appleWidthIdlePill,
+                                onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(appleWidthIdlePill = c) } } }
+                            )
+                        }
+                        item {
+                            SwitchRow(
+                                title = "Energy Ring around camera",
+                                helper = "Battery arc hugging the punch-hole camera cutout.",
+                                checked = settings.energyRingEnabled,
+                                onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(energyRingEnabled = c) } } }
+                            )
+                        }
+                        item {
+                            SwitchRow(
+                                title = "Privacy Dots",
+                                helper = "Show subtle live dot when another app uses Camera, Mic, or Location.",
+                                checked = settings.privacyDotsEnabled,
+                                onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(privacyDotsEnabled = c) } } }
+                            )
                         }
                         item {
                             SwitchRow(
@@ -439,7 +466,7 @@ fun SettingsGroupDetailScreen(
                                     Spacer(Modifier.height(8.dp))
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                         Text("Glass Density", color = Color.White, fontWeight = FontWeight.Medium)
-                                        Text("${(settings.glassDensity * 100).toInt()}%", color = IslandColors.CrimsonBright)
+                                        Text("${(settings.glassDensity * 100).toInt()}%", color = MaterialTheme.colorScheme.primary)
                                     }
                                     Slider(
                                         value = settings.glassDensity,
@@ -520,7 +547,7 @@ fun SettingsGroupDetailScreen(
                                         Column(modifier = Modifier.weight(1f)) {
                                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                                 Text("Speed", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 13.sp)
-                                                Text("${String.format("%.1f", settings.animationSpeed)}x", color = IslandColors.CrimsonBright, fontSize = 12.sp)
+                                                Text("${String.format("%.1f", settings.animationSpeed)}x", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
                                             }
                                             Slider(
                                                 value = settings.animationSpeed,
@@ -532,7 +559,7 @@ fun SettingsGroupDetailScreen(
                                         Column(modifier = Modifier.weight(1f)) {
                                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                                 Text("Elasticity", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 13.sp)
-                                                Text("${(settings.animationElasticity * 100).toInt()}%", color = IslandColors.CrimsonBright, fontSize = 12.sp)
+                                                Text("${(settings.animationElasticity * 100).toInt()}%", color = MaterialTheme.colorScheme.primary, fontSize = 12.sp)
                                             }
                                             Slider(
                                                 value = settings.animationElasticity,
@@ -545,14 +572,22 @@ fun SettingsGroupDetailScreen(
                                     }
                                 }
                             }
+                            item {
+                                SwitchRow(
+                                    title = "Metaball Glass Effect",
+                                    helper = "Liquid RenderEffect blur+threshold merge on Android 13+.",
+                                    checked = settings.metaballRenderEffect,
+                                    onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(metaballRenderEffect = c) } } }
+                                )
+                            }
                         }
 
                         if (motionSubSection == 0 || motionSubSection == 3) {
                             item {
-                                SettingsSectionHeader("Swipes & Long-Press Gestures")
+                                SettingsSectionHeader("4-Way Pill Swipes & Gestures")
                                 EnumPickerRow(
                                     title = "Collapsed Pill Swipe Left",
-                                    helper = "Next track, cycle notifications, adjust volume, or open search.",
+                                    helper = "Next track, cycle notifications, adjust volume, torch, or search.",
                                     selectedLabel = settings.pillSwipeLeftGesture.label,
                                     options = PillSwipeAction.entries.map { it.label to it },
                                     onSelect = { a -> scope.launch { app.settingsRepository.update { it.copy(pillSwipeLeftGesture = a) } } }
@@ -561,11 +596,88 @@ fun SettingsGroupDetailScreen(
                             item {
                                 EnumPickerRow(
                                     title = "Collapsed Pill Swipe Right",
-                                    helper = "Previous track, volume up, or open search.",
+                                    helper = "Previous track, volume up, torch, or open search.",
                                     selectedLabel = settings.pillSwipeRightGesture.label,
                                     options = PillSwipeAction.entries.map { it.label to it },
                                     onSelect = { a -> scope.launch { app.settingsRepository.update { it.copy(pillSwipeRightGesture = a) } } }
                                 )
+                            }
+                            item {
+                                EnumPickerRow(
+                                    title = "Collapsed Pill Swipe Up",
+                                    helper = "Collapse or dismiss active glimpse.",
+                                    selectedLabel = settings.pillSwipeUpGesture.label,
+                                    options = PillSwipeAction.entries.map { it.label to it },
+                                    onSelect = { a -> scope.launch { app.settingsRepository.update { it.copy(pillSwipeUpGesture = a) } } }
+                                )
+                            }
+                            item {
+                                EnumPickerRow(
+                                    title = "Collapsed Pill Swipe Down",
+                                    helper = "Expand card, open Shelf, or toggle Torch.",
+                                    selectedLabel = settings.pillSwipeDownGesture.label,
+                                    options = PillSwipeAction.entries.map { it.label to it },
+                                    onSelect = { a -> scope.launch { app.settingsRepository.update { it.copy(pillSwipeDownGesture = a) } } }
+                                )
+                            }
+                            item {
+                                ObsidianGlassCard {
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("Gesture Sensitivity", color = Color.White, fontWeight = FontWeight.Medium)
+                                        Text("${String.format("%.1f", settings.gestureSensitivity)}x", color = MaterialTheme.colorScheme.primary)
+                                    }
+                                    Slider(
+                                        value = settings.gestureSensitivity,
+                                        valueRange = 0.6f..1.6f,
+                                        onValueChange = { v -> scope.launch { app.settingsRepository.update { it.copy(gestureSensitivity = v) } } }
+                                    )
+                                }
+                            }
+                            item {
+                                var playgroundStatus by remember { mutableStateOf("Swipe Left, Right, Up, or Down here to test") }
+                                var dragAccX by remember { mutableStateOf(0f) }
+                                var dragAccY by remember { mutableStateOf(0f) }
+                                ObsidianGlassCard(highlighted = true) {
+                                    Text("Gesture Playground", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    Spacer(Modifier.height(4.dp))
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .height(72.dp)
+                                            .clip(RoundedCornerShape(18.dp))
+                                            .background(IslandColors.ObsidianBg)
+                                            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.45f), RoundedCornerShape(18.dp))
+                                            .pointerInput(settings.gestureSensitivity) {
+                                                val threshold = (48f / settings.gestureSensitivity.coerceIn(0.6f, 1.6f))
+                                                detectDragGestures(
+                                                    onDragStart = { dragAccX = 0f; dragAccY = 0f },
+                                                    onDrag = { change, dragAmount ->
+                                                        change.consume()
+                                                        dragAccX += dragAmount.x
+                                                        dragAccY += dragAmount.y
+                                                    },
+                                                    onDragEnd = {
+                                                        playgroundStatus = when {
+                                                            kotlin.math.abs(dragAccX) >= kotlin.math.abs(dragAccY) && dragAccX < -threshold ->
+                                                                "Swipe Left -> ${settings.pillSwipeLeftGesture.label}"
+                                                            kotlin.math.abs(dragAccX) >= kotlin.math.abs(dragAccY) && dragAccX > threshold ->
+                                                                "Swipe Right -> ${settings.pillSwipeRightGesture.label}"
+                                                            dragAccY < -threshold ->
+                                                                "Swipe Up -> ${settings.pillSwipeUpGesture.label}"
+                                                            dragAccY > threshold ->
+                                                                "Swipe Down -> ${settings.pillSwipeDownGesture.label}"
+                                                            else -> "Swipe further to trigger gesture"
+                                                        }
+                                                        app.soundManager.playTap()
+                                                    }
+                                                )
+                                            }
+                                            .padding(horizontal = 12.dp)
+                                    ) {
+                                        Text(playgroundStatus, color = IslandColors.TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                                    }
+                                }
                             }
                             item {
                                 EnumPickerRow(
@@ -663,7 +775,7 @@ fun SettingsGroupDetailScreen(
                             ObsidianGlassCard {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Text("Sound Volume", color = Color.White, fontWeight = FontWeight.Medium)
-                                    Text("${(settings.soundVolume * 100).toInt()}%", color = IslandColors.CrimsonBright)
+                                    Text("${(settings.soundVolume * 100).toInt()}%", color = MaterialTheme.colorScheme.primary)
                                 }
                                 Slider(
                                     value = settings.soundVolume,
@@ -679,6 +791,15 @@ fun SettingsGroupDetailScreen(
                             }
                         }
                         item {
+                            SwitchRow(
+                                title = "Extra Morph Sound",
+                                helper = "Optional subtle swoosh when the pill morphs sizes (default OFF).",
+                                checked = settings.sfxMorphEnabled,
+                                enabled = settings.soundEnabled,
+                                onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(sfxMorphEnabled = c) } } }
+                            )
+                        }
+                        item {
                             CrimsonPillButton(
                                 text = "Try It · Interactive Motion Demo",
                                 icon = Icons.Filled.PlayArrow,
@@ -688,6 +809,113 @@ fun SettingsGroupDetailScreen(
                                 },
                                 modifier = Modifier.fillMaxWidth().testTag("motion_try_it_btn")
                             )
+                        }
+                    }
+
+                    SettingsGroup.MEDIA_PET -> {
+                        item {
+                            SettingsSectionHeader("Lyrics & Music Playback")
+                        }
+                        item {
+                            SwitchRow(
+                                title = "Lyrics download from LRCLIB (lrclib.net)",
+                                helper = "Embedded local LRC files load first; fetches synced lyrics from lrclib.net only when missing and toggled ON.",
+                                checked = settings.lyricsFromInternet,
+                                onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(lyricsFromInternet = c) } } }
+                            )
+                        }
+                        item {
+                            ObsidianGlassCard {
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("Lyrics Timing Offset", color = Color.White, fontWeight = FontWeight.Medium)
+                                    Text(
+                                        "${if (settings.lyricsOffsetMs >= 0) "+" else ""}${settings.lyricsOffsetMs} ms",
+                                        color = MaterialTheme.colorScheme.primary,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
+                                Slider(
+                                    value = settings.lyricsOffsetMs.toFloat().coerceIn(-5000f, 5000f),
+                                    valueRange = -5000f..5000f,
+                                    steps = 19,
+                                    onValueChange = { v ->
+                                        val snapped = (v / 250f).toInt() * 250
+                                        scope.launch { app.settingsRepository.update { it.copy(lyricsOffsetMs = snapped) } }
+                                    }
+                                )
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                                    OutlinedButton(
+                                        onClick = { scope.launch { app.settingsRepository.update { it.copy(lyricsOffsetMs = (it.lyricsOffsetMs - 500).coerceIn(-5000, 5000)) } } },
+                                        shape = CircleShape,
+                                        modifier = Modifier.weight(1f).height(40.dp)
+                                    ) { Text("-500 ms", fontSize = 12.sp) }
+                                    OutlinedButton(
+                                        onClick = { scope.launch { app.settingsRepository.update { it.copy(lyricsOffsetMs = 0) } } },
+                                        shape = CircleShape,
+                                        modifier = Modifier.weight(1f).height(40.dp)
+                                    ) { Text("Reset", fontSize = 12.sp) }
+                                    OutlinedButton(
+                                        onClick = { scope.launch { app.settingsRepository.update { it.copy(lyricsOffsetMs = (it.lyricsOffsetMs + 500).coerceIn(-5000, 5000)) } } },
+                                        shape = CircleShape,
+                                        modifier = Modifier.weight(1f).height(40.dp)
+                                    ) { Text("+500 ms", fontSize = 12.sp) }
+                                }
+                            }
+                        }
+                        item {
+                            SwitchRow(
+                                title = "Scroll Long Song Titles in Expanded Card",
+                                helper = "Opt-in marquee inside the expanded Music card only (compact pill never scrolls titles).",
+                                checked = settings.expandedLyricsMarquee,
+                                onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(expandedLyricsMarquee = c) } } }
+                            )
+                        }
+                        item {
+                            SettingsSectionHeader("Mochi Island Pet")
+                        }
+                        item {
+                            SwitchRow(
+                                title = "Island pet",
+                                helper = "Cute pixel panda resting beside the idle Dynamic Island. Long-press Mochi anytime to hide or remove.",
+                                checked = settings.mochiPetEnabled,
+                                onCheckedChange = { c ->
+                                    scope.launch {
+                                        app.settingsRepository.update {
+                                            it.copy(mochiPetEnabled = c, mochiHiddenUntilMs = if (c) 0L else it.mochiHiddenUntilMs)
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                        item {
+                            SwitchRow(
+                                title = "Quiet Hours Animation (11 PM–7 AM)",
+                                helper = "Allow Mochi idle animations overnight instead of sleeping still.",
+                                checked = settings.mochiQuietHoursAnimate,
+                                enabled = settings.mochiPetEnabled,
+                                onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(mochiQuietHoursAnimate = c) } } }
+                            )
+                        }
+                        if (settings.mochiHiddenUntilMs > System.currentTimeMillis()) {
+                            item {
+                                ObsidianGlassCard(highlighted = true) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text("Mochi is hidden for today", color = Color.White, fontWeight = FontWeight.SemiBold)
+                                            Text("Tap Restore to bring Mochi back immediately.", color = IslandColors.TextSecondary, fontSize = 12.sp)
+                                        }
+                                        Button(
+                                            onClick = {
+                                                app.soundManager.playSuccess()
+                                                scope.launch {
+                                                    app.settingsRepository.update { it.copy(mochiPetEnabled = true, mochiHiddenUntilMs = 0L) }
+                                                }
+                                            },
+                                            shape = CircleShape
+                                        ) { Text("Restore") }
+                                    }
+                                }
+                            }
                         }
                     }
 
@@ -744,7 +972,7 @@ fun SettingsGroupDetailScreen(
                             ObsidianGlassCard {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Text("Alerts Dwell Timer", color = Color.White, fontWeight = FontWeight.Medium)
-                                    Text("${String.format("%.1f", settings.alertsDwellMs / 1000f)} s", color = IslandColors.CrimsonBright)
+                                    Text("${String.format("%.1f", settings.alertsDwellMs / 1000f)} s", color = MaterialTheme.colorScheme.primary)
                                 }
                                 Slider(
                                     value = settings.alertsDwellMs.toFloat().coerceIn(1500f, 10000f),
@@ -1077,7 +1305,7 @@ fun SettingsGroupDetailScreen(
                         item {
                             ObsidianGlassCard(highlighted = true, accentColor = IslandColors.AccentGreen) {
                                 Text(
-                                    text = "On-Device Privacy Guarantee: Dynamic Island declares zero INTERNET permission. Notes, Shelf photos, memos, clips, and OCR stay strictly on your phone.",
+                                    text = "On-Device Privacy Guarantee: Notes, Shelf photos, memos, clips, notification inbox, and OCR stay 100% on your phone. Network access is used ONLY for optional lyrics download from lrclib.net when enabled.",
                                     color = Color.White,
                                     fontSize = 13.sp
                                 )
@@ -1117,6 +1345,8 @@ fun SettingsGroupDetailScreen(
                                 HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = Color.White.copy(alpha = 0.14f))
                                 Text("Runtime Diagnostics:", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                                 Spacer(Modifier.height(4.dp))
+                                Text("• Island Status: ${diag.hiddenReason}", color = IslandColors.TextSecondary, fontSize = 12.sp)
+                                Text("• Keep-Alive Service: ${if (diag.serviceAlive) "Running" else "Stopped"}", color = IslandColors.TextSecondary, fontSize = 12.sp)
                                 Text("• Last Notification: ${diag.lastNotificationApp}", color = IslandColors.TextSecondary, fontSize = 12.sp)
                                 Text("• Last Suppression Reason: ${diag.lastSuppressionReason}", color = IslandColors.TextSecondary, fontSize = 12.sp)
                                 Text("• Dead-Zone Collisions: ${diag.deadZoneCollisionCount}", color = IslandColors.TextSecondary, fontSize = 12.sp)
@@ -1363,7 +1593,7 @@ private fun InteractiveMotionDemoDialog(
                         .fillMaxWidth()
                         .height(140.dp)
                         .clip(RoundedCornerShape(24.dp))
-                        .background(Color(0xFF0A0A0E)),
+                        .background(IslandColors.ObsidianBg),
                     contentAlignment = Alignment.TopCenter
                 ) {
                     Box(
@@ -1374,7 +1604,7 @@ private fun InteractiveMotionDemoDialog(
                             .height(92.dp)
                             .graphicsLayer { scaleX = animScaleXState.value; scaleY = animScaleYState.value }
                             .clip(RoundedCornerShape(36.dp))
-                            .background(Color(0xFF1A0D10))
+                            .background(IslandColors.ObsidianCard)
                             .border(1.dp, demoColor.copy(alpha = 0.72f), RoundedCornerShape(36.dp)),
                         contentAlignment = Alignment.Center
                     ) {
@@ -1418,7 +1648,7 @@ private fun InteractiveMotionDemoDialog(
                                 demoColor = color
                                 if (demoStage == 0) demoStage = 1
                             },
-                            label = { Text(chipLabel, fontSize = 10.sp) }
+                            label = { Text(chipLabel, fontSize = 11.sp) }
                         )
                     }
                 }
@@ -1427,7 +1657,7 @@ private fun InteractiveMotionDemoDialog(
         confirmButton = {
             Button(
                 onClick = onDismiss,
-                colors = ButtonDefaults.buttonColors(containerColor = IslandColors.CrimsonPrimary)
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) { Text("Close") }
         }
     )
@@ -1436,7 +1666,7 @@ private fun InteractiveMotionDemoDialog(
 @Composable
 private fun SettingsSectionHeader(title: String) {
     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 4.dp)) {
-        Box(Modifier.width(3.dp).height(14.dp).background(IslandColors.CrimsonBright, CircleShape))
+        Box(Modifier.width(3.dp).height(14.dp).background(MaterialTheme.colorScheme.primary, CircleShape))
         Spacer(Modifier.width(8.dp))
         Text(text = title, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
     }
@@ -1514,7 +1744,7 @@ private fun <T> EnumPickerRow(
                 Text(title, color = Color.White, fontWeight = FontWeight.Medium, fontSize = 14.sp)
                 Text(helper, color = IslandColors.TextSecondary, fontSize = 12.sp)
             }
-            Text(selectedLabel, color = IslandColors.CrimsonBright, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+            Text(selectedLabel, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                 options.forEach { (label, value) ->
                     DropdownMenuItem(

@@ -28,6 +28,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Animation
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.RadioButtonChecked
 import androidx.compose.material.icons.filled.Search
@@ -38,6 +39,7 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Widgets
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
@@ -78,12 +80,13 @@ import com.example.ui.theme.islandGlassChrome
 import kotlinx.coroutines.launch
 
 enum class SettingsGroup(val title: String, val subtitle: String, val icon: ImageVector) {
-    LOOK("Look", "Pill style, glass density, solid fallback & theme", Icons.Filled.Palette),
-    MOTION("Motion", "Animation speed, spring feel, haptics & sound", Icons.Filled.Animation),
+    LOOK("Look", "Pill style, glass density, energy ring, privacy dots & theme", Icons.Filled.Palette),
+    MOTION("Motion", "Animation speed, 4-way gestures, haptics & sound", Icons.Filled.Animation),
+    MEDIA_PET("Music, Lyrics & Mochi", "LRCLIB lyrics, timing offset, marquee & island pet", Icons.Filled.MusicNote),
     PILL("Pill", "Camera calibration, idle mode, dwell time & lock screen", Icons.Filled.RadioButtonChecked),
     FEATURES("Features", "Master toggles, Customise Island, event groups & apps", Icons.Filled.Tune),
     PRIVACY("Privacy", "Screen reading / OCR (off by default), Shelf & clipboard", Icons.Filled.Security),
-    ABOUT("About / Danger Zone", "Version, permissions status, backup, reset & delete", Icons.Filled.Info)
+    ABOUT("About / Danger Zone", "Diagnostics, permissions status, backup & reset", Icons.Filled.Info)
 }
 
 private data class SettingsSearchEntry(
@@ -96,20 +99,30 @@ private data class SettingsSearchEntry(
 private val settingsIndex = listOf(
     SettingsSearchEntry("Pill Style", "Dark, Apple Glass, or Liquid Glass", "Look > Style", SettingsGroup.LOOK),
     SettingsSearchEntry("Pill Size", "Small, Medium, or Large slot width", "Look > Size", SettingsGroup.LOOK),
+    SettingsSearchEntry("Apple-width idle pill (125 dp)", "Switch between camera-hug (56dp) and 125dp idle capsule", "Look > Idle Pill", SettingsGroup.LOOK),
+    SettingsSearchEntry("Energy Ring", "Arc battery indicator hugging the punch-hole camera", "Look > Energy Ring", SettingsGroup.LOOK),
+    SettingsSearchEntry("Privacy Dots", "Live Camera, Microphone & Location dots beside island", "Look > Privacy Dots", SettingsGroup.LOOK),
     SettingsSearchEntry("Glass Density", "Clear to Tinted density slider", "Look > Glass", SettingsGroup.LOOK),
     SettingsSearchEntry("Reduce Glass", "Soften translucent blur & specular glow", "Look > Glass", SettingsGroup.LOOK),
     SettingsSearchEntry("Solid Fallback", "Force solid black over glass", "Look > Fallback", SettingsGroup.LOOK),
-    SettingsSearchEntry("Accent Colour", "Blue, Purple, Cyan, Amber, Crimson, Green, or Auto", "Look > Accent", SettingsGroup.LOOK),
+    SettingsSearchEntry("Accent Colour", "Blue, Purple, Cyan, Amber, Coral, Mint, or Auto", "Look > Accent", SettingsGroup.LOOK),
     SettingsSearchEntry("Rotate Album Art", "Spin vinyl album art when music plays", "Look > Music", SettingsGroup.LOOK),
     SettingsSearchEntry("Animation Style", "Springy, Standard, Calm, or Off", "Motion > Style", SettingsGroup.MOTION),
     SettingsSearchEntry("Animation Speed", "Adjust spring transition speed", "Motion > Speed", SettingsGroup.MOTION),
     SettingsSearchEntry("Elasticity", "Adjust overshoot bounce intensity", "Motion > Elasticity", SettingsGroup.MOTION),
+    SettingsSearchEntry("Metaball Glass Effect", "Liquid RenderEffect blur+threshold during morphs", "Motion > Metaball", SettingsGroup.MOTION),
+    SettingsSearchEntry("4-Way Pill Gestures & Sensitivity", "Left, Right, Up, Down swipes & Gesture Playground", "Motion > Gestures", SettingsGroup.MOTION),
     SettingsSearchEntry("Two-Stage Open", "Compact pill -> Stage 1 preview -> Full card", "Motion > Stages", SettingsGroup.MOTION),
     SettingsSearchEntry("Try It Motion Demo", "Interactive capsule animation playground", "Motion > Demo", SettingsGroup.MOTION),
     SettingsSearchEntry("Reduced Motion", "Calm fallback for sensitive eyes", "Motion > Accessibility", SettingsGroup.MOTION),
     SettingsSearchEntry("Haptics Strength", "Off, Light tick, or Medium click", "Motion > Haptics", SettingsGroup.MOTION),
     SettingsSearchEntry("Sound Effects", "Enable or mute Dynamic Island UI sound effects", "Motion > Sound", SettingsGroup.MOTION),
+    SettingsSearchEntry("Extra Morph Sound", "Optional subtle swoosh on pill morphs (default OFF)", "Motion > Sound", SettingsGroup.MOTION),
     SettingsSearchEntry("Sound Volume", "Adjust UI sound effects volume", "Motion > Sound", SettingsGroup.MOTION),
+    SettingsSearchEntry("Lyrics download from LRCLIB (lrclib.net)", "Online synced lyrics fallback (disabled offline)", "Music, Lyrics & Mochi > Lyrics", SettingsGroup.MEDIA_PET),
+    SettingsSearchEntry("Lyrics Timing Offset", "Nudge synced lyrics -5s to +5s", "Music, Lyrics & Mochi > Lyrics", SettingsGroup.MEDIA_PET),
+    SettingsSearchEntry("Scroll Long Song Titles", "Opt-in marquee inside expanded music card", "Music, Lyrics & Mochi > Music", SettingsGroup.MEDIA_PET),
+    SettingsSearchEntry("Island Pet (Mochi)", "Toggle Mochi pixel panda, quiet hours & restore", "Music, Lyrics & Mochi > Mochi", SettingsGroup.MEDIA_PET),
     SettingsSearchEntry("Camera Calibration", "Nudge X, Y, width, and height around punch-hole", "Pill > Calibration", SettingsGroup.PILL),
     SettingsSearchEntry("Companion Circle Side", "Place +1 split bubble on Left or Right", "Pill > Split", SettingsGroup.PILL),
     SettingsSearchEntry("When Idle Mode", "Camera Only, Dual-Slot Info Pill, or Hidden", "Pill > Idle", SettingsGroup.PILL),
@@ -121,12 +134,12 @@ private val settingsIndex = listOf(
     SettingsSearchEntry("Customise Island", "Pick & reorder up to 8 island features", "Features > Chooser", SettingsGroup.FEATURES),
     SettingsSearchEntry("Master Feature Toggles", "Enable/disable Music, Timer, Search, Shelf, OCR & more", "Features > Toggles", SettingsGroup.FEATURES),
     SettingsSearchEntry("Floating-Window Apps", "Pick apps for MIUI sidebar & freeform launch", "Features > Floating", SettingsGroup.FEATURES),
-    SettingsSearchEntry("Pinned Quick Launch Apps", "Choose shortcuts shown in expanded island", "Features > Shortcuts", SettingsGroup.FEATURES),
+    SettingsSearchEntry("Pinned Quick Launch Apps", "Choose shortcuts shown in Tools & Search", "Features > Shortcuts", SettingsGroup.FEATURES),
     SettingsSearchEntry("Screen Reading / OCR", "Strictly opt-in, OFF by default", "Privacy > Screen Reading", SettingsGroup.PRIVACY),
     SettingsSearchEntry("OCR Tier B (ML Kit)", "Opt-in cropped fallback when Tier A finds no text", "Privacy > OCR Tier B", SettingsGroup.PRIVACY),
     SettingsSearchEntry("Shelf 10-Min Rules", "3-finger screenshot auto-capture & 24h trash", "Privacy > Shelf", SettingsGroup.PRIVACY),
     SettingsSearchEntry("Clipboard History", "Foreground-only capture on Android 13", "Privacy > Clips", SettingsGroup.PRIVACY),
-    SettingsSearchEntry("Permissions Status", "Live granted / not-granted hardware checks", "About > Permissions", SettingsGroup.ABOUT),
+    SettingsSearchEntry("Diagnostics & Permissions", "Service alive, hidden reason & hardware checks", "About > Diagnostics", SettingsGroup.ABOUT),
     SettingsSearchEntry("Backup / Restore Settings", "Export or import settings JSON", "About > Backup", SettingsGroup.ABOUT),
     SettingsSearchEntry("Delete All App Data", "Erase Shelf, Notes, Memos, Inbox & settings", "About > Danger Zone", SettingsGroup.ABOUT)
 )
@@ -172,7 +185,7 @@ fun SettingsHomeScreen(
                     modifier = Modifier
                         .size(44.dp)
                         .clip(CircleShape)
-                        .background(Color(0xAA191114))
+                        .background(IslandColors.ObsidianGlassDark)
                         .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
                         .testTag("settings_back")
                 ) {
@@ -196,8 +209,8 @@ fun SettingsHomeScreen(
                     modifier = Modifier
                         .size(44.dp)
                         .clip(CircleShape)
-                        .background(Color(0xAA230B10))
-                        .border(1.dp, IslandColors.CrimsonBorder, CircleShape)
+                        .background(IslandColors.ObsidianCard)
+                        .border(1.dp, lookAccent.copy(alpha = 0.45f), CircleShape)
                 ) {
                     Icon(Icons.Filled.Info, contentDescription = "About & Permissions", tint = Color.White)
                 }
@@ -216,13 +229,13 @@ fun SettingsHomeScreen(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
                         placeholder = { Text("Search settings...", color = IslandColors.TextSecondary) },
-                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search settings", tint = IslandColors.CrimsonBright) },
+                        leadingIcon = { Icon(Icons.Filled.Search, contentDescription = "Search settings", tint = lookAccent) },
                         singleLine = true,
                         shape = CircleShape,
                         colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color(0xD8150E11),
-                            unfocusedContainerColor = Color(0xCC120B0E),
-                            focusedBorderColor = IslandColors.CrimsonBorderStrong,
+                            focusedContainerColor = IslandColors.ObsidianCardElevated,
+                            unfocusedContainerColor = IslandColors.ObsidianCard,
+                            focusedBorderColor = lookAccent.copy(alpha = 0.72f),
                             unfocusedBorderColor = Color.White.copy(alpha = 0.16f),
                             focusedTextColor = Color.White,
                             unfocusedTextColor = Color.White
@@ -245,23 +258,23 @@ fun SettingsHomeScreen(
                     } else {
                         items(matchingEntries) { entry ->
                             ObsidianGlassCard(onClick = { onOpenGroup(entry.group) }) {
-                                Text(entry.breadcrumb, color = IslandColors.CrimsonBright, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text(entry.breadcrumb, color = lookAccent, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 Text(entry.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
                                 Text(entry.subtext, color = IslandColors.TextSecondary, fontSize = 12.sp)
                             }
                         }
                     }
                 } else {
-                    // Master Dynamic Island Overlay Toggle Card (matching youtubers742-settings.png)
+                    // Master Dynamic Island Overlay Toggle Card
                     item {
-                        ObsidianGlassCard(highlighted = settings.islandEnabled) {
+                        ObsidianGlassCard(highlighted = settings.islandEnabled, accentColor = lookAccent) {
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                                 Box(
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier
                                         .size(44.dp)
                                         .clip(RoundedCornerShape(13.dp))
-                                        .background(Color(0xFF140B0E))
+                                        .background(IslandColors.ObsidianCardElevated)
                                         .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(13.dp))
                                 ) {
                                     Box(
@@ -270,13 +283,13 @@ fun SettingsHomeScreen(
                                             .height(11.dp)
                                             .clip(CircleShape)
                                             .background(Color.Black)
-                                            .border(1.8.dp, IslandColors.CrimsonBright, CircleShape)
+                                            .border(1.8.dp, lookAccent, CircleShape)
                                     )
                                 }
                                 Spacer(Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text("Dynamic Island", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Text("v${BuildConfig.VERSION_NAME} · On-Device Offline", color = IslandColors.TextSecondary, fontSize = 12.sp)
+                                    Text("v${BuildConfig.VERSION_NAME} · On-Device + Optional LRCLIB", color = IslandColors.TextSecondary, fontSize = 12.sp)
                                 }
                                 Switch(
                                     checked = settings.islandEnabled,
@@ -441,7 +454,7 @@ fun SettingsHomeScreen(
                                         Text(
                                             text = theme.label,
                                             color = if (active) Color.White else IslandColors.TextSecondary,
-                                            fontSize = 9.sp,
+                                            fontSize = 11.sp,
                                             fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
                                             maxLines = 1
                                         )
@@ -466,7 +479,7 @@ fun SettingsHomeScreen(
                                 Row(
                                     modifier = Modifier
                                         .clip(CircleShape)
-                                        .background(Color(0xFF140C0F))
+                                        .background(IslandColors.ObsidianCard)
                                         .border(1.dp, Color.White.copy(alpha = 0.12f), CircleShape)
                                         .padding(3.dp)
                                 ) {
@@ -496,11 +509,11 @@ fun SettingsHomeScreen(
                         }
                     }
 
-                    // Inline Motion Quick-Card matching youtubers742-settings.png
+                    // Inline Motion Quick-Card
                     item {
-                        ObsidianGlassCard {
+                        ObsidianGlassCard(accentColor = lookAccent) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Box(Modifier.width(3.dp).height(18.dp).background(IslandColors.CrimsonBright, CircleShape))
+                                Box(Modifier.width(3.dp).height(18.dp).background(lookAccent, CircleShape))
                                 Spacer(Modifier.width(8.dp))
                                 Column {
                                     Text("Motion", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
@@ -510,20 +523,20 @@ fun SettingsHomeScreen(
                             Spacer(Modifier.height(10.dp))
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Text("Animation Speed", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 13.sp)
-                                Text("${String.format("%.1f", settings.animationSpeed)}x", color = IslandColors.CrimsonBright, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("${String.format("%.1f", settings.animationSpeed)}x", color = lookAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                             Slider(
                                 value = settings.animationSpeed,
                                 valueRange = 0.6f..1.6f,
                                 onValueChange = { v -> scope.launch { app.settingsRepository.update { it.copy(animationSpeed = v) } } },
                                 colors = SliderDefaults.colors(
-                                    thumbColor = IslandColors.CrimsonBright,
-                                    activeTrackColor = IslandColors.CrimsonPrimary,
-                                    inactiveTrackColor = Color(0xFF2B181D)
+                                    thumbColor = lookAccent,
+                                    activeTrackColor = lookAccent,
+                                    inactiveTrackColor = IslandColors.ObsidianCardElevated
                                 )
                             )
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                CrimsonSquircleIcon(icon = Icons.Filled.VolumeUp, size = 34.dp, iconSize = 17.dp)
+                                CrimsonSquircleIcon(icon = Icons.Filled.VolumeUp, size = 34.dp, iconSize = 17.dp, tint = lookAccent)
                                 Spacer(Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text("Sound Effects", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 13.sp)
@@ -542,17 +555,18 @@ fun SettingsHomeScreen(
                         }
                     }
 
-                    // All 6 Detailed Settings Groups (Look, Motion, Pill, Features, Privacy, About)
+                    // 7 Grouped Settings Sections (Look, Motion, Music/Lyrics/Mochi, Pill, Features, Privacy, About)
                     items(SettingsGroup.entries) { group ->
                         ObsidianGlassCard(
                             highlighted = group == SettingsGroup.ABOUT,
+                            accentColor = lookAccent,
                             onClick = { onOpenGroup(group) },
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("settings_group_${group.name.lowercase()}")
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                CrimsonSquircleIcon(icon = group.icon, size = 40.dp, iconSize = 20.dp)
+                                CrimsonSquircleIcon(icon = group.icon, size = 40.dp, iconSize = 20.dp, tint = lookAccent)
                                 Spacer(Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(group.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
@@ -569,11 +583,14 @@ fun SettingsHomeScreen(
 }
 
 @Composable
-internal fun crimsonSwitchColors() = SwitchDefaults.colors(
-    checkedThumbColor = Color.White,
-    checkedTrackColor = IslandColors.CrimsonPrimary,
-    checkedBorderColor = IslandColors.CrimsonGlow,
-    uncheckedThumbColor = Color(0xFFB5B6BE),
-    uncheckedTrackColor = Color(0xFF241A1E),
-    uncheckedBorderColor = Color.White.copy(alpha = 0.22f)
-)
+internal fun crimsonSwitchColors(): androidx.compose.material3.SwitchColors {
+    val primary = MaterialTheme.colorScheme.primary
+    return SwitchDefaults.colors(
+        checkedThumbColor = Color.White,
+        checkedTrackColor = primary,
+        checkedBorderColor = primary.copy(alpha = 0.75f),
+        uncheckedThumbColor = Color(0xFFB5B6BE),
+        uncheckedTrackColor = IslandColors.ObsidianCardElevated,
+        uncheckedBorderColor = Color.White.copy(alpha = 0.22f)
+    )
+}

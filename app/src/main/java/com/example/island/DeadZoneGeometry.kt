@@ -95,16 +95,59 @@ object DeadZoneGeometry {
     }
 
     /**
-     * Idle camera-only pill tightly hugs the front camera punch-hole with subtle black framing.
-     * Never stretches into a wide full-top line while idle.
+     * Idle camera-only pill tightly hugs the front camera punch-hole (48–58 dp x 32 dp)
+     * or optional Apple-width (125 dp x 36 dp) when [appleWidth] is enabled.
+     * Pure black #000000, zero shadow/border, never stretches into a wide full-top line while idle.
      */
-    fun idleCameraPillMetrics(holeWidthDp: Float, holeHeightDp: Float): IdleCameraPillMetrics {
-        val w = (holeWidthDp.coerceAtLeast(18f) + 14f).coerceIn(36f, 96f)
-        val h = (holeHeightDp.coerceAtLeast(18f) + 4f).coerceIn(34f, 44f)
+    fun idleCameraPillMetrics(
+        holeWidthDp: Float,
+        holeHeightDp: Float,
+        appleWidth: Boolean = false
+    ): IdleCameraPillMetrics {
+        if (appleWidth) {
+            return IdleCameraPillMetrics(
+                widthDp = 125f,
+                heightDp = 36f,
+                cornerRadiusDp = 18f
+            )
+        }
+        val w = (holeWidthDp.coerceAtLeast(18f) + 22f).coerceIn(48f, 58f)
+        val h = (holeHeightDp.coerceAtLeast(24f) - 2f).coerceIn(30f, 33f)
         return IdleCameraPillMetrics(
             widthDp = w,
             heightDp = h,
             cornerRadiusDp = h / 2f
+        )
+    }
+
+    /**
+     * §0 Music compact pill: 180–200 dp wide (hard cap 210 dp) x 37 dp tall,
+     * showing album art + animated visualizer bars ONLY (no song title text in pill).
+     */
+    fun musicCompactPillMetrics(
+        holeWidthDp: Float,
+        holeHeightDp: Float,
+        isLandscape: Boolean = false
+    ): CompactSlotMetrics {
+        if (isLandscape) {
+            return compactSlotMetrics(holeWidthDp, holeHeightDp, isLandscape = true, slotWidthDp = 44f)
+        }
+        val safeHoleW = holeWidthDp.coerceAtLeast(14f)
+        val safeHoleH = holeHeightDp.coerceAtLeast(14f)
+        val spacer = safeHoleW + REQUIRED_MARGIN_DP * 2f
+        val targetTotal = (spacer + 146f).coerceIn(180f, 200f)
+        val slot = ((targetTotal - spacer - OUTER_PAD_DP * 2f) / 2f).coerceIn(52f, 70f)
+        val totalW = (slot + spacer + slot + OUTER_PAD_DP * 2f).coerceAtMost(210f)
+        val pillH = (safeHoleH + 3f).coerceIn(36f, 37f)
+        return CompactSlotMetrics(
+            leftSlotDp = slot,
+            centerSpacerDp = spacer,
+            rightSlotDp = slot,
+            outerPadDp = OUTER_PAD_DP,
+            innerSafetyInsetDp = INNER_SAFETY_INSET_DP,
+            totalWidthDp = totalW,
+            pillHeightDp = pillH,
+            isVerticalLandscape = false
         )
     }
 
@@ -156,10 +199,10 @@ object DeadZoneGeometry {
         val safeHoleW = holeWidthDp.coerceAtLeast(14f)
         val safeHoleH = holeHeightDp.coerceAtLeast(14f)
         return if (!isLandscape) {
-            val slot = slotWidthDp.coerceIn(64f, 108f)
+            val slot = slotWidthDp.coerceIn(58f, 124f)
             val spacer = safeHoleW + REQUIRED_MARGIN_DP * 2f
             val totalW = slot + spacer + slot + OUTER_PAD_DP * 2f
-            val pillH = (safeHoleH + 4f).coerceAtLeast(COMPACT_PILL_MIN_HEIGHT_DP)
+            val pillH = (safeHoleH + 3f).coerceIn(COMPACT_PILL_MIN_HEIGHT_DP, 40f)
             CompactSlotMetrics(
                 leftSlotDp = slot,
                 centerSpacerDp = spacer,

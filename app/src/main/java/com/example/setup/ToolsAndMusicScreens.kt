@@ -6,6 +6,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.media.AudioManager
 import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.foundation.Canvas
@@ -34,6 +35,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BrightnessHigh
 import androidx.compose.material.icons.filled.Build
@@ -41,6 +43,7 @@ import androidx.compose.material.icons.filled.DoNotDisturbOn
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MusicNote
@@ -62,6 +65,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -95,6 +99,7 @@ import com.example.DynamicIslandApp
 import com.example.ocr.MediaProjectionPromptActivity
 import com.example.ocr.OcrPrivacyGate
 import com.example.system.IslandSettings
+import com.example.system.ScreenRecorderManager
 import com.example.system.TimerEngine
 import com.example.ui.theme.CrimsonCircularHaloIcon
 import com.example.ui.theme.CrimsonPillButton
@@ -120,6 +125,11 @@ fun ToolsTabScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val toggleState by app.quickTogglesManager.state.collectAsState()
+    val islandState by app.islandController.state.collectAsState()
+    val isScreenRecording = islandState.activityQueue.any { it is com.example.island.IslandActivity.ScreenRecording }
+    val audioMgr = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager }
+    val maxMusicVol = remember(audioMgr) { (audioMgr?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15).coerceAtLeast(1) }
+    var mediaVolume by remember { mutableFloatStateOf((audioMgr?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 8).toFloat()) }
     var showCompassDialog by remember { mutableStateOf(false) }
     var showLevelDialog by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
@@ -142,7 +152,7 @@ fun ToolsTabScreen(
                             modifier = Modifier
                                 .size(44.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xAA191114))
+                                .background(IslandColors.ObsidianCard)
                                 .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
                         ) {
                             Icon(Icons.Filled.BrightnessHigh, contentDescription = "Tool permissions", tint = Color.White)
@@ -212,17 +222,18 @@ fun ToolsTabScreen(
 
                 if (toggleState.isTorchOn && toggleState.maxTorchStrength > 1) {
                     ObsidianGlassCard(highlighted = true) {
+                        val accent = MaterialTheme.colorScheme.primary
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text("Torch Intensity", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                            Text("${toggleState.torchStrength} / ${toggleState.maxTorchStrength}", color = IslandColors.CrimsonBright, fontSize = 12.sp)
+                            Text("${toggleState.torchStrength} / ${toggleState.maxTorchStrength}", color = accent, fontSize = 12.sp)
                         }
                         Slider(
                             value = toggleState.torchStrength.toFloat(),
                             onValueChange = { app.quickTogglesManager.setTorchStrength(it.roundToInt()) },
                             valueRange = 1f..toggleState.maxTorchStrength.toFloat(),
                             colors = SliderDefaults.colors(
-                                thumbColor = IslandColors.CrimsonBright,
-                                activeTrackColor = IslandColors.CrimsonPrimary
+                                thumbColor = accent,
+                                activeTrackColor = accent
                             )
                         )
                     }
@@ -311,13 +322,33 @@ fun ToolsTabScreen(
                     )
                 }
 
-                // Real Display Brightness & System Connectivity Panels
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    ToolBentoTile(
+                        title = "Screen Record",
+                        subtitle = if (isScreenRecording) "Recording ON · Tap stop" else "Record MP4 to Movies",
+                        icon = Icons.Filled.FiberManualRecord,
+                        isActive = isScreenRecording,
+                        onClick = {
+                            app.soundManager.playToggle(!isScreenRecording)
+                            if (isScreenRecording) {
+                                ScreenRecorderManager.stopRecording(context)
+                            } else {
+                                ScreenRecorderManager.startRecording(context)
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.weight(1f))
+                }
+
+                // Real Display Brightness, Media Volume & System Connectivity Panels
                 ObsidianGlassCard {
+                    val accent = MaterialTheme.colorScheme.primary
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Screen Brightness", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                         Text(
                             if (toggleState.hasWriteSettingsPermission) "${(toggleState.brightness * 100 / 255f).roundToInt()}%" else "Tap to grant",
-                            color = IslandColors.CrimsonBright,
+                            color = accent,
                             fontSize = 12.sp
                         )
                     }
@@ -326,8 +357,28 @@ fun ToolsTabScreen(
                         onValueChange = { app.quickTogglesManager.setScreenBrightness(it.roundToInt()) },
                         valueRange = 10f..255f,
                         colors = SliderDefaults.colors(
-                            thumbColor = IslandColors.CrimsonBright,
-                            activeTrackColor = IslandColors.CrimsonPrimary
+                            thumbColor = accent,
+                            activeTrackColor = accent
+                        )
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = accent, modifier = Modifier.size(16.dp))
+                            Text("Media Volume", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                        }
+                        Text("${(mediaVolume * 100 / maxMusicVol.toFloat()).roundToInt()}%", color = accent, fontSize = 12.sp)
+                    }
+                    Slider(
+                        value = mediaVolume,
+                        onValueChange = { v ->
+                            mediaVolume = v
+                            runCatching { audioMgr?.setStreamVolume(AudioManager.STREAM_MUSIC, v.roundToInt(), 0) }
+                        },
+                        valueRange = 0f..maxMusicVol.toFloat(),
+                        colors = SliderDefaults.colors(
+                            thumbColor = accent,
+                            activeTrackColor = accent
                         )
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -392,18 +443,19 @@ private fun ObsidianQuickLinkChip(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val accent = MaterialTheme.colorScheme.primary
     Row(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center,
         modifier = modifier
             .height(44.dp)
             .clip(CircleShape)
-            .background(Color(0xCC1E1418))
+            .background(IslandColors.ObsidianCard)
             .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp)
     ) {
-        Icon(icon, contentDescription = null, tint = IslandColors.CrimsonBright, modifier = Modifier.size(16.dp))
+        Icon(icon, contentDescription = null, tint = accent, modifier = Modifier.size(16.dp))
         Spacer(Modifier.width(6.dp))
         Text(text, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
     }
@@ -456,17 +508,18 @@ private fun LiveCompassDialog(onDismiss: () -> Unit) {
         textContentColor = Color.White,
         title = { Text("Compass") },
         text = {
+            val accent = MaterialTheme.colorScheme.primary
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                 if (!hasSensor) {
                     Text("Rotation vector sensor unavailable on this device.", color = IslandColors.TextSecondary)
                 } else {
                     Canvas(modifier = Modifier.size(180.dp)) {
                         val r = size.minDimension / 2f - 10.dp.toPx()
-                        drawCircle(color = Color(0xFF2B1014), radius = r, style = Stroke(width = 3.dp.toPx()))
-                        drawCircle(color = IslandColors.CrimsonBorderStrong, radius = r, style = Stroke(width = 1.5.dp.toPx()))
+                        drawCircle(color = IslandColors.ObsidianCard, radius = r, style = Stroke(width = 3.dp.toPx()))
+                        drawCircle(color = accent.copy(alpha = 0.65f), radius = r, style = Stroke(width = 1.5.dp.toPx()))
                         val rad = ((azimuthDeg - 90f) * PI / 180.0)
                         val tip = Offset(center.x + cos(rad).toFloat() * (r - 12.dp.toPx()), center.y + sin(rad).toFloat() * (r - 12.dp.toPx()))
-                        drawLine(color = IslandColors.CrimsonBright, start = center, end = tip, strokeWidth = 4.dp.toPx(), cap = StrokeCap.Round)
+                        drawLine(color = accent, start = center, end = tip, strokeWidth = 4.dp.toPx(), cap = StrokeCap.Round)
                         drawCircle(color = Color.White, radius = 6.dp.toPx(), center = center)
                     }
                     Spacer(Modifier.height(10.dp))
@@ -475,7 +528,7 @@ private fun LiveCompassDialog(onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = IslandColors.CrimsonPrimary)) {
+            Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {
                 Text("Close")
             }
         }
@@ -521,20 +574,21 @@ private fun LiveBubbleLevelDialog(onDismiss: () -> Unit) {
         textContentColor = Color.White,
         title = { Text("Surface Level") },
         text = {
+            val accent = MaterialTheme.colorScheme.primary
             Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                 if (!hasSensor) {
                     Text("Accelerometer unavailable on this device.", color = IslandColors.TextSecondary)
                 } else {
                     Canvas(modifier = Modifier.size(180.dp)) {
                         val r = size.minDimension / 2f - 8.dp.toPx()
-                        drawCircle(color = Color(0xFF150B0E), radius = r)
-                        drawCircle(color = if (isFlat) IslandColors.AccentGreen else IslandColors.CrimsonBorderStrong, radius = r, style = Stroke(width = 2.dp.toPx()))
+                        drawCircle(color = IslandColors.ObsidianBg, radius = r)
+                        drawCircle(color = if (isFlat) IslandColors.AccentGreen else accent.copy(alpha = 0.65f), radius = r, style = Stroke(width = 2.dp.toPx()))
                         drawLine(color = Color.White.copy(alpha = 0.2f), start = Offset(center.x - r, center.y), end = Offset(center.x + r, center.y), strokeWidth = 1.dp.toPx())
                         drawLine(color = Color.White.copy(alpha = 0.2f), start = Offset(center.x, center.y - r), end = Offset(center.x, center.y + r), strokeWidth = 1.dp.toPx())
                         val dx = (rollDeg / 45f).coerceIn(-1f, 1f) * (r - 18.dp.toPx())
                         val dy = (pitchDeg / 45f).coerceIn(-1f, 1f) * (r - 18.dp.toPx())
                         drawCircle(
-                            color = if (isFlat) IslandColors.AccentGreen else IslandColors.CrimsonBright,
+                            color = if (isFlat) IslandColors.AccentGreen else accent,
                             radius = 14.dp.toPx(),
                             center = Offset(center.x + dx, center.y + dy)
                         )
@@ -550,7 +604,7 @@ private fun LiveBubbleLevelDialog(onDismiss: () -> Unit) {
             }
         },
         confirmButton = {
-            Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = IslandColors.CrimsonPrimary)) {
+            Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {
                 Text("Close")
             }
         }
@@ -591,7 +645,7 @@ fun MusicTabScreen(
                         modifier = Modifier
                             .size(44.dp)
                             .clip(CircleShape)
-                            .background(Color(0xAA191114))
+                            .background(IslandColors.ObsidianCard)
                             .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
                     ) {
                         Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Open player app", tint = Color.White)
@@ -624,7 +678,7 @@ fun MusicTabScreen(
                 }
 
                 item {
-                    // Centered Crimson Halo Album Art Card matching youtubers742-music.png
+                    val accent = MaterialTheme.colorScheme.primary
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
@@ -632,10 +686,10 @@ fun MusicTabScreen(
                             .clip(RoundedCornerShape(28.dp))
                             .background(
                                 Brush.radialGradient(
-                                    colors = listOf(IslandColors.CrimsonPrimary.copy(alpha = 0.35f), Color(0xFF14090C))
+                                    colors = listOf(accent.copy(alpha = 0.28f), IslandColors.ObsidianCard)
                                 )
                             )
-                            .border(1.2.dp, IslandColors.CrimsonBorder, RoundedCornerShape(28.dp))
+                            .border(1.2.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(28.dp))
                             .clickable { app.mediaHub.openPlayerApp() }
                     ) {
                         val bmp = mediaState.albumArt
@@ -664,9 +718,9 @@ fun MusicTabScreen(
                         Text(
                             text = mediaState.title.ifBlank { "Nothing Playing" },
                             color = Color.White,
-                            fontSize = 20.sp,
+                            fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
-                            maxLines = 1,
+                            maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                         if (mediaState.artist.isNotBlank()) {
@@ -683,11 +737,12 @@ fun MusicTabScreen(
                 }
 
                 item {
+                    val accent = MaterialTheme.colorScheme.primary
                     Column(modifier = Modifier.fillMaxWidth()) {
                         WavyProgressBar(
                             progress = progress,
                             isActiveWave = mediaState.isPlaying,
-                            accentColor = IslandColors.CrimsonBright,
+                            accentColor = accent,
                             interactive = mediaState.durationMs > 0L,
                             onSeekFraction = { frac ->
                                 val target = (frac * mediaState.durationMs).toLong()
@@ -733,8 +788,8 @@ fun MusicTabScreen(
                             modifier = Modifier
                                 .size(66.dp)
                                 .clip(CircleShape)
-                                .background(IslandColors.CrimsonPrimary)
-                                .border(1.5.dp, IslandColors.CrimsonGlow, CircleShape)
+                                .background(MaterialTheme.colorScheme.primary)
+                                .border(1.5.dp, Color.White.copy(alpha = 0.25f), CircleShape)
                         ) {
                             Icon(
                                 imageVector = if (mediaState.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
@@ -763,19 +818,26 @@ fun MusicTabScreen(
                     }
                 }
 
-                // On-Device Lyrics / Session Info
+                // On-Device + LRCLIB Lyrics with Timing Offset
                 if (mediaState.lyrics.isNotEmpty()) {
+                    val adjustedPos = (mediaState.positionMs + settings.lyricsOffsetMs).coerceAtLeast(0L)
                     item {
+                        val accent = MaterialTheme.colorScheme.primary
                         ObsidianGlassCard {
-                            Text("Synced Lyrics", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                            Spacer(Modifier.height(8.dp))
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text("Synced Lyrics", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                if (settings.lyricsOffsetMs != 0) {
+                                    Text("${if (settings.lyricsOffsetMs > 0) "+" else ""}${settings.lyricsOffsetMs} ms", color = accent, fontSize = 12.sp)
+                                }
+                            }
                         }
                     }
                     items(mediaState.lyrics) { line ->
-                        val active = line.timestampMs >= 0L && kotlin.math.abs(line.timestampMs - mediaState.positionMs) < 3500L
+                        val accent = MaterialTheme.colorScheme.primary
+                        val active = line.timestampMs >= 0L && kotlin.math.abs(line.timestampMs - adjustedPos) < 3500L
                         Text(
                             text = line.text,
-                            color = if (active) IslandColors.CrimsonBright else IslandColors.TextSecondary,
+                            color = if (active) accent else IslandColors.TextSecondary,
                             fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
                             fontSize = if (active) 15.sp else 13.sp,
                             modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
@@ -805,14 +867,15 @@ private fun TransportCircleButton(
     active: Boolean = false,
     onClick: () -> Unit
 ) {
+    val accent = MaterialTheme.colorScheme.primary
     IconButton(
         onClick = onClick,
         modifier = Modifier
             .size(48.dp)
             .clip(CircleShape)
-            .background(if (active) Color(0xFF470B13) else Color(0xCC181014))
-            .border(1.dp, if (active) IslandColors.CrimsonBorderStrong else Color.White.copy(alpha = 0.16f), CircleShape)
+            .background(if (active) accent.copy(alpha = 0.24f) else IslandColors.ObsidianCard)
+            .border(1.dp, if (active) accent.copy(alpha = 0.72f) else Color.White.copy(alpha = 0.16f), CircleShape)
     ) {
-        Icon(icon, contentDescription = contentDescription, tint = if (active) IslandColors.CrimsonBright else Color.White, modifier = Modifier.size(22.dp))
+        Icon(icon, contentDescription = contentDescription, tint = if (active) accent else Color.White, modifier = Modifier.size(22.dp))
     }
 }

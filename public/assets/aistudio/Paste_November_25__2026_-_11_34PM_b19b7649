@@ -1,0 +1,200 @@
+# Build #5 FIX Round 3 — AI Studio prompt (Alex phone-tested the Round 2 build Nov 25, 21:56–22:12 IST)
+
+Context: this app is the Round 2 build (repo everyoneplsshutup-bit/dynamic-island-android, HEAD 7062770, "Build #5 FIX Round 2"). Alex installed it on his Redmi Note 10 Pro, uninstalled old first, did full setup. Round 2 fixed a lot — but his phone test found the list below, and he ordered HEAVY research first (7 research briefs + live browser research + 25 reference images, all done Nov 25 — the numbers in this prompt are researched, not guessed). Fix EVERY point. This is Round 3 of the same fix. New screenshots from his phone test are attached (9 images) plus reference images (see §10) — look at each one.
+
+## 0. THE #1 FIX — the pill is STILL too long. Make it SHORT (Alex: "pill kuch zada badi ni h camere ke borders pe? ... usko choota karo, bohot lambi h line iski")
+
+What the screenshots prove (22:00–22:06): the music pill is a LONG BAR spanning ~70–85% of the screen width ("Dracula (fea...", "Habibi (Alba...", "Enemy (Fro..."), and one home-screen shot (21:59) shows a wide EMPTY black bar. The cause is proven by the reference images: the pill contains the SONG TITLE, and the title stretches it. dynamicSpot's own screenshot (dynamicspot-screenshot-4.png, attached) shows the correct model — album art + visualizer bars ONLY, no title, hugging the camera.
+
+Exact spec (Apple HIG verified + device geometry: Redmi viewport is 393x873 dp, exactly Apple's 393 pt class, so Apple pt = dp here; camera hole is 27x34 dp):
+- **Idle pill (nothing active): 48–64 dp wide x 30–33 dp tall, hugging the camera punch-hole only** (ajitpal's "shrinks to exactly your camera hole" model). Pure black #000000, 100% opacity, NO shadow, NO border (shadow/border is what makes clones look cheap on AMOLED). Centred on the cutout — vertical centre from Display.getCutout() at runtime, never a hard-coded Y. Add a Settings option "Apple-width idle pill" (125 dp) for users who want Apple's size — default is the small 48–64 dp pill.
+- **Active music pill: 180–200 dp wide x 36–37 dp tall, HARD CAP 210 dp.** Contents: album art 24–28 dp (8 dp radius) + animated visualizer bars ONLY. **NO song title in the pill, EVER.** The title lives in the expanded card, not the pill. This is the single most important rule of this round.
+- **Second activity:** small 37 dp circle beside the pill with +1 badge (already in §9h Round 2 — keep).
+- **Long titles:** compact pill = one line, end-ellipsis ("..."), never widen the pill for a title, never shrink the font. Expanded card = full title over up to 2 lines, artist on its own line. Marquee ONLY as an opt-in inside the expanded music card (1500 ms dwell, 30–50 dp/s, 2000 ms pause at end, stop on pause/touch/expand-collapse). NEVER marquee in the idle/compact pill — it is the fastest way to look unprofessional and it fights Apple's no-looping rule.
+- **Idle pill must ALWAYS be visible.** One screenshot (21:56, home screen) shows NO island at all — the pill completely vanished. Find why (service killed? state stuck HIDDEN?) and fix it; the Diagnostics card must say WHY if it ever hides. Idle = small pill, always there, never absent, never a wide line.
+- Keep: tap once = MEDIUM, tap again = FULL, tap/swipe up/X = back to small pill. Wide bar ONLY while something is live.
+
+## 1. PROFESSIONAL design system — make it look client-grade, not bekar (Alex: "isko professional banana baki h")
+
+Apply this system to EVERY screen and card (island + Settings + Home Hub + Wizard). If a screen still looks ordinary after this round, it is not done.
+- **Typography (Apple-verified):** pill text 13–15 sp semibold; card title 16 sp semibold white; body 14 sp; caption 12 sp; NOTHING below 11 sp. Compact text 15 sp / 22 line height. One piece of information per region; medium weight or higher for most text, heavier for larger text.
+- **Colour:** idle pill pure black #000000 100% opacity, no shadow, no border. Cards: real liquid glass (§3 Round 2 still applies) or solid dark — never a muddy reddish dark fill. Alert/notification text clean white, never harsh red.
+- **Corner radii:** pill fully rounded (radius = half height, 18.5 dp at 37 dp tall). Expanded card radius 28 dp minimum, R_inner = R_outer − padding (concentric corners).
+- **Spacing:** 20 dp padding, 18 dp gaps between rows, max 3–4 rows per view (§9j Round 2 still applies — bigger + airy, never loaded). Touch targets ≥44 dp in expanded cards.
+- **Expanded card:** 371 dp wide (11 dp margins each side, exactly Apple's figure), heights per §9j Round 2 (MEDIUM min 360x200 dp, FULL up to 380x300 dp, width = screen width − 24 dp, never wider; height grows so nothing is cut).
+- **App UI (Settings / Home Hub / Wizard):** CLEAN and SIMPLE, plain language, clear sections, bigger labels, no clutter. Settings gets a proper structure: Look (Dark / Apple Glass / Liquid Glass + accent colour Blue/Violet/Teal/Amber/Red), Pill size (Small hugging / Apple-width), Animation speed presets, Sound Effects toggle, Reel overlay toggle, per-app island on/off, Diagnostics card.
+- **Reference images to copy (attached, see §10):** ajitpal-03-music-controls.webp (expanded music card layout), smartisland-01-home-event-controls.jpg (dashboard layout), material-capsule-screenshot-1/2/3.png (Material You control-centre cards).
+
+## 2. ANIMATION — full focus, the best (Alex: "animation pe full focus karo ... saab ekdum perfect banana h")
+
+Use ALL of this (researched Nov 25, on top of §4/§4b/§4c Round 2 — the M3E table and one-scalar morph still stand):
+- **One scalar spring drives width + height + radius + translation + scrim together.** Never separate width/height springs (they drift on interruption). Content is a HANDOVER at ~55% of morph, never a crossfade. C1 continuity via Animatable/spring() retargeting, never cancel-and-restart with tween.
+- **Apple curve cubic-bezier(0.32, 0.72, 0, 1):** 70–80% of distance in first ~30% of time, long feather settle. Nothing starts slow.
+- **Springs:** expand/collapse spring(dampingRatio = 0.75, stiffness = 400f) — one gentle overshoot, settles ~450–600 ms. Tap-opened cards ZERO bounce (damping 0.88–1.0); overshoot only for flick/throw/small accent. Bounce belongs to the OPEN, the close stays critically damped (~240 ms). Content crossfade 150–250 ms, content fade delayed 150 ms (shape first, text second).
+- **Per-feature signatures (each different, from §9b/§4b — now mandatory, not optional):** Music = pill stretches horizontally first (scaleX overshoots while scaleY lags) + album art rotate −12°→0 spin-settle + scale 0.8→1 + progress draws in. Timer = digits roll (AnimatedContent vertical slide+fade per digit) + ring draws 0→360° red. Alert = bounce-in from top (spring 0.8/800) + glow pulse (shadow alpha 0→0.35→0 over ~600 ms). Search = liquid ripple (two staggered scale pulses 60 ms apart) + bar slides in after glass settles. Tools/Shelf = tiles stagger 40–60 ms, tiny pop (spring 0.6/800, scale 0.85→1 + fade). Idle→medium→full = three DISTINCT morphs.
+- **Metaball / droplet merge-split:** ONE RenderEffect on the PARENT layer (chain blur ~16–24 px + colour-matrix alpha threshold ~50, constant ~−5000) — shapes split/merge like droplets, never crossfade. True field metaballs (Σ1/d² + marching squares) are CPU-bound — do NOT use.
+- **Material Capsule lesson (50+ animations):** give EVERY event its own opening effect (charging, battery, timer, alert each animate in differently) — but only after the core morph is perfect.
+- **Choreography:** tap squish 0.97 + haptic 0 ms → morph 380–460 ms → glass fade 180 ms (effects spring) → content stagger 200 ms → collapse 240 ms. Exit: content fades first (~80 ms), then shell shrinks into the pill. Swipe up = instant dismiss.
+- **Performance (120 Hz, Snapdragon 732G, frame budget 8.3 ms):** graphicsLayer lambda only; never animate layout size; one updateTransition; blur radius static; shader area small; content at final width from the start; resize overlay window to island bounds where possible; R8 + Baseline Profile; redraw only on visible change; test on the real Redmi at 120 Hz.
+- **Reference video:** dribbble-music-player-dynamic-island-animation.mp4 (attached) — study the music-player island animation frame by frame and copy its timing/feel.
+
+## 3. FEATURES — the best of every app, ranked (researched from 25+ apps/repos + iPhone + Samsung/Xiaomi/Vivo/Oppo/Nothing/Pixel)
+
+Add these in priority order. P0 is mandatory this round; P1 if it fits cleanly in the same run, else it carries to the next round — say honestly in the report which landed. Do NOT add: calls, inline reply, rides/deliveries, meeting notes/AI, payments, scanner, weather/AQI (needs internet — impossible offline, do NOT add).
+- **P0-1 Notification Inbox (ajitpal model):** on-device notification history, searchable, same-app grouping, swipe-through, OTP code copy in one tap. Encrypted on-device, no upload.
+- **P0-2 Downloads/uploads with live progress:** live speed + time left in the island (SmartIsland model).
+- **P0-3 System glimpses:** charging (with charging speed where the system reports it), low battery, earbuds battery, DND, flashlight — small, glanceable, 2-sec dwell like alerts. Charging pill = tiny, one live value, nothing else (see dynamicspot-screenshot-2.png).
+- **P0-4 Remappable 4-way swipe gestures on the collapsed pill** (SmartIsland model): swipe left/right = prev/next song, swipe up = dismiss, swipe down = cycle notifications. Every direction remappable in Settings, sensitivity + haptic strength adjustable, with a gesture playground screen that teaches them visually (see smartisland-06-gesture-guide.jpg).
+- **P0-5 Expanded card as mini control centre (Material Capsule model):** brightness / volume / flashlight sliders + quick-launch apps inside the expanded card (see material-capsule-screenshot-1/2/3.png).
+- **P1-1 Lock-screen live activities + privacy dots** (camera/mic/location) with "which app" on tap.
+- **P1-2 Screen recorder from the island:** 3-2-1 countdown, REC timer in the pill, MP4 saved to Movies (see ajitpal-screen-recorder.png). Uses MediaProjection — show the system consent sheet each time, never silently.
+- **P1-3 Idle widgets rotating** (SmartIsland model): clock/date/weather-offline (no internet — so clock, date, battery, next alarm, net speed, unread count, DND only — NO weather) as the optional Info Pill (§9h Round 2).
+- **P1-4 Priority stack (ajitpal IslandStack):** rock-solid MediaSession + NotificationListener pipeline with priority, auto-expiry, tap-to-cycle ("+N") — without this everything jitters. Activities keep their place; redraw only on visible change.
+- **P2 (polish last):** unlock face/fingerprint animation over the cutout, per-event opening effects, drag-photo-to-island share (Vivo Atomic Island model).
+- Keep from Round 2 §9h: long-press expands, minimal +1 circle, per-app island on/off, no double pop-ups, Diagnostics card, polite rules (hide an app's activity while that app is open; hide message text on lock screen).
+
+## 4. LYRICS — the exact truth + the offline fix (Alex: "lyrics wala bol raha h no lyrics but PixelMusic me to hoti h?")
+
+The research verdict (verified against PixelMusic's own site FAQ + Android MediaMetadata docs + live LRCLIB query):
+- **PixelMusic's lyrics do NOT come from the device, the file, or the MediaSession.** PixelMusic downloads them from **LRCLIB over the internet** and caches them in its own private database. Its YouTube Music streaming is audio only — no lyrics come from YouTube Music.
+- **Android's MediaMetadata has NO lyrics key at all** (verified key list: TITLE, ARTIST, ALBUM, DURATION, artwork, etc. — never lyrics). There is no lyrics field in PlaybackState, notifications, or any documented PixelMusic provider/broadcast/extra. So the island can NEVER read lyrics from PixelMusic through the session — "No lyrics found on device" was technically true for a streamed track (no local file = no embedded lyrics), but the message is misleading and it must NOT show by default.
+- **Implement now (offline first + LRCLIB online — Alex ALLOWED internet for lyrics only, Nov 25 ~22:27 IST):**
+  1. Read lyrics for LOCAL files first: embedded USLT/SYLT tags + `.lrc` sidecar files via MediaStore. PixelMusic's own default source order is EMBEDDED_FIRST — match it.
+  2. Synced lyrics line-by-line, scrolling in sync with playback position, exactly like PixelMusic — but ONLY when Alex taps the Lyrics button (Round 2 rule stands: never auto-show; default card shows controls only).
+  3. Honest states, never the dead "No lyrics found on device" bar: if the track is streamed (no local file), show "Lyrics need internet — PixelMusic downloads them from LRCLIB" with a small "Learn more" line; if local but truly no lyrics, show "No lyrics for this track". The lyrics view must never appear uninvited.
+  4. Timing offset setting (like PixelMusic) so Alex can fix lyrics that drift.
+- **LRCLIB direct query — ENABLED (Alex allowed it, Nov 25 ~22:27 IST):** add the INTERNET permission and wire the client (GET https://lrclib.net/api/get?track_name=&artist_name=&album_name=&duration= — track+artist required, duration must match within ±2 s, 404 if no match; fallback /api/search; identifying User-Agent; ~45 req/min anonymous, ~90 identified; honour 429 Retry-After; parse syncedLyrics LRC; cache offline keyed by track; one request per track change). The network client MUST point at lrclib.net ONLY — no other host, ever — enforced in code (one base-URL constant, no generic HTTP client anywhere else in the app). Disclose it in Settings ("Lyrics download from LRCLIB (lrclib.net)") with a toggle "Lyrics from internet" default ON — turning it OFF kills all network use and the app behaves exactly as before (offline embedded/.lrc only). Live proof lyrics exist for his test track: LRCLIB returns full synced LRC for "Enemy" (Imagine Dragons).
+- Full briefs: hidden_files/pixelmusic-lyrics-research-2026-11-25.md + hidden_files/browser-research-round3-2026-11-25.md §6.
+
+## 5. SELECTION — PERMANENT fix, rebuild it (Alex: "select abhi bhi bekar h" — fourth report)
+
+Screenshot 1000194417 (22:04, Reel) proves Round 2's fix did NOT land: two full-width blue bars, handles floating outside the text. Rebuild the selection path with this researched two-path architecture (full brief: hidden_files/ocr-selection-research-round3-2026-11-25.md):
+- **Path A — delegate to the owning app (the ONLY way to get REAL native selection).** On long-press: fresh `getRootInActiveWindow()`, take the SMALLEST text node under the finger, and if `isTextSelectable || isEditable`, fire `ACTION_LONG_CLICK` (lets the app snap the word and draw its own handles/loupe) or `ACTION_SET_SELECTION` with word offsets from `refreshWithExtraData(EXTRA_DATA_TEXT_CHARACTER_LOCATION_KEY)` — the official per-character-location API. Draw NOTHING yourself. Read back `getTextSelectionStart/End` after `refresh()` and copy ONLY `text[start, end)`. Extend word-by-word via `ACTION_NEXT_AT_MOVEMENT_GRANULARITY` with `MOVEMENT_GRANULARITY_WORD`. ALWAYS check `performAction()`'s boolean — `false` means fall through to Path B.
+- **Path B — freeze-frame OCR (Reels/video/images, where no text node exists).** Hide overlays → `takeScreenshot()` (API 30+, needs `canTakeScreenshot="true"`) → ML Kit v2 on the FROZEN bitmap → select whole `Element` words on the frozen frame, per-word translucent rects in AOSP blue `0x6633B5E5`, teardrop handles as SEPARATE small touchable overlay windows snapping to word edges, and the platform `Magnifier` (API 28+) attached to the frozen `ImageView` for a real loupe. Copy bar placed CLEAR of the selection, never over it.
+- **Why the current build fails (7 independent causes — fix ALL of them):** (1) stale snapshot node bounds (docs warn nodes go stale — always re-fetch); (2) container-node hit test returning the full-screen Reel container (the blue wash — always take the SMALLEST node); (3) live-video drift (boxes cannot track 30 fps pixels — freeze is the only fix); (4) dp↔px density errors (~2.75x on this phone — convert exactly once, in one place); (5) five different coordinate spaces mixed (screen vs window vs view vs bitmap vs overlay — one mapping function, tested); (6) touch-interception dilemma (solved with a NON-touchable highlight layer + separate handle windows, exactly how `TextView.Editor` does it); (7) toolbar drawn over the selection (Copy bar goes below/clear, never on top).
+- **Tests (build-gating):** pure-JVM tests for the word-hit/selection/copy/mapping model + Robolectric tests using `ShadowAccessibilityNodeInfo` (`setOnPerformActionListener`, `getPerformedActionsWithArgs`, `setRefreshReturnValue`) — including cases that FAIL the build if selection covers ≥80% of the screen or clipboard content contains unselected words. NOTE: Robolectric CANNOT test the real screenshot/OCR/Magnifier — those go on the phone checklist instead (test on a real Reel + a real photo + a real screenshot).
+- Rules unchanged: screen reading OFF by default, OCR on-device only, reads ONLY the long-pressed text, nothing uploaded, no background clipboard reading.
+
+## 6. SOUND — 19 sounds, exact recipes, strict tests (Alex: "sound effects pe bhi daba ke research karo")
+
+**Diagnosis (measured from the Round 2 APK — the re-tune drifted the WRONG way):** expand 220 ms vs 115 recipe, notification 400 ms vs 180, toggle 110 ms vs 55, timer_done 640 ms vs 420 — roughly 2x too long — and peaks of −2.0 to −4.1 dBFS, ~8–10 dB too hot. The old unit test (only <1 s, >5 ms silence, ticks >−12 dBFS) was too loose to catch it. Fix the recipes AND the test this round. Researched principles: Apple island sounds are haptics-led (essentially silent — the sounds you hear are the underlying events); restraint first (sound only where it reduces uncertainty); taps 30–150 ms, notifications ≤500 ms; overall gain −12 to −18 dB below full scale; attack 3–6 ms raised-cosine, never vertical (vertical = clipping/static on cheap speakers); one key (C major), one palette; ±3% pitch / ±1 dB volume jitter; 45 ms retrigger cooldown on ticks; haptics confirm, haptic first, sound second. Small-speaker engineering: high-pass at 300 Hz on EVERY file; weight via 2nd harmonic at −15 dB (missing-fundamental trick), never real low-end energy; tame 2–5 kHz harshness (low-pass click layer at 6 kHz); mono 44.1 kHz 16-bit; judge only on the real phone speaker with music running.
+
+**Recipe table (19 sounds — 14 refined + 5 new). All C-major exact notes, attack 3–6 ms, exponential decay, 0 ms leading silence, levels BAKED INTO THE FILES ONLY (code plays at 1.0 x user volume — this kills the double-gain confusion):**
+
+| # | File | Recipe | Dur | Peak |
+|---|---|---|---|---|
+| 1 | sfx_tap | 1800 Hz + click @ −18 dB | 32 ms | −18 dBFS |
+| 2 | sfx_expand | 880→1318 Hz rise + 2nd harmonic | 110 ms | −12 |
+| 3 | sfx_collapse | 1318→880 Hz fall | 85 ms | −12 |
+| 4 | sfx_toggle | 1568 Hz (G6) + click | 55 ms | −12 |
+| 5 | sfx_toggle_off | 1174 Hz (D6) + click | 55 ms | −12 |
+| 6 | sfx_timer_set | 1046→1318 Hz rise | 110 ms | −12 |
+| 7 | sfx_timer_done | FM-bell C6–E6–G6 arpeggio + 30 ms shimmer | 420 ms | −6 |
+| 8 | sfx_music_play | 880→1174 Hz rise | 75 ms | −12 |
+| 9 | sfx_music_pause | 1174→880 Hz fall | 65 ms | −12 |
+| 10 | sfx_music_next | double tick 1318+1760 Hz | 80 ms | −12 |
+| 11 | sfx_shelf_add (RENAMED from sfx_vault_add — fix the filename too) | FM-bell C6–G6–C7 + shimmer | 150 ms | −6 |
+| 12 | sfx_search_open | 698→1046→1318 Hz 3-step rise | 90 ms | −12 |
+| 13 | sfx_notification | kalimba-like 1174→1568 Hz | 180 ms | −9 |
+| 14 | sfx_error | 880→659 Hz fall, same level as confirmations | 120 ms | −12 |
+| 15 | sfx_success (NEW) | FM-bell C6–E6–G6–C7, brand sound logo (setup/calibration/approval) | 320 ms | −6 |
+| 16 | sfx_screenshot (NEW) | 2093 Hz 20 ms whisper tick — barely there by design | 25 ms | −21 |
+| 17 | sfx_charging (NEW) | 1046→1318 Hz, charger connected | 120 ms | −12 |
+| 18 | sfx_low_battery (NEW) | 1174→880 Hz fall, calm not alarming | 200 ms | −12 |
+| 19 | sfx_copy (NEW) | 1568 Hz single blip, OCR copy confirmed | 50 ms | −15 |
+
+Plus an experimental `sfx_morph` whoosh (filtered-noise sweep, −18 dBFS, full-open only) shipped DEFAULT OFF behind a Settings toggle — delete it if the phone test says it sounds cheap.
+**New enforcement (the important part):** unit tests must now check duration ±15%, peak ±2 dB, sub-300 Hz energy < −40 dB (FFT), dominant frequency on the C-major grid, leading silence ≤2 ms, no file >600 ms except timer_done — the build FAILS on any drift. Full brief: hidden_files/sound-research-round3-2026-11-25.md (§12 has a paste-ready instruction block; §13 has a 7-step Redmi ear test — run it).
+
+## 7. "Save to Shelf" pill over YouTube — REMOVE it (Alex, Nov 25 22:12 IST, screenshot 1795624984619)
+
+Screenshot shows a floating "Save to Shelf" pill over a YouTube Short (top-right, over the video). Alex: "Ye youtube pe kya h ye hatao." Fix: the floating "Save to Shelf" pill must NEVER appear over YouTube or any full-screen video app. Screenshots still auto-store silently in Shelf for 10 min with NO popup/pill. The feature stays (silent auto-store); the floating pill goes. If a pill is ever needed, it appears only inside the island itself when Alex opens it — never floating over another app's video.
+
+## 8. Round 2 leftovers STILL broken in the new screenshots — verify each one
+
+- **Island absent (21:56 home screen):** no pill at all — see §0 (idle pill must always be visible; Diagnostics must explain any hiding).
+- **Expanded music card (22:05, "Enemy"):** title STILL truncated ("Enemy (From the series Arcane League of Lege..."), artist STILL truncated ("Imagine Dragons, League O..."). Expanded card = full title up to 2 lines + artist on its own line (§0/§1). Also the "No lyrics found on device" bar STILL shows by default — see §4 (lyrics view only on Lyrics tap; honest states).
+- **Alert text (19:51, re-sent):** "Saved to S..." STILL cut. Alert text must show FULLY ("Saved to Shelf") — §7 Round 2, verify with a test.
+- **Music card (22:05):** dark reddish, low-contrast — see §1 (no muddy reddish fill).
+
+## 9. Hard rules (unchanged)
+
+- INTERNET permission is allowed ONLY for LRCLIB lyrics (§4) — the client talks to lrclib.net and nothing else; no other network use anywhere in the app; Settings toggle kills it. No calls, no inline reply, no meeting notes/AI, no rides/deliveries, no payments, no scanner, no weather/AQI. Calculator stays DROPPED as a tab (pinned app only). Vault = Shelf, Share DELETED, Attach→clipboard KEPT. Timer ATTACHED to the island. Google search via browser intent. Music = PixelMusic. App is FREE — no premium upsell.
+- Keep R8 + baseline profile. Keep CameraDeadZoneTest. Keep the §9j Round 2 card sizes (MEDIUM 360x200, FULL 380x300) and the 2000 ms alert dwell and the lyrics-on-tap-only rule.
+- Research briefs (in the repo notes, hidden_files/): dynamic-island-research-round3-2026-11-25.md, pixelmusic-lyrics-research-2026-11-25.md, ocr-selection-research-round3-2026-11-25.md, di-apps-repos-sweep-round3-2026-11-25.md, iphone-phones-di-research-round3-2026-11-25.md, sound-research-round3-2026-11-25.md, browser-research-round3-2026-11-25.md, liquid-glass-animation-research-round3-2026-11-25.md, animation-research-round2-2026-11-25.md.
+
+## 10. Process + attachments
+
+1. Apply ALL fixes above to the existing code (new chat keeps all code/files). P0 features (§3) are mandatory; P1 if clean, else report as next round.
+2. Extend Robolectric tests: idle pill 48–64 dp wide when idle (assert width); music pill ≤210 dp with a long title (assert cap + no title text in pill); alert auto-dismisses at 2000 ms; progress bar position updates with playback position; toggle buttons change state/colour on tap; OCR selection covers only selected words (fail if ≥80% of screen or clipboard has unselected words); sound tests per §6 (duration ±15%, peak ±2 dB, sub-300 Hz < −40 dB, C-major grid, leading silence ≤2 ms, max 600 ms except timer_done).
+3. Run `gradle testDebugUnitTest` AND `assembleDebug` green.
+4. Commit with a clear message and push to GitHub main.
+5. Confirm the GitHub Actions run succeeds.
+6. Report: commit SHA + Actions run URL + what was fixed, per point above — and honestly list anything P1 that did NOT land.
+
+**Attachments — new phone-test screenshots (9, look at each one):**
+- 1000194419_0_a2qh.jpg (22:06, home screen — "Dracula (fea..." LONG pill)
+- 1000194418_1_9llj.jpg (22:05, expanded music "Enemy" — title/artist truncated, "No lyrics found on device" bar)
+- 1000194417_2_gm0q.jpg (22:04, Reel OCR — two full-width blue bars, handles outside text, selection STILL broken)
+- 1000194416_3_0bnf.jpg (22:00, home screen — "Habibi (Alba..." LONG pill, Alex's red scribble around it)
+- 1000194414_4_w1gy.jpg (21:59, home screen — wide EMPTY black bar, no content)
+- 1000194409_5_gxu9.jpg (19:51, re-sent — "Saved to S..." alert text cut)
+- 1000194412_6_h2yo.jpg (21:56, home screen — island COMPLETELY ABSENT, no pill at all)
+- 1000194410_7_0npc.jpg (19:52, re-sent — "Dracula..." LONG pill in Ai Tools folder)
+- 1795624984619_0_62m1.jpg (22:12, YouTube Short — floating "Save to Shelf" pill over the video, REMOVE it)
+
+**Attachments — reference images (from files/di-references-round3/, see MANIFEST.md — copy the look/feel, do NOT copy proprietary artwork):**
+- dynamicspot-screenshot-4.png — THE model for the short pill (art + visualizer only, no title)
+- ajitpal-02-music.webp — compact music pill, same rule, closest open-source implementation
+- ajitpal-03-music-controls.webp — expanded music card done right
+- ajitpal-01-resting.webp — idle pill hugging the camera
+- ajitpal-island-05-three-at-once.png — three activities at once, +1-circle model
+- ajitpal-island-07-info-pill.png — idle info pill (time/battery beside camera)
+- glisse-liquid-glass-og.png — real liquid-glass refraction look to copy
+- dynamicspot-screenshot-2.png — system glimpse: tiny charging pill, one live value
+- smartisland-06-gesture-guide.jpg — in-pill gestures taught visually
+- smartisland-03-media-player-idle.jpg — music pill + idle state
+- material-capsule-screenshot-1.png, material-capsule-screenshot-2.png, material-capsule-screenshot-3.png — Material You control-centre cards
+- dribbble-music-player-dynamic-island-animation.mp4 — animation reference video (study frame by frame)
+
+Never switch to a paid model. Never push untested changes. This is FINAL quality bar: best, no errors, no glitches, no lag, every feature next-level, animation ekdum khatarnak Apple-type, design fully professional.
+
+## 11. Round 3b additions — deeper animation, full feature inventory, professional UI (researched Nov 25, ~22:27–22:31 IST)
+
+### 11a. Animation implementation (Compose ladder — use these exact APIs)
+- Morph driver: `updateTransition` — one shared timeline, ALL properties (width, height, radius, position, scrim) from ONE scalar. `Animatable` for interrupt/velocity handling. `AnimatedContent` for digit rolls and state swaps. `SharedTransitionLayout` + `sharedElement` for the album-art hero morph (art grows from pill into the card). `anchoredDraggable` for in-pill swipes. Lookahead only if the camera dead zone needs holding during handover. Reference implementation: sinasamaki's "Made in Compose — Dynamic Island" (IslandState sealed class, shell via animateDpAsState spring StiffnessLow 200 / damping 0.6, content fadeIn(tween(300, delay 300)), bubble shake ±15 px + squish 1.5x→1x).
+- Gooey/metaball: Route A (recommended) — ONE RenderEffect chain on the PARENT layer only: blur 16–24 px + ColorMatrix alpha row (alpha 50, constant −5000). Route B — AGSL RuntimeShader (API 33+, cutoff 0.5, entity blur ~30f). Route C (decorative blobs only) — Canvas radial gradients + BlendMode.Plus + Offscreen + withFrameNanos tick. Blur radius STATIC, shader area = island bounds only.
+- Lottie: native springs for anything state-driven (morph, progress, visualizer, icon states); Lottie ONLY for decorative one-shots (success checkmark, unlock shimmer, empty states). Files MUST be bundled in res/raw or assets — URL sources forbidden. Total Lottie budget < 100 KB (lottie-compose 6.x.x, dotlottie-android 0.4.1).
+- Animated vector drawables: play↔pause path morph (identical command counts/types per index — canonical 48 dp pathData), AnimatedStateListDrawable with reversible transitions, trimPath for ring/checkmark draw-on, heart pop spring 0.6/800. Visualizer is Canvas, NOT an AVD (3–5 bars, 80–120 ms phase stagger, drawBehind lambda).
+- Exact M3E token table (verified against token files — do NOT use the wrong stiffness values floating around online; official stiffness ladder is 50/200/400/1500/10000): fast spatial 0.6/800 ~360–380 ms 9.5% overshoot; default spatial 0.8/380 ~435–460 ms 1.5%; slow spatial 0.8/200 ~600–620 ms 1.5%; fast effects 1.0/3800 ~150–170 ms 0%; default effects 1.0/1600 ~230–260 ms 0%; slow effects 1.0/800 ~330–350 ms 0%. Reduced-motion: spatial 0.9, stiffness 1400/700/300.
+- Measured references: compact 36 pt → expanded 168 pt, radius 18→44 pt, damping 0.82 / response 0.38 s; transitions 400–500 ms; states 126x37 → 371x176.
+- 120 Hz on Snapdragon 732G (8.33 ms budget): main-thread killers = recomposition churn (fix: defer state reads to offset{}/drawBehind{}/graphicsLayer{} lambdas), unstable params (Strong Skipping compares by === — a new list instance per emission = full recompose; fix @Immutable/ImmutableList). RenderThread killers = blur/shadow/overdraw/nested graphicsLayers (fix: one parent RenderEffect, static blur, small shader area, single cheap contact shadow). BIGGEST single win: resize the overlay window to island bounds (a full-screen transparent window forces full-screen compositing every frame). Measure with JankStats + Perfetto; R8 + Baseline Profile.
+
+### 11b. Feature additions (from the full 70-feature inventory — top of the list)
+- Energy Ring around the camera hole (NotiGuy model): battery % as a ring hugging the cutout.
+- Quick-launch window + floating windows + 25+ tools grid (already decided Nov 19 — build it properly now).
+- MIUI keep-alive: the service must survive MIUI battery optimisation (foreground service + autostart guidance in the wizard); 60 fps spring engine with no jank on this phone.
+- Privacy dots (camera/mic/location) + Diagnostics card that says WHY the island is hidden — this answers the 21:56 no-island screenshot directly.
+- Idle widgets, offline only (clock, date + next event, battery, next alarm, net speed, unread, DND) — NO weather (needs internet).
+- Full inventory: hidden_files/features-inventory-round3b-2026-11-25.md (70 features, MUST/NICE/SKIP ranked). License caution: ajitpal MIT reusable with attribution; SmartIsland/LiveBridge GPL-3.0 — study, don't paste; proprietary apps features-only. HyperBridge/LiveBridge/Samsung LSPosed module cannot run on Android 13 / without root — ideas only.
+
+### 11c. UI design rules (professional app UI — Settings / Wizard / Theme picker)
+- **Settings: 7 grouped sections MAX.** M3 Expressive shaping — 28 dp outer corners, 4 dp inner, single item fully rounded; rows 56/72/88 dp; search bar on top; supporting text rewrites itself to say what the setting does NOW (status values live in the subtitle, e.g. "71% — about 21 hr left"); a switch acts at once, no confirm button.
+- **Wizard: 5 steps MAX** — one priming card + one big button per permission (Accessibility → Notification → Overlay → Calibration → Done); per-permission state buttons (done = green COMPLETED, pending = TAP TO ENABLE); visible Skip on every screen; progress dots; ends on a LIVE island (first win, not an empty app). The system dialog is one-shot — a decline means <5% ever return via Settings, so prime properly first.
+- **Theme picker:** 3 visual preview cards (Dark / Apple Glass / Liquid Glass) + 5 accent dots (ring + check when selected); glass for chrome only, never glass-on-glass.
+- **Typography:** full M3 scale; pill text 13–15 sp semibold; nothing below 11 sp; sp always; sentence-case buttons.
+- **Icons:** Material Symbols Rounded; 20 dp pill / 24 dp default / 40–48 dp hero; outline = idle, filled = active (the flip IS the state signal); opsz must match size — don't just scale a 24 dp icon down.
+- **Dark mode — the split rule:** island pill pure black #000000 always (no shadow/border — anything else looks cheap on AMOLED); app surfaces on a #121212 grey ladder (0→16% white overlays by elevation); body text #E0E0E0, never pure white on pure black (21:1 halation, worst for astigmatism); contrast ≥4.5:1; desaturated accents; 150–200 ms transitions.
+- **Motion-loop rule (from concept studies):** one shape, no cuts, content swaps with a quick blur, slight overshoot only, no bouncy easing/particles/glows/gradients on chrome. Heavy glass splits opinion — legibility first, always ship a solid fallback.
+- **Reference images (12, in files/di-references-round3b/ — see MANIFEST.md):** Behance iPhone island 3-state ladder, Play Store evolution graphic + music-player card, X "Lately" call+music states, MIUI + Pixel dark settings, Material You overscroll GIF (14.8 MB — REFERENCE ONLY, do NOT ship it), accent-colour + dark-mode theme pickers, 3 onboarding/permission-cards images. All © their authors — reference only, never ship their artwork.
+
+Full briefs: hidden_files/animation-research-round3b-2026-11-25.md, hidden_files/features-inventory-round3b-2026-11-25.md, hidden_files/ui-design-research-round3b-2026-11-25.md.
+
+## 12. Mascot — a little panda that peeks from the island (Alex saw it in other island apps, Nov 25 ~23:21 IST)
+
+Alex saw dynamic island apps with a custom animation like a little panda peeking from the top, and wants it. Researched Nov 25: the app he almost certainly saw is **ORBI** (pixel pet inside a liquid-glass island — cat, dog, bunny, PANDA, fox, bear; the pet blinks, looks at the cursor, sleeps when idle, dances to music, reacts to clicks and notifications; its reel pet is named "Mochi"). The original is **Pixel Pals** (iOS, 2022 — a cat/dog sitting ON TOP of the pill, chasing a ball, sleeping, chilling). Same idea elsewhere: Chimomo (pet peeks out from the top of the screen), Pebbo (16 hand-drawn pets, 50+ animations), Mochi's Island (cat curls up in the island, naps, purrs), Pika! Spot (Android, tap-to-play character animations), iScreen Pet Island (corgis, cats, rabbits, panda), ApexNotch (MIT — pets run along the notch). **ORBI is proprietary — behavior reference ONLY, never copy its art or code. Draw an ORIGINAL panda.**
+- **Five moves (the same in every app — build all five):** PERCH (sit on top of the pill), PEEK (pop up from behind the pill, look around, duck back — the exact move Alex described), RUN along the pill edge, DANCE to the music beat, SLEEP when idle (~30 s) and wake on notification/tap. Plus eyes following the finger, tap = jump + hearts, long-press = feed/play panel.
+- **Implementation (researched, cheapest correct route): sprite-sheet frame animation on Compose Canvas.** One ORIGINAL 32x32 pixel panda drawn as part of this build (idle / blink / peek / dance / sleep / happy — about 18 frames total), cached bitmap, FilterQuality.None, withFrameNanos clock (idle 8 fps, dance 12 fps). Peek = translateY spring 0.8/380 from behind the pill. Cost: <100 KB APK, <1 ms/frame on the Snapdragon 732G. Lottie ONLY for 1–2 tiny one-shot reactions (dotLottie <20 KB — big Lottie JSON parses ~520 ms and renders 11–21 ms/frame, can drop frames). AVD cannot draw a character — do not use it for the mascot.
+- **Rules:** toggleable in Settings ("Island pet" ON/OFF, default ON — Alex wants it, but it must be switchable); quiet hours (never animate 11 PM–7 AM unless the user opts in); the pet NEVER covers text or the camera; NEVER inside a music/alert card; pauses when the screen is off. Pet states: music playing = dance; timer done = happy jump; notification = peek + look; charging = sleep on the pill; low battery = sleepy eyes.
+- **Mascot name:** call it "Mochi" in the UI (Alex's panda is Mochi — same spirit as the reference, original art).
+- **Reference images:** files/di-references-round3b/mascot-*.png (Pixel Pals cat on the island, LottieFiles panda waving, ApexNotch pet) + the new GPT panda images batch5-27/28/29. Full brief: hidden_files/mascot-animation-research-2026-11-25.md.

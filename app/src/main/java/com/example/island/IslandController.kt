@@ -85,7 +85,8 @@ class IslandController(
                 is IslandActivity.Timer -> IslandTab.TIMER
                 is IslandActivity.Music -> IslandTab.MUSIC
                 is IslandActivity.VoiceRecording -> IslandTab.MEMO
-                is IslandActivity.Alert, is IslandActivity.NotificationPreview -> IslandTab.ALERTS
+                is IslandActivity.ScreenRecording -> IslandTab.TOOLS
+                is IslandActivity.Alert, is IslandActivity.NotificationPreview, is IslandActivity.DownloadProgress -> IslandTab.ALERTS
                 else -> current.activeTab
             }
 
@@ -306,6 +307,7 @@ class IslandController(
                 mode = nextMode,
                 isMoreRowOpen = false,
                 isFlashlightCardOpen = false,
+                isMochiMenuOpen = false,
                 pullDownProgress = 0f,
                 needsKeyboardFocus = false
             )
@@ -322,6 +324,7 @@ class IslandController(
                 mode = IslandMode.IDLE,
                 isMoreRowOpen = false,
                 isFlashlightCardOpen = false,
+                isMochiMenuOpen = false,
                 pullDownProgress = 0f,
                 needsKeyboardFocus = false
             )
@@ -440,7 +443,11 @@ class IslandController(
     fun pruneStaleNotifications(activeNotificationIds: Set<String>) {
         _state.update { current ->
             val remaining = current.activityQueue.filter { item ->
-                item !is IslandActivity.NotificationPreview || item.id in activeNotificationIds
+                when (item) {
+                    is IslandActivity.NotificationPreview -> item.id in activeNotificationIds
+                    is IslandActivity.DownloadProgress -> item.id in activeNotificationIds
+                    else -> true
+                }
             }
             if (remaining.size == current.activityQueue.size) return@update current
             val nextPromoted = if (current.promotedPrimaryId != null && remaining.none { it.id == current.promotedPrimaryId }) {
@@ -683,6 +690,50 @@ class IslandController(
         }
     }
 
+    fun setHiddenReason(reason: String, serviceAlive: Boolean = true) {
+        _state.update { current ->
+            if (current.diagnostics.hiddenReason == reason && current.diagnostics.serviceAlive == serviceAlive) {
+                current
+            } else {
+                current.copy(
+                    diagnostics = current.diagnostics.copy(
+                        hiddenReason = reason,
+                        serviceAlive = serviceAlive
+                    )
+                )
+            }
+        }
+    }
+
+    fun updatePrivacyIndicator(indicator: PrivacyIndicatorState) {
+        _state.update { current ->
+            if (current.privacyIndicator == indicator) current
+            else current.copy(privacyIndicator = indicator)
+        }
+    }
+
+    fun setScreenRecording(active: Boolean) {
+        _state.update { current ->
+            if (current.isScreenRecording == active) current
+            else current.copy(isScreenRecording = active)
+        }
+    }
+
+    fun setMochiMenuOpen(open: Boolean) {
+        _state.update { current ->
+            if (current.isMochiMenuOpen == open) current
+            else current.copy(isMochiMenuOpen = open)
+        }
+        if (open) onSoundEvent(IslandSoundEvent.TAP)
+    }
+
+    fun triggerMochiJump() {
+        _state.update { current ->
+            current.copy(mochiJumpTrigger = current.mochiJumpTrigger + 1)
+        }
+        onSoundEvent(IslandSoundEvent.TAP)
+    }
+
     fun clearAlerts() {
         clearInboxWithUndo()
     }
@@ -691,7 +742,8 @@ class IslandController(
         is IslandActivity.Timer -> IslandTab.TIMER
         is IslandActivity.Music -> IslandTab.MUSIC
         is IslandActivity.VoiceRecording -> IslandTab.MEMO
-        is IslandActivity.Alert, is IslandActivity.NotificationPreview -> IslandTab.ALERTS
+        is IslandActivity.ScreenRecording -> IslandTab.TOOLS
+        is IslandActivity.Alert, is IslandActivity.NotificationPreview, is IslandActivity.DownloadProgress -> IslandTab.ALERTS
         else -> fallback
     }
 
@@ -704,6 +756,10 @@ class IslandController(
             a.levelPercent == b.levelPercent && a.isCharging == b.isCharging && a.isFull == b.isFull && a.pluggedLabel == b.pluggedLabel
         a is IslandActivity.NotificationPreview && b is IslandActivity.NotificationPreview ->
             a.packageName == b.packageName && a.appName == b.appName && a.title == b.title && a.text == b.text
+        a is IslandActivity.DownloadProgress && b is IslandActivity.DownloadProgress ->
+            a.title == b.title && a.progress == b.progress && a.max == b.max && a.indeterminate == b.indeterminate && a.speedText == b.speedText
+        a is IslandActivity.ScreenRecording && b is IslandActivity.ScreenRecording ->
+            a.isCountdown == b.isCountdown && a.countdownSec == b.countdownSec && (a.elapsedMs / 1000L) == (b.elapsedMs / 1000L)
         a is IslandActivity.VoiceRecording && b is IslandActivity.VoiceRecording ->
             (a.elapsedMs / 1000L) == (b.elapsedMs / 1000L)
         a is IslandActivity.Alert && b is IslandActivity.Alert ->

@@ -79,6 +79,36 @@ private const val LIQUID_EDGE_AGSL = """
 """
 
 /**
+ * Optional API 31+ RenderEffect metaball chain (gaussian soften + alpha threshold) on the parent layer
+ * so companion circles merge/split cleanly without CPU field marching.
+ */
+fun Modifier.metaballParentLayer(enabled: Boolean): Modifier {
+    if (!enabled || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return this
+    return this.graphicsLayer {
+        runCatching {
+            val blurEffect = AndroidRenderEffect.createBlurEffect(
+                14f,
+                14f,
+                android.graphics.Shader.TileMode.CLAMP
+            )
+            val matrix = android.graphics.ColorMatrix(
+                floatArrayOf(
+                    1f, 0f, 0f, 0f, 0f,
+                    0f, 1f, 0f, 0f, 0f,
+                    0f, 0f, 1f, 0f, 0f,
+                    0f, 0f, 0f, 38f, -3800f
+                )
+            )
+            val thresholdEffect = AndroidRenderEffect.createColorFilterEffect(
+                android.graphics.ColorMatrixColorFilter(matrix),
+                blurEffect
+            )
+            renderEffect = thresholdEffect.asComposeRenderEffect()
+        }
+    }
+}
+
+/**
  * Optical Liquid Glass chrome modifier:
  * - When a sibling [LayerBackdrop] is provided (inside ObsidianCrimsonBackground), applies real
  *   Kyant backdrop blur + optical lens distortion over live background graphics.
@@ -94,20 +124,22 @@ fun Modifier.islandGlassChrome(
     accentColor: Color,
     isHighlighted: Boolean = false,
     backdrop: LayerBackdrop? = null,
-    crossWindowBlurActive: Boolean = false
+    crossWindowBlurActive: Boolean = false,
+    allowDarkBorder: Boolean = true
 ): Modifier {
     val effectiveStyle = if (solidFallback) PillStyle.BLACK else pillStyle
     if (effectiveStyle == PillStyle.BLACK) {
+        val base = this
+            .clip(shape)
+            .background(IslandColors.PillBlack)
+        if (!allowDarkBorder && !isHighlighted) return base
         val borderBrush = IslandColors.liquidBorderBrush(
             useGlass = false,
             isHighlighted = isHighlighted,
             accentColor = accentColor,
             isLiquidStyle = false
         )
-        return this
-            .clip(shape)
-            .background(IslandColors.PillBlack)
-            .border(if (isHighlighted) 1.5.dp else 1.dp, borderBrush, shape)
+        return base.border(if (isHighlighted) 1.5.dp else 1.dp, borderBrush, shape)
     }
 
     val density = glassDensity.coerceIn(0f, 1f)

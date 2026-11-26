@@ -29,21 +29,27 @@ enum class IslandSoundEvent {
     MUSIC_PLAY,
     MUSIC_PAUSE,
     MUSIC_NEXT,
-    VAULT_ADD,
+    SHELF_ADD,
     SEARCH_OPEN,
     NOTIFICATION,
-    ERROR
+    ERROR,
+    SUCCESS,
+    SCREENSHOT,
+    CHARGING,
+    LOW_BATTERY,
+    COPY,
+    MORPH
 }
 
 /**
- * Low-latency SoundPool earcon engine for the 14-sound C-major mallet-pluck family.
- * - Preloads all 14 single-family WAVs at startup; maxStreams = 6; never requests AudioFocus.
+ * Low-latency SoundPool earcon engine for the C-major mallet-pluck family (19 core + 1 default-OFF morph).
+ * - Preloads all 20 WAVs at startup; maxStreams = 6; never requests AudioFocus.
  * - Plays ONLY after SoundPool.OnLoadCompleteListener confirms the sample is loaded.
- * - Per-tier gain in code: Moments = 1.0f, Feedback = 0.5f, Ticks = 0.25f.
- * - Playback rate jitter 0.97..1.03 and volume jitter +/- 1 dB (0.891..1.122).
- * - Paired haptics: Tap -> simultaneous light; Toggle -> haptic 10ms BEFORE sound;
- *   Expand/Collapse -> light impact at morph start; Success (TIMER_DONE, VAULT_ADD) ->
- *   triple-tap haptic aligned to C6-E6-G6 arpeggio beats (0ms, 135ms, 270ms).
+ * - Target levels (-21 dBFS to -6 dBFS) are baked directly into the WAV files so play() uses
+ *   `1.0f * userVolume * volJitter` without double-attenuation.
+ * - Rate jitter 0.97..1.03 and volume jitter +/- 1 dB (0.891..1.122).
+ * - 45 ms retrigger cooldown on rapid ticks/toggles/copy/screenshot.
+ * - Paired haptic choreography: haptics first, sound second.
  */
 class IslandSoundManager(
     context: Context,
@@ -62,6 +68,9 @@ class IslandSoundManager(
 
     @Volatile
     private var soundVolume: Float = 0.75f
+
+    @Volatile
+    private var sfxMorphEnabled: Boolean = false
 
     @Volatile
     private var hapticsStrength: HapticsStrength = HapticsStrength.LIGHT
@@ -101,10 +110,16 @@ class IslandSoundManager(
             soundIds[IslandSoundEvent.MUSIC_PLAY] = pool.load(appContext, R.raw.sfx_music_play, 1)
             soundIds[IslandSoundEvent.MUSIC_PAUSE] = pool.load(appContext, R.raw.sfx_music_pause, 1)
             soundIds[IslandSoundEvent.MUSIC_NEXT] = pool.load(appContext, R.raw.sfx_music_next, 1)
-            soundIds[IslandSoundEvent.VAULT_ADD] = pool.load(appContext, R.raw.sfx_vault_add, 1)
+            soundIds[IslandSoundEvent.SHELF_ADD] = pool.load(appContext, R.raw.sfx_shelf_add, 1)
             soundIds[IslandSoundEvent.SEARCH_OPEN] = pool.load(appContext, R.raw.sfx_search_open, 1)
             soundIds[IslandSoundEvent.NOTIFICATION] = pool.load(appContext, R.raw.sfx_notification, 1)
             soundIds[IslandSoundEvent.ERROR] = pool.load(appContext, R.raw.sfx_error, 1)
+            soundIds[IslandSoundEvent.SUCCESS] = pool.load(appContext, R.raw.sfx_success, 1)
+            soundIds[IslandSoundEvent.SCREENSHOT] = pool.load(appContext, R.raw.sfx_screenshot, 1)
+            soundIds[IslandSoundEvent.CHARGING] = pool.load(appContext, R.raw.sfx_charging, 1)
+            soundIds[IslandSoundEvent.LOW_BATTERY] = pool.load(appContext, R.raw.sfx_low_battery, 1)
+            soundIds[IslandSoundEvent.COPY] = pool.load(appContext, R.raw.sfx_copy, 1)
+            soundIds[IslandSoundEvent.MORPH] = pool.load(appContext, R.raw.sfx_morph, 1)
 
             soundPool = pool
         }
@@ -115,6 +130,7 @@ class IslandSoundManager(
             settingsRepository.settingsFlow.collectLatest { s ->
                 soundEnabled = s.soundEnabled
                 soundVolume = s.soundVolume.coerceIn(0f, 1f)
+                sfxMorphEnabled = s.sfxMorphEnabled
                 hapticsStrength = s.hapticsStrength
             }
         }
@@ -124,35 +140,19 @@ class IslandSoundManager(
 
     fun currentVolume(): Float = soundVolume
 
-    fun updateCachedAudioSettings(enabled: Boolean, volume: Float = soundVolume) {
+    fun updateCachedAudioSettings(
+        enabled: Boolean,
+        volume: Float = soundVolume,
+        morphEnabled: Boolean = sfxMorphEnabled
+    ) {
         soundEnabled = enabled
         soundVolume = volume.coerceIn(0f, 1f)
-    }
-
-    fun tierGainFor(event: IslandSoundEvent): Float = when (event) {
-        // Moments tier (1.0f)
-        IslandSoundEvent.TIMER_DONE,
-        IslandSoundEvent.VAULT_ADD,
-        IslandSoundEvent.NOTIFICATION -> 1.0f
-
-        // Feedback tier (0.5f)
-        IslandSoundEvent.EXPAND,
-        IslandSoundEvent.COLLAPSE,
-        IslandSoundEvent.TIMER_SET,
-        IslandSoundEvent.TOGGLE_ON,
-        IslandSoundEvent.TOGGLE_OFF,
-        IslandSoundEvent.MUSIC_PLAY,
-        IslandSoundEvent.MUSIC_PAUSE,
-        IslandSoundEvent.SEARCH_OPEN,
-        IslandSoundEvent.ERROR -> 0.5f
-
-        // Ticks tier (0.25f)
-        IslandSoundEvent.TAP,
-        IslandSoundEvent.MUSIC_NEXT -> 0.25f
+        sfxMorphEnabled = morphEnabled
     }
 
     fun play(event: IslandSoundEvent): Boolean {
         if (!soundEnabled) return false
+        if (event == IslandSoundEvent.MORPH && !sfxMorphEnabled) return false
         val baseVol = soundVolume.coerceIn(0f, 1f)
         if (baseVol <= 0f) return false
 
@@ -160,26 +160,26 @@ class IslandSoundManager(
         val sampleId = soundIds[event] ?: return false
         if (sampleId == 0) return false
 
-        // Play strictly after OnLoadCompleteListener confirms sample is ready
         if (!loadedSampleIds.contains(sampleId)) {
             return false
         }
 
-        // Prevent rapid double-triggers within 28ms on micro-taps/toggles
+        // 45 ms retrigger cooldown on rapid ticks & micro-feedback
         val nowMs = android.os.SystemClock.uptimeMillis()
         if (event == IslandSoundEvent.TAP ||
             event == IslandSoundEvent.MUSIC_NEXT ||
             event == IslandSoundEvent.TOGGLE_ON ||
-            event == IslandSoundEvent.TOGGLE_OFF
+            event == IslandSoundEvent.TOGGLE_OFF ||
+            event == IslandSoundEvent.SCREENSHOT ||
+            event == IslandSoundEvent.COPY
         ) {
             val prevMs = lastPlayedMs[event] ?: 0L
-            if (nowMs - prevMs < 28L) {
+            if (nowMs - prevMs < 45L) {
                 return false
             }
         }
         lastPlayedMs[event] = nowMs
 
-        // Stop-before-replay for high-frequency taps so rapid taps stay crisp without stacking
         if (event == IslandSoundEvent.TAP) {
             activeStreams[event]?.let { prevStream ->
                 if (prevStream != 0) runCatching { pool.stop(prevStream) }
@@ -187,27 +187,32 @@ class IslandSoundManager(
         }
 
         val priority = when (event) {
-            IslandSoundEvent.TIMER_DONE, IslandSoundEvent.VAULT_ADD -> 10
-            IslandSoundEvent.NOTIFICATION, IslandSoundEvent.ERROR -> 8
-            IslandSoundEvent.MUSIC_PLAY -> 6
+            IslandSoundEvent.TIMER_DONE,
+            IslandSoundEvent.SUCCESS,
+            IslandSoundEvent.SHELF_ADD -> 10
+            IslandSoundEvent.NOTIFICATION,
+            IslandSoundEvent.LOW_BATTERY,
+            IslandSoundEvent.ERROR -> 8
+            IslandSoundEvent.MUSIC_PLAY,
+            IslandSoundEvent.CHARGING -> 6
             IslandSoundEvent.EXPAND,
             IslandSoundEvent.COLLAPSE,
             IslandSoundEvent.SEARCH_OPEN,
             IslandSoundEvent.TIMER_SET,
             IslandSoundEvent.TOGGLE_ON,
             IslandSoundEvent.TOGGLE_OFF,
-            IslandSoundEvent.MUSIC_PAUSE -> 4
+            IslandSoundEvent.MUSIC_PAUSE,
+            IslandSoundEvent.MORPH -> 4
             IslandSoundEvent.TAP,
-            IslandSoundEvent.MUSIC_NEXT -> 1
+            IslandSoundEvent.MUSIC_NEXT,
+            IslandSoundEvent.SCREENSHOT,
+            IslandSoundEvent.COPY -> 1
         }
 
-        // Rate jitter 0.97..1.03 (moments & toggles keep pitch faithful or tight organic shimmer)
         val rate = 0.97f + (Math.random().toFloat() * 0.06f)
-
-        // Volume jitter +/- 1 dB (0.891f .. 1.122f) scaled by per-tier gain (1.0 / 0.5 / 0.25)
         val volJitter = 0.891f + (Math.random().toFloat() * 0.231f)
-        val tierGain = tierGainFor(event)
-        val vol = (baseVol * tierGain * volJitter).coerceIn(0.01f, 1f)
+        // Baked WAV peaks handle hierarchy cleanly; play at 1.0 * userVolume * jitter
+        val vol = (baseVol * volJitter).coerceIn(0.01f, 1f)
 
         var streamId = runCatching {
             pool.play(sampleId, vol, vol, priority, 0, rate)
@@ -227,13 +232,6 @@ class IslandSoundManager(
         return streamId != 0
     }
 
-    /**
-     * Fires sound + paired haptic choreography:
-     * - Tap: simultaneous light haptic
-     * - Toggle: haptic 10 ms BEFORE the sound
-     * - Expand / Collapse: light impact at morph start
-     * - Success (TIMER_DONE, VAULT_ADD): triple-tap haptic aligned to C6-E6-G6 arpeggio beats (0, 135, 270 ms)
-     */
     fun playWithHaptic(
         event: IslandSoundEvent,
         view: View? = null,
@@ -259,7 +257,9 @@ class IslandSoundManager(
                 return soundEnabled && soundVolume > 0f
             }
 
-            IslandSoundEvent.TIMER_DONE, IslandSoundEvent.VAULT_ADD -> {
+            IslandSoundEvent.TIMER_DONE,
+            IslandSoundEvent.SHELF_ADD,
+            IslandSoundEvent.SUCCESS -> {
                 val played = play(event)
                 triggerHaptic(HapticFeedbackConstants.CLOCK_TICK)
                 scope.launch {
@@ -274,7 +274,7 @@ class IslandSoundManager(
                 return played
             }
 
-            IslandSoundEvent.EXPAND, IslandSoundEvent.COLLAPSE -> {
+            IslandSoundEvent.EXPAND, IslandSoundEvent.COLLAPSE, IslandSoundEvent.MORPH -> {
                 triggerHaptic(HapticFeedbackConstants.CONTEXT_CLICK)
                 return play(event)
             }
@@ -294,8 +294,16 @@ class IslandSoundManager(
                 return play(event)
             }
 
-            IslandSoundEvent.TIMER_SET -> {
+            IslandSoundEvent.TIMER_SET, IslandSoundEvent.CHARGING -> {
                 triggerHaptic(HapticFeedbackConstants.CLOCK_TICK)
+                return play(event)
+            }
+
+            IslandSoundEvent.COPY -> {
+                triggerHaptic(
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) HapticFeedbackConstants.CONFIRM
+                    else HapticFeedbackConstants.KEYBOARD_TAP
+                )
                 return play(event)
             }
 
@@ -340,10 +348,18 @@ class IslandSoundManager(
     fun playMusicPlay(view: View? = null) { playWithHaptic(IslandSoundEvent.MUSIC_PLAY, view) }
     fun playMusicPause(view: View? = null) { playWithHaptic(IslandSoundEvent.MUSIC_PAUSE, view) }
     fun playMusicNext(view: View? = null) { playWithHaptic(IslandSoundEvent.MUSIC_NEXT, view) }
-    fun playVaultAdd(view: View? = null) { playWithHaptic(IslandSoundEvent.VAULT_ADD, view) }
+    fun playShelfAdd(view: View? = null) { playWithHaptic(IslandSoundEvent.SHELF_ADD, view) }
     fun playSearchOpen(view: View? = null) { playWithHaptic(IslandSoundEvent.SEARCH_OPEN, view) }
     fun playNotification(view: View? = null) { playWithHaptic(IslandSoundEvent.NOTIFICATION, view) }
     fun playError(view: View? = null) { playWithHaptic(IslandSoundEvent.ERROR, view) }
+    fun playSuccess(view: View? = null) { playWithHaptic(IslandSoundEvent.SUCCESS, view) }
+    fun playScreenshot(view: View? = null) { playWithHaptic(IslandSoundEvent.SCREENSHOT, view) }
+    fun playCharging(view: View? = null) { playWithHaptic(IslandSoundEvent.CHARGING, view) }
+    fun playLowBattery(view: View? = null) { playWithHaptic(IslandSoundEvent.LOW_BATTERY, view) }
+    fun playCopy(view: View? = null) { playWithHaptic(IslandSoundEvent.COPY, view) }
+    fun playMorph(view: View? = null) {
+        if (sfxMorphEnabled) playWithHaptic(IslandSoundEvent.MORPH, view)
+    }
 
     fun release() {
         runCatching { soundPool?.release() }

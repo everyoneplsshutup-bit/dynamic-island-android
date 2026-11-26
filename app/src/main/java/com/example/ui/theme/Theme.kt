@@ -15,12 +15,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
 private val IslandDarkColorScheme = darkColorScheme(
-    primary = IslandColors.CrimsonBright,
+    primary = IslandColors.ElectricBlue,
     onPrimary = Color.White,
-    primaryContainer = IslandColors.CrimsonDeep,
-    onPrimaryContainer = Color(0xFFFFDADE),
-    secondary = IslandColors.AccentRed,
-    onSecondary = Color.White,
+    primaryContainer = Color(0xFF1C2D44),
+    onPrimaryContainer = Color(0xFFD6E6FF),
+    secondary = IslandColors.AccentCyan,
+    onSecondary = Color(0xFF0C1821),
     tertiary = IslandColors.AccentGreen,
     background = IslandColors.ObsidianBg,
     onBackground = IslandColors.TextPrimary,
@@ -35,15 +35,15 @@ private val IslandDarkColorScheme = darkColorScheme(
     surfaceContainerHighest = IslandColors.SurfaceContainerHighest,
     error = IslandColors.AccentRed,
     onError = Color.White,
-    outline = Color(0xFF332024)
+    outline = Color(0xFF2E2E34)
 )
 
 private val IslandLightColorScheme = lightColorScheme(
-    primary = IslandColors.CrimsonPrimary,
+    primary = Color(0xFF1E70D9),
     onPrimary = Color.White,
-    primaryContainer = Color(0xFFFFDAD6),
-    onPrimaryContainer = Color(0xFF410002),
-    secondary = Color(0xFF9E1B24),
+    primaryContainer = Color(0xFFDCEBFF),
+    onPrimaryContainer = Color(0xFF0A2540),
+    secondary = Color(0xFF0D7C99),
     onSecondary = Color.White,
     tertiary = Color(0xFF16A34A),
     background = IslandColors.AppBgLight,
@@ -59,9 +59,9 @@ private val IslandLightColorScheme = lightColorScheme(
 
 val IslandShapes = Shapes(
     extraSmall = RoundedCornerShape(8.dp),
-    small = RoundedCornerShape(12.dp),
-    medium = RoundedCornerShape(18.dp),
-    large = RoundedCornerShape(24.dp),
+    small = RoundedCornerShape(14.dp),
+    medium = RoundedCornerShape(20.dp),
+    large = RoundedCornerShape(28.dp),
     extraLarge = RoundedCornerShape(36.dp)
 )
 

@@ -19,10 +19,10 @@ data class TierBSelectionResult(
 )
 
 /**
- * Tier B OCR: Opt-in fallback only when Tier A finds no text.
- * Crops around the pressed element / tap point (up to ~900x520 px for multi-line photo blocks),
- * runs bundled on-device ML Kit (Latin + Devanagari), builds word-level tokens in screen
- * coordinates across multi-line blocks, and immediately recycles all bitmaps.
+ * Tier B OCR (§5 Path B): Frozen-frame ML Kit text recognition.
+ * - Preserves the frozen screenshot in [OcrBitmapHolder] when requested so the frozen ImageView
+ *   plus platform Magnifier & non-touchable highlight canvas align 1:1 with underlying text.
+ * - Rejects oversize (>= 80% screen area) blocks and builds word-level tokens in bitmap/screen coords.
  */
 object TierBMlKitOcr {
 
@@ -30,28 +30,41 @@ object TierBMlKitOcr {
         fullFrame: Bitmap,
         elementBounds: Rect?,
         tapX: Int = -1,
-        tapY: Int = -1
+        tapY: Int = -1,
+        preserveFrozenFrameForOverlay: Boolean = false
     ): TierBSelectionResult? {
-        val cropRect = resolveFocusedCropRect(fullFrame.width, fullFrame.height, elementBounds, tapX, tapY)
+        val frameW = fullFrame.width.coerceAtLeast(1)
+        val frameH = fullFrame.height.coerceAtLeast(1)
+        val cropRect = resolveFocusedCropRect(frameW, frameH, elementBounds, tapX, tapY)
         val cropped = cropSafely(fullFrame, cropRect)
-        if (cropped !== fullFrame && !fullFrame.isRecycled) {
+
+        if (preserveFrozenFrameForOverlay) {
+            OcrBitmapHolder.setFrozenFrame(fullFrame)
+        } else if (cropped !== fullFrame && !fullFrame.isRecycled) {
             fullFrame.recycle()
         }
+
         val localTapX = if (tapX >= 0) (tapX - cropRect.left).coerceIn(0, cropped.width) else cropped.width / 2
         val localTapY = if (tapY >= 0) (tapY - cropRect.top).coerceIn(0, cropped.height) else cropped.height / 2
 
         return try {
             val inputImage = InputImage.fromBitmap(cropped, 0)
             val latinResult = runLatinRecognizer(inputImage)
-            val latinMatch = latinResult?.let { selectPressedBlock(it, cropRect, localTapX, localTapY, tapX, tapY) }
+            val latinMatch = latinResult?.let {
+                selectPressedBlock(it, cropRect, frameW, frameH, localTapX, localTapY, tapX, tapY)
+            }
             if (latinMatch != null) {
                 latinMatch
             } else {
                 val devResult = runDevanagariRecognizer(inputImage)
-                devResult?.let { selectPressedBlock(it, cropRect, localTapX, localTapY, tapX, tapY) }
+                devResult?.let {
+                    selectPressedBlock(it, cropRect, frameW, frameH, localTapX, localTapY, tapX, tapY)
+                }
             }
         } finally {
-            if (!cropped.isRecycled) {
+            if (cropped !== fullFrame && !cropped.isRecycled) {
+                cropped.recycle()
+            } else if (!preserveFrozenFrameForOverlay && !cropped.isRecycled) {
                 cropped.recycle()
             }
         }
@@ -73,7 +86,9 @@ object TierBMlKitOcr {
     ): Rect {
         val w = bitmapW.coerceAtLeast(1)
         val h = bitmapH.coerceAtLeast(1)
-        if (bounds != null && !bounds.isEmpty && bounds.width() <= 960 && bounds.height() <= 600) {
+        if (bounds != null && !bounds.isEmpty && bounds.width() <= 960 && bounds.height() <= 600 &&
+            !SelectionCoordinateMapper.isOversizeSelection(bounds, w, h)
+        ) {
             return Rect(
                 bounds.left.coerceIn(0, w - 1),
                 bounds.top.coerceIn(0, h - 1),
@@ -83,8 +98,8 @@ object TierBMlKitOcr {
         }
         val cx = if (tapX >= 0) tapX.coerceIn(0, w - 1) else w / 2
         val cy = if (tapY >= 0) tapY.coerceIn(0, h - 1) else h / 2
-        val halfW = 450
-        val halfH = 260
+        val halfW = 460
+        val halfH = 280
         val left = (cx - halfW).coerceIn(0, (w - 2).coerceAtLeast(0))
         val top = (cy - halfH).coerceIn(0, (h - 2).coerceAtLeast(0))
         val right = (cx + halfW).coerceIn(left + 1, w)
@@ -95,12 +110,23 @@ object TierBMlKitOcr {
     private fun selectPressedBlock(
         visionText: Text,
         cropRect: Rect,
+        screenW: Int,
+        screenH: Int,
         localX: Int,
         localY: Int,
         rawX: Int,
         rawY: Int
     ): TierBSelectionResult? {
-        val blocks = visionText.textBlocks
+        val blocks = visionText.textBlocks.filter { block ->
+            val box = block.boundingBox ?: return@filter true
+            val screenBox = Rect(
+                cropRect.left + box.left,
+                cropRect.top + box.top,
+                cropRect.left + box.right,
+                cropRect.top + box.bottom
+            )
+            !SelectionCoordinateMapper.isOversizeSelection(screenBox, screenW, screenH)
+        }
         if (blocks.isEmpty()) return null
 
         val hitBlock = blocks.firstOrNull { block ->
@@ -140,7 +166,6 @@ object TierBMlKitOcr {
             hypot(dx, dy)
         }
 
-        // Select up to 4 contiguous lines around hitLine within the block
         val linesToUse = if (blockLines.size <= 4) {
             blockLines
         } else {
@@ -246,20 +271,11 @@ object TierBMlKitOcr {
             ).tokens
         }
 
-        val hitTokenIdx = finalTokens.indices.minByOrNull { idx ->
-            val tok = finalTokens[idx]
-            val dx = when {
-                rawX < tok.leftPx -> (tok.leftPx - rawX).toDouble()
-                rawX > tok.rightPx -> (rawX - tok.rightPx).toDouble()
-                else -> 0.0
-            }
-            val dy = when {
-                rawY < tok.topPx -> (tok.topPx - rawY).toDouble()
-                rawY > tok.bottomPx -> (rawY - tok.bottomPx).toDouble()
-                else -> 0.0
-            }
-            hypot(dx, dy)
-        } ?: 0
+        val hitTokenIdx = SelectionCoordinateMapper.findNearestTokenIndex(
+            tokens = finalTokens,
+            x = rawX.toFloat(),
+            y = rawY.toFloat()
+        ).coerceAtLeast(0)
 
         val selectionState = OcrSelectionState(
             fullText = combinedText,

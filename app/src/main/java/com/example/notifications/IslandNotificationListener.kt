@@ -48,7 +48,12 @@ class IslandNotificationListener : NotificationListenerService() {
                 val activeList = runCatching { activeNotifications?.toList() }.getOrNull() ?: continue
                 val activeRawKeys = activeList.mapTo(HashSet(activeList.size)) { it.key }
                 lastPostedFingerprints.keys.retainAll(activeRawKeys)
-                val activeIds = activeRawKeys.mapTo(HashSet(activeRawKeys.size)) { "notif_$it" }
+                val activeIds = HashSet<String>(activeRawKeys.size * 2).apply {
+                    activeRawKeys.forEach { key ->
+                        add("notif_$key")
+                        add("download_$key")
+                    }
+                }
                 kotlinx.coroutines.withContext(Dispatchers.Main) {
                     app.islandController.pruneStaleNotifications(activeIds)
                 }
@@ -119,6 +124,60 @@ class IslandNotificationListener : NotificationListenerService() {
         // Ignore media-style notifications (handled cleanly by MediaHub)
         if (extras.containsKey(Notification.EXTRA_MEDIA_SESSION)) {
             scope.launch(Dispatchers.Main) { app.mediaHub.refreshSessions() }
+            return
+        }
+
+        // 3. Progress / download / upload notifications -> IslandActivity.DownloadProgress
+        val progressMax = extras.getInt(Notification.EXTRA_PROGRESS_MAX, 0)
+        val progressVal = extras.getInt(Notification.EXTRA_PROGRESS, 0)
+        val progressIndet = extras.getBoolean(Notification.EXTRA_PROGRESS_INDETERMINATE, false)
+        val isProgressNotif = (notification.category == Notification.CATEGORY_PROGRESS) ||
+            progressIndet ||
+            (progressMax > 0 && progressVal in 0..progressMax)
+
+        if (isProgressNotif) {
+            val rawAppName = runCatching {
+                val ai = packageManager.getApplicationInfo(pkg, 0)
+                packageManager.getApplicationLabel(ai).toString().trim()
+            }.getOrDefault("")
+            val appName = rawAppName.ifBlank { "Transfer" }
+            val dlId = "download_${sbn.key}"
+            val dlTitle = title.ifEmpty { text.ifEmpty { appName } }
+            val detail = "$text $subText"
+            val speed = Regex("""\d+(?:[.,]\d+)?\s*(?:KB|MB|GB)/s""", RegexOption.IGNORE_CASE).find(detail)?.value.orEmpty()
+            val eta = Regex("""\d+\s*(?:sec|min|hr|s|m|h)\s*(?:left|remaining)?""", RegexOption.IGNORE_CASE).find(detail)?.value.orEmpty()
+            scope.launch(Dispatchers.Main) {
+                val settings = app.settingsRepository.settingsFlow.first()
+                if (!settings.notificationsEnabled) return@launch
+                if (!progressIndet && progressMax > 0 && progressVal >= progressMax) {
+                    app.islandController.removeActivity(dlId)
+                    app.islandController.upsertActivity(
+                        IslandActivity.Alert(
+                            id = "dl_done_${sbn.key}",
+                            kind = com.example.island.AlertKind.GENERAL,
+                            title = "Download complete",
+                            subtitle = dlTitle
+                        ),
+                        autoShowCompact = true,
+                        autoDismissMs = 2000L
+                    )
+                } else {
+                    app.islandController.upsertActivity(
+                        IslandActivity.DownloadProgress(
+                            id = dlId,
+                            packageName = pkg,
+                            appName = appName,
+                            title = dlTitle,
+                            progress = progressVal.coerceAtLeast(0),
+                            max = progressMax.coerceAtLeast(100),
+                            indeterminate = progressIndet,
+                            speedText = speed,
+                            etaText = eta
+                        ),
+                        autoShowCompact = true
+                    )
+                }
+            }
             return
         }
 
@@ -246,6 +305,7 @@ class IslandNotificationListener : NotificationListenerService() {
             app.timerEngine.updateMirroredClockTimer(null, null)
         }
         app.islandController.removeActivity("notif_${sbn.key}")
+        app.islandController.removeActivity("download_${sbn.key}")
     }
 
     @Suppress("DEPRECATION")

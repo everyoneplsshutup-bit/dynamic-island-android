@@ -13,69 +13,75 @@ import com.example.system.AccentTheme
 import com.example.system.PillStyle
 
 object IslandColors {
-    // Obsidian & Crimson Glass Palette (matching the 12 mockup screens)
-    val ObsidianBg = Color(0xFF050507)
-    val ObsidianSurface = Color(0xFF0E0B0D)
-    val ObsidianCard = Color(0xFF140E11)
-    val ObsidianCardElevated = Color(0xFF1C1317)
-    val ObsidianDock = Color(0xEA100A0C)
+    // Neutral #121212 Dark Ladder & Liquid Glass Palette
+    val ObsidianBg = Color(0xFF121212)
+    val ObsidianSurface = Color(0xFF161618)
+    val ObsidianCard = Color(0xFF1C1C20)
+    val ObsidianCardElevated = Color(0xFF242429)
+    val ObsidianGlassDark = Color(0xCC16161A)
+    val ObsidianDock = Color(0xEC16161A)
 
-    val CrimsonPrimary = Color(0xFFE50914)
-    val CrimsonBright = Color(0xFFFF1E2D)
-    val CrimsonGlow = Color(0xFFFF3B47)
-    val CrimsonDeep = Color(0xFF4A070D)
-    val CrimsonMuted = Color(0xFF28090C)
-    val CrimsonBorder = Color(0x55FF2A38)
-    val CrimsonBorderStrong = Color(0xCCFF2A38)
+    // Muted semantic crimson/red (only for REC indicator, destructive actions, <=15% battery)
+    val CrimsonPrimary = Color(0xFFE53935)
+    val CrimsonBright = Color(0xFFEF5350)
+    val CrimsonGlow = Color(0xFFFF6B6B)
+    val CrimsonDeep = Color(0xFF2A181A)
+    val CrimsonMuted = Color(0xFF221618)
+    val CrimsonBorder = Color(0x44FFFFFF)
+    val CrimsonBorderStrong = Color(0xAA4A9EFF)
 
     // Core Dynamic Island & Glass palette
     val PillBlack = Color(0xFF000000)
-    val CardSurfaceBlack = Color(0xFF08090C)
-    val CardSurfaceSolid = Color(0xFF13141A)
-    val CardSurfaceElevated = Color(0xFF1D1E27)
+    val CardSurfaceBlack = Color(0xFF121212)
+    val CardSurfaceSolid = Color(0xFF18181B)
+    val CardSurfaceElevated = Color(0xFF222227)
     val GlassTintLight = Color(0x20FFFFFF)
-    val GlassTintDark = Color(0xC40A0B10)
+    val GlassTintDark = Color(0xCC121316)
     val GlassSpecularBorder = Color(0x66E4EEFF)
     val GlassSpecularTop = Color(0x96FFFFFF)
     val GlassSpecularMid = Color(0x36FFFFFF)
     val GlassSpecularBottom = Color(0x18FFFFFF)
-    val GlassSubtleBorder = Color(0x22FFFFFF)
+    val GlassSubtleBorder = Color(0x24FFFFFF)
 
-    // M3E Surface Container Ladder (Obsidian-tinted)
-    val SurfaceContainerLowest = Color(0xFF050507)
-    val SurfaceContainerLow = Color(0xFF0E0B0D)
-    val SurfaceContainer = Color(0xFF151013)
-    val SurfaceContainerHigh = Color(0xFF1E161A)
-    val SurfaceContainerHighest = Color(0xFF281D22)
+    // M3E Surface Container Ladder (Neutral grey overlays on #121212)
+    val SurfaceContainerLowest = Color(0xFF0E0E10)
+    val SurfaceContainerLow = Color(0xFF141416)
+    val SurfaceContainer = Color(0xFF1A1A1E)
+    val SurfaceContainerHigh = Color(0xFF212126)
+    val SurfaceContainerHighest = Color(0xFF2A2A30)
 
-    // Accent & Semantic Activity colors
-    val ElectricBlue = Color(0xFF1E90FF) // Liquid Glass default hero accent
-    val NeonPurple = Color(0xFFA855F7)   // Position chooser Liquid Glass accent
-    val CyanBright = Color(0xFF00E5FF)   // Tools Liquid Glass accent
-    val AccentOrange = Color(0xFFFF9F0A) // Amber / Gold Liquid Glass & Timer accent
+    // Desaturated Accent & Semantic Activity colors
+    val ElectricBlue = Color(0xFF4A9EFF) // Liquid Glass default hero accent
+    val NeonPurple = Color(0xFFAB7DF8)   // Violet Liquid Glass accent
+    val CyanBright = Color(0xFF3FD5E8)   // Teal Liquid Glass accent
+    val AccentOrange = Color(0xFFF5A623) // Amber Liquid Glass & Timer accent
     val AccentCyan = Color(0xFF64D2FF)   // Alerts / OCR / Info
-    val AccentGreen = Color(0xFF30D158)  // Charging / Shelf Ready / Active
-    val AccentLime = Color(0xFFA6E33A)   // Notes / Shelf countdown healthy
+    val AccentGreen = Color(0xFF34C759)  // Charging / Granted / Active
+    val AccentLime = Color(0xFF9CD94A)   // Notes / Shelf countdown healthy
     val AccentAmber = Color(0xFFFFB340)  // Shelf < 2:00 warning
-    val AccentRed = Color(0xFFFF2433)    // Crimson primary / calibration ring / recording / <= 15% battery
+    val AccentRed = Color(0xFFEF5350)    // REC / error / <= 15% battery
     val AccentPurple = Color(0xFFBF5AF2) // Sleep / Sidebar option
-    val SelectionBlue = Color(0xFF0A84FF) // Native Android/Apple OCR Selection blue
-    val TextPrimary = Color(0xFFFFFFFF)
-    val TextSecondary = Color(0xFFA6A8B2)
-    val TextTertiary = Color(0xFF6F727C)
+    val SelectionBlue = Color(0xFF33B5E5) // AOSP / Native OCR Selection blue
+    val PrivacyCameraGreen = AccentGreen
+    val PrivacyMicOrange = Color(0xFFFF9F0A)
+    val PrivacyLocBlue = Color(0xFF0A84FF)
+    val TextPrimary = Color(0xFFF5F5F7)
+    val TextSecondary = Color(0xFFE0E0E0) // >= 4.5:1 contrast body text
+    val TextMuted = Color(0xFF9EA0AA)
+    val TextTertiary = Color(0xFF7D808C)
 
     // Concentric radii scale (Apple HIG / Build #5 spec: 36dp full, 28dp medium)
     val ExpandedOuterRadius = 36.dp
     val MediumOuterRadius = 28.dp
     val ExpandedInnerSheetRadius = 28.dp
-    val CardRadius = 22.dp
+    val CardRadius = 28.dp
     val ChipRadius = 8.dp
     val ScreenHorizontalMargin = 16.dp
 
     // App Settings surface tokens
-    val AppBgDark = Color(0xFF050507)
-    val AppSurfaceDark = Color(0xFF120D10)
-    val AppSurfaceVariantDark = Color(0xFF1C1418)
+    val AppBgDark = Color(0xFF121212)
+    val AppSurfaceDark = Color(0xFF18181A)
+    val AppSurfaceVariantDark = Color(0xFF222226)
     val AppBgLight = Color(0xFFF5F6FA)
     val AppSurfaceLight = Color(0xFFFFFFFF)
     val AppSurfaceVariantLight = Color(0xFFEBEEF5)
@@ -98,7 +104,7 @@ object IslandColors {
                 val raw = context.getColor(resId)
                 val hsl = FloatArray(3)
                 ColorUtils.colorToHSL(raw, hsl)
-                hsl[1] = hsl[1].coerceAtLeast(0.55f)
+                hsl[1] = hsl[1].coerceAtLeast(0.50f)
                 hsl[2] = hsl[2].coerceIn(0.50f, 0.68f)
                 Color(ColorUtils.HSLToColor(hsl))
             } else {
@@ -111,19 +117,18 @@ object IslandColors {
         val d = density.coerceIn(0f, 1f)
         if (pillStyle == PillStyle.BLACK) return 1f to 1f
         if (reduceGlass) {
-            val top = (0.72f + d * 0.18f).coerceIn(0.72f, 0.92f)
-            return top to (top + 0.05f).coerceAtMost(0.96f)
+            val top = (0.78f + d * 0.14f).coerceIn(0.76f, 0.94f)
+            return top to (top + 0.04f).coerceAtMost(0.96f)
         }
         return when (pillStyle) {
             PillStyle.APPLE_GLASS -> {
-                val top = (0.48f + d * 0.28f).coerceIn(0.42f, 0.78f)
-                val bot = (top + 0.10f).coerceAtMost(0.86f)
+                val top = (0.56f + d * 0.24f).coerceIn(0.50f, 0.82f)
+                val bot = (top + 0.08f).coerceAtMost(0.88f)
                 top to bot
             }
             PillStyle.LIQUID_GLASS -> {
-                // Optical crystal Liquid Glass: crisp translucent body + luminous edge refraction
-                val top = (0.12f + d * 0.16f).coerceIn(0.10f, 0.30f)
-                val bot = (top + 0.06f).coerceAtMost(0.36f)
+                val top = (0.16f + d * 0.16f).coerceIn(0.14f, 0.34f)
+                val bot = (top + 0.06f).coerceAtMost(0.40f)
                 top to bot
             }
             PillStyle.BLACK -> 1f to 1f
@@ -137,13 +142,13 @@ object IslandColors {
         reduceGlass: Boolean = false
     ): Brush {
         if (pillStyle == PillStyle.BLACK) {
-            return Brush.verticalGradient(colors = listOf(Color(0xFA060608), PillBlack))
+            return Brush.verticalGradient(colors = listOf(Color(0xFF141416), Color(0xFF101012)))
         }
         val (alphaTop, alphaBot) = glassAlphaRange(pillStyle, density, reduceGlass)
-        val tintStrengthTop = if (pillStyle == PillStyle.LIQUID_GLASS) 0.18f else 0.10f
-        val tintStrengthBot = if (pillStyle == PillStyle.LIQUID_GLASS) 0.08f else 0.04f
-        val baseTopArgb = if (pillStyle == PillStyle.LIQUID_GLASS) 0xFF0E1624.toInt() else 0xFF14151C.toInt()
-        val baseBotArgb = if (pillStyle == PillStyle.LIQUID_GLASS) 0xFF060912.toInt() else 0xFF090A0F.toInt()
+        val tintStrengthTop = if (pillStyle == PillStyle.LIQUID_GLASS) 0.14f else 0.08f
+        val tintStrengthBot = if (pillStyle == PillStyle.LIQUID_GLASS) 0.06f else 0.03f
+        val baseTopArgb = if (pillStyle == PillStyle.LIQUID_GLASS) 0xFF161B24.toInt() else 0xFF18181C.toInt()
+        val baseBotArgb = if (pillStyle == PillStyle.LIQUID_GLASS) 0xFF101218.toInt() else 0xFF121215.toInt()
         val tintedTop = Color(
             ColorUtils.blendARGB(baseTopArgb, materialYouColor.toArgb(), tintStrengthTop)
         ).copy(alpha = alphaTop)
