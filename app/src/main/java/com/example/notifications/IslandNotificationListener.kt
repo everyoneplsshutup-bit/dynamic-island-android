@@ -62,6 +62,7 @@ class IslandNotificationListener : NotificationListenerService() {
     }
 
     private val lastPostedFingerprints = java.util.concurrent.ConcurrentHashMap<String, String>()
+    private val lastPackageBurstMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     override fun onListenerDisconnected() {
         super.onListenerDisconnected()
@@ -203,6 +204,18 @@ class IslandNotificationListener : NotificationListenerService() {
             }.getOrDefault("")
             val appName = rawAppName.ifBlank { "Notification" }
 
+            val channelId = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) notification.channelId else null
+            val channelKey = channelId?.let { "$pkg|$it" }
+            if (channelKey != null && channelKey in settings.mutedNotificationChannels) {
+                app.islandController.recordNotificationDiagnostic(
+                    appName = appName,
+                    title = resolvedTitle.ifEmpty { appName },
+                    timeMs = sbn.postTime,
+                    suppressionReason = "Suppressed: channel muted ($channelId)"
+                )
+                return@launch
+            }
+
             val existingRule = app.database.appRuleDao().getByPackage(pkg)
             if (existingRule == null) {
                 app.database.appRuleDao().upsert(
@@ -225,7 +238,23 @@ class IslandNotificationListener : NotificationListenerService() {
             )
             app.database.notificationDao().insert(entity)
 
-            // Polite rules: hide banner if user is currently inside that exact app
+            val detectedOtp = OtpExtractor.extract(notifTitle, resolvedText)
+
+            // 4s anti-spam burst limiter per package (OTP messages bypass cooldown so verification codes arrive immediately)
+            val nowMs = android.os.SystemClock.elapsedRealtime()
+            val prevBurstMs = lastPackageBurstMs[pkg] ?: 0L
+            if (detectedOtp == null && (nowMs - prevBurstMs) in 0L until 4_000L) {
+                app.islandController.recordNotificationDiagnostic(
+                    appName = appName,
+                    title = notifTitle,
+                    timeMs = sbn.postTime,
+                    suppressionReason = "Rate-limited: 4s anti-spam cooldown for $appName"
+                )
+                return@launch
+            }
+            lastPackageBurstMs[pkg] = nowMs
+
+            // Polite rules: hide banner if user is currently inside that exact app or in Landscape Quiet Mode
             val fgPkg = app.islandController.state.value.currentForegroundPackage
             if (settings.hideNotifInForegroundApp && fgPkg == pkg) {
                 app.islandController.recordNotificationDiagnostic(
@@ -233,6 +262,15 @@ class IslandNotificationListener : NotificationListenerService() {
                     title = notifTitle,
                     timeMs = sbn.postTime,
                     suppressionReason = "Suppressed: $appName open in foreground"
+                )
+                return@launch
+            }
+            if (settings.landscapeQuietMode && app.islandController.state.value.isLandscapeQuiet) {
+                app.islandController.recordNotificationDiagnostic(
+                    appName = appName,
+                    title = notifTitle,
+                    timeMs = sbn.postTime,
+                    suppressionReason = "Suppressed: Landscape Quiet Mode"
                 )
                 return@launch
             }
@@ -253,13 +291,29 @@ class IslandNotificationListener : NotificationListenerService() {
             } else {
                 resolvedText
             }
+            val visibleOtp = if (isLocked && settings.lockScreenPreset == LockScreenPreset.PRIVACY_HIDE_TEXT) {
+                null
+            } else {
+                detectedOtp
+            }
 
-            // Extract rich BigPicture + non-reply actions + contentIntent for opened notification card
+            // Extract rich BigPicture + actions + RemoteInput reply + contentIntent
             val bigPicture = extractBigPictureOnly(notification)?.let { downscaleNotifPicture(it) }
             NotificationMediaCache.putPicture(notifId, bigPicture)
             NotificationMediaCache.putContentIntent(notifId, notification.contentIntent)
 
-            // Rule §9: NO inline reply — exclude actions that attach RemoteInput
+            val replyAction = notification.actions.orEmpty().firstOrNull { action ->
+                !action.remoteInputs.isNullOrEmpty() && action.actionIntent != null
+            }
+            val remoteInput = replyAction?.remoteInputs?.firstOrNull()
+            val replyIntent = replyAction?.actionIntent
+            val hasReply = remoteInput != null && replyIntent != null
+            if (hasReply) {
+                NotificationMediaCache.putReplyAction(notifId, remoteInput!! to replyIntent!!)
+            } else {
+                NotificationMediaCache.putReplyAction(notifId, null)
+            }
+
             val safeActions = notification.actions.orEmpty()
                 .filter { action -> action.remoteInputs.isNullOrEmpty() && !action.title.isNullOrBlank() }
                 .take(3)
@@ -270,6 +324,12 @@ class IslandNotificationListener : NotificationListenerService() {
                         pendingIntent = action.actionIntent
                     )
                 }
+
+            val accentArgb = if (settings.matchAppColor) {
+                app.appColorAccentCache.getAccentColorArgb(pkg)
+            } else {
+                null
+            }
 
             app.islandController.recordNotificationDiagnostic(
                 appName = appName,
@@ -287,6 +347,10 @@ class IslandNotificationListener : NotificationListenerService() {
                     text = visibleText,
                     hasPicture = bigPicture != null,
                     actions = safeActions,
+                    otpCode = visibleOtp,
+                    channelId = channelId,
+                    hasReplyAction = hasReply,
+                    accentArgb = accentArgb,
                     timestamp = sbn.postTime
                 ),
                 autoShowCompact = true,

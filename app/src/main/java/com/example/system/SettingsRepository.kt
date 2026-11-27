@@ -178,7 +178,8 @@ data class IslandSettings(
     val solidFallback: Boolean = false,
     val accentTheme: AccentTheme = AccentTheme.BLUE,
     val rotateAlbumArt: Boolean = true,
-    val purpleSidebarTheme: Boolean = false,
+    val performanceMode: Boolean = false,
+    val matchAppColor: Boolean = true,
     val appleWidthIdlePill: Boolean = false,
     val energyRingEnabled: Boolean = true,
     val privacyDotsEnabled: Boolean = true,
@@ -228,13 +229,10 @@ data class IslandSettings(
     val hideNotifInForegroundApp: Boolean = true,
     val notifInboxGrouped: Boolean = true,
 
-    // 4. Music, Lyrics & Mascot
+    // 4. Music & Lyrics
     val lyricsFromInternet: Boolean = true,
     val lyricsOffsetMs: Int = 0,
     val expandedLyricsMarquee: Boolean = false,
-    val mochiPetEnabled: Boolean = true,
-    val mochiHiddenUntilMs: Long = 0L,
-    val mochiQuietHoursAnimate: Boolean = false,
 
     // 5. Features (Hard cap: max 8 enabled on island)
     val enabledTabs: List<IslandTab> = listOf(
@@ -258,8 +256,14 @@ data class IslandSettings(
     val memoEnabled: Boolean = true,
     val clipsEnabled: Boolean = true,
     val ocrFeatureEnabled: Boolean = true,
-    val floatingEnabled: Boolean = true,
     val alertsEnabled: Boolean = true,
+    val landscapeQuietMode: Boolean = false,
+    val autoRotateSuggestionEnabled: Boolean = true,
+    val calendarRemindersEnabled: Boolean = true,
+    val mutedNotificationChannels: Set<String> = emptySet(),
+    val glyphCApp: String = "",
+    val glyphWApp: String = "",
+    val glyphOApp: String = "",
     val includedQuickToggles: List<QuickToggleType> = listOf(
         QuickToggleType.FLASHLIGHT,
         QuickToggleType.DND,
@@ -271,7 +275,6 @@ data class IslandSettings(
     ),
     val allowedMusicPackages: Set<String> = setOf("com.unshoo.pixelmusic"),
     val pinnedAppPackages: List<String> = emptyList(),
-    val floatingAppPackages: List<String> = emptyList(),
     val tapGesture: IslandGesture = IslandGesture.OPEN_APP,
     val longPressGesture: IslandGesture = IslandGesture.EXPAND,
 
@@ -285,7 +288,6 @@ data class IslandSettings(
     val wizardCompleted: Boolean = false,
     val firstRunTipsShown: Boolean = false,
     val accessibilityWasEnabled: Boolean = false,
-    val verifiedFloatingPath: String = "UNTESTED",
     val vaultScreenshotsTreeUri: String? = null,
     val perEventConfig: Map<String, EventBehaviorConfig> = defaultPerEventConfig()
 ) {
@@ -331,7 +333,8 @@ class SettingsRepository(private val context: Context) {
         val SOLID_FALLBACK = booleanPreferencesKey("solid_fallback")
         val ACCENT_THEME = stringPreferencesKey("accent_theme")
         val ROTATE_ALBUM_ART = booleanPreferencesKey("rotate_album_art")
-        val PURPLE_SIDEBAR_THEME = booleanPreferencesKey("purple_sidebar_theme")
+        val PERFORMANCE_MODE = booleanPreferencesKey("performance_mode")
+        val MATCH_APP_COLOR = booleanPreferencesKey("match_app_color")
         val APPLE_WIDTH_IDLE_PILL = booleanPreferencesKey("apple_width_idle_pill")
         val ENERGY_RING_ENABLED = booleanPreferencesKey("energy_ring_enabled")
         val PRIVACY_DOTS_ENABLED = booleanPreferencesKey("privacy_dots_enabled")
@@ -383,9 +386,6 @@ class SettingsRepository(private val context: Context) {
         val LYRICS_FROM_INTERNET = booleanPreferencesKey("lyrics_from_internet")
         val LYRICS_OFFSET_MS = intPreferencesKey("lyrics_offset_ms")
         val EXPANDED_LYRICS_MARQUEE = booleanPreferencesKey("expanded_lyrics_marquee")
-        val MOCHI_PET_ENABLED = booleanPreferencesKey("mochi_pet_enabled")
-        val MOCHI_HIDDEN_UNTIL_MS = longPreferencesKey("mochi_hidden_until_ms")
-        val MOCHI_QUIET_HOURS_ANIMATE = booleanPreferencesKey("mochi_quiet_hours_animate")
 
         val ENABLED_TABS = stringPreferencesKey("enabled_tabs_json")
         val MUSIC_ENABLED = booleanPreferencesKey("music_enabled")
@@ -399,12 +399,17 @@ class SettingsRepository(private val context: Context) {
         val MEMO_ENABLED = booleanPreferencesKey("memo_enabled")
         val CLIPS_ENABLED = booleanPreferencesKey("clips_enabled")
         val OCR_FEATURE_ENABLED = booleanPreferencesKey("ocr_feature_enabled")
-        val FLOATING_ENABLED = booleanPreferencesKey("floating_enabled")
         val ALERTS_ENABLED = booleanPreferencesKey("alerts_enabled")
+        val LANDSCAPE_QUIET_MODE = booleanPreferencesKey("landscape_quiet_mode")
+        val AUTO_ROTATE_SUGGESTION = booleanPreferencesKey("auto_rotate_suggestion")
+        val CALENDAR_REMINDERS = booleanPreferencesKey("calendar_reminders")
+        val MUTED_CHANNELS = stringPreferencesKey("muted_channels_json")
+        val GLYPH_C_APP = stringPreferencesKey("glyph_c_app")
+        val GLYPH_W_APP = stringPreferencesKey("glyph_w_app")
+        val GLYPH_O_APP = stringPreferencesKey("glyph_o_app")
         val QUICK_TOGGLES = stringPreferencesKey("quick_toggles_json")
         val ALLOWED_MUSIC_PACKAGES = stringPreferencesKey("allowed_music_packages_json")
         val PINNED_APPS = stringPreferencesKey("pinned_apps_json")
-        val FLOATING_APPS = stringPreferencesKey("floating_apps_json")
         val TAP_GESTURE = stringPreferencesKey("tap_gesture")
         val LONG_PRESS_GESTURE = stringPreferencesKey("long_press_gesture")
 
@@ -416,7 +421,6 @@ class SettingsRepository(private val context: Context) {
         val WIZARD_COMPLETED = booleanPreferencesKey("wizard_completed")
         val FIRST_RUN_TIPS_SHOWN = booleanPreferencesKey("first_run_tips_shown")
         val ACCESSIBILITY_WAS_ENABLED = booleanPreferencesKey("accessibility_was_enabled")
-        val VERIFIED_FLOATING_PATH = stringPreferencesKey("verified_floating_path")
         val VAULT_SCREENSHOTS_TREE_URI = stringPreferencesKey("vault_screenshots_tree_uri")
     }
 
@@ -446,7 +450,8 @@ class SettingsRepository(private val context: Context) {
             solidFallback = prefs[Keys.SOLID_FALLBACK] ?: default.solidFallback,
             accentTheme = prefs[Keys.ACCENT_THEME]?.let { runCatching { AccentTheme.valueOf(it) }.getOrNull() } ?: default.accentTheme,
             rotateAlbumArt = prefs[Keys.ROTATE_ALBUM_ART] ?: default.rotateAlbumArt,
-            purpleSidebarTheme = prefs[Keys.PURPLE_SIDEBAR_THEME] ?: default.purpleSidebarTheme,
+            performanceMode = prefs[Keys.PERFORMANCE_MODE] ?: default.performanceMode,
+            matchAppColor = prefs[Keys.MATCH_APP_COLOR] ?: default.matchAppColor,
             appleWidthIdlePill = prefs[Keys.APPLE_WIDTH_IDLE_PILL] ?: default.appleWidthIdlePill,
             energyRingEnabled = prefs[Keys.ENERGY_RING_ENABLED] ?: default.energyRingEnabled,
             privacyDotsEnabled = prefs[Keys.PRIVACY_DOTS_ENABLED] ?: default.privacyDotsEnabled,
@@ -497,9 +502,6 @@ class SettingsRepository(private val context: Context) {
             lyricsFromInternet = prefs[Keys.LYRICS_FROM_INTERNET] ?: default.lyricsFromInternet,
             lyricsOffsetMs = (prefs[Keys.LYRICS_OFFSET_MS] ?: default.lyricsOffsetMs).coerceIn(-5000, 5000),
             expandedLyricsMarquee = prefs[Keys.EXPANDED_LYRICS_MARQUEE] ?: default.expandedLyricsMarquee,
-            mochiPetEnabled = prefs[Keys.MOCHI_PET_ENABLED] ?: default.mochiPetEnabled,
-            mochiHiddenUntilMs = prefs[Keys.MOCHI_HIDDEN_UNTIL_MS] ?: default.mochiHiddenUntilMs,
-            mochiQuietHoursAnimate = prefs[Keys.MOCHI_QUIET_HOURS_ANIMATE] ?: default.mochiQuietHoursAnimate,
 
             enabledTabs = prefs[Keys.ENABLED_TABS]?.let { raw ->
                 runCatching {
@@ -519,8 +521,16 @@ class SettingsRepository(private val context: Context) {
             memoEnabled = prefs[Keys.MEMO_ENABLED] ?: default.memoEnabled,
             clipsEnabled = prefs[Keys.CLIPS_ENABLED] ?: default.clipsEnabled,
             ocrFeatureEnabled = prefs[Keys.OCR_FEATURE_ENABLED] ?: default.ocrFeatureEnabled,
-            floatingEnabled = prefs[Keys.FLOATING_ENABLED] ?: default.floatingEnabled,
             alertsEnabled = prefs[Keys.ALERTS_ENABLED] ?: default.alertsEnabled,
+            landscapeQuietMode = prefs[Keys.LANDSCAPE_QUIET_MODE] ?: default.landscapeQuietMode,
+            autoRotateSuggestionEnabled = prefs[Keys.AUTO_ROTATE_SUGGESTION] ?: default.autoRotateSuggestionEnabled,
+            calendarRemindersEnabled = prefs[Keys.CALENDAR_REMINDERS] ?: default.calendarRemindersEnabled,
+            mutedNotificationChannels = prefs[Keys.MUTED_CHANNELS]?.let {
+                runCatching { json.decodeFromString<Set<String>>(it) }.getOrNull()
+            } ?: default.mutedNotificationChannels,
+            glyphCApp = prefs[Keys.GLYPH_C_APP] ?: default.glyphCApp,
+            glyphWApp = prefs[Keys.GLYPH_W_APP] ?: default.glyphWApp,
+            glyphOApp = prefs[Keys.GLYPH_O_APP] ?: default.glyphOApp,
             includedQuickToggles = prefs[Keys.QUICK_TOGGLES]?.let {
                 runCatching { json.decodeFromString<List<QuickToggleType>>(it) }.getOrNull()
             } ?: default.includedQuickToggles,
@@ -530,9 +540,6 @@ class SettingsRepository(private val context: Context) {
             pinnedAppPackages = prefs[Keys.PINNED_APPS]?.let {
                 runCatching { json.decodeFromString<List<String>>(it) }.getOrNull()
             } ?: default.pinnedAppPackages,
-            floatingAppPackages = prefs[Keys.FLOATING_APPS]?.let {
-                runCatching { json.decodeFromString<List<String>>(it) }.getOrNull()
-            } ?: default.floatingAppPackages,
             tapGesture = prefs[Keys.TAP_GESTURE]?.let { runCatching { IslandGesture.valueOf(it) }.getOrNull() } ?: default.tapGesture,
             longPressGesture = prefs[Keys.LONG_PRESS_GESTURE]?.let { runCatching { IslandGesture.valueOf(it) }.getOrNull() } ?: default.longPressGesture,
 
@@ -545,7 +552,6 @@ class SettingsRepository(private val context: Context) {
             wizardCompleted = prefs[Keys.WIZARD_COMPLETED] ?: false,
             firstRunTipsShown = prefs[Keys.FIRST_RUN_TIPS_SHOWN] ?: false,
             accessibilityWasEnabled = prefs[Keys.ACCESSIBILITY_WAS_ENABLED] ?: false,
-            verifiedFloatingPath = prefs[Keys.VERIFIED_FLOATING_PATH] ?: default.verifiedFloatingPath,
             vaultScreenshotsTreeUri = prefs[Keys.VAULT_SCREENSHOTS_TREE_URI],
             perEventConfig = prefs[Keys.PER_EVENT_CONFIG]?.let {
                 runCatching { json.decodeFromString<Map<String, EventBehaviorConfig>>(it) }.getOrNull()
@@ -569,7 +575,8 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.SOLID_FALLBACK] = s.solidFallback
             prefs[Keys.ACCENT_THEME] = s.accentTheme.name
             prefs[Keys.ROTATE_ALBUM_ART] = s.rotateAlbumArt
-            prefs[Keys.PURPLE_SIDEBAR_THEME] = s.purpleSidebarTheme
+            prefs[Keys.PERFORMANCE_MODE] = s.performanceMode
+            prefs[Keys.MATCH_APP_COLOR] = s.matchAppColor
             prefs[Keys.APPLE_WIDTH_IDLE_PILL] = s.appleWidthIdlePill
             prefs[Keys.ENERGY_RING_ENABLED] = s.energyRingEnabled
             prefs[Keys.PRIVACY_DOTS_ENABLED] = s.privacyDotsEnabled
@@ -621,9 +628,6 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.LYRICS_FROM_INTERNET] = s.lyricsFromInternet
             prefs[Keys.LYRICS_OFFSET_MS] = s.lyricsOffsetMs.coerceIn(-5000, 5000)
             prefs[Keys.EXPANDED_LYRICS_MARQUEE] = s.expandedLyricsMarquee
-            prefs[Keys.MOCHI_PET_ENABLED] = s.mochiPetEnabled
-            prefs[Keys.MOCHI_HIDDEN_UNTIL_MS] = s.mochiHiddenUntilMs
-            prefs[Keys.MOCHI_QUIET_HOURS_ANIMATE] = s.mochiQuietHoursAnimate
 
             prefs[Keys.ENABLED_TABS] = json.encodeToString(s.enabledTabs.take(IslandSettings.MAX_ISLAND_FEATURES))
             prefs[Keys.MUSIC_ENABLED] = s.musicEnabled
@@ -637,12 +641,17 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.MEMO_ENABLED] = s.memoEnabled
             prefs[Keys.CLIPS_ENABLED] = s.clipsEnabled
             prefs[Keys.OCR_FEATURE_ENABLED] = s.ocrFeatureEnabled
-            prefs[Keys.FLOATING_ENABLED] = s.floatingEnabled
             prefs[Keys.ALERTS_ENABLED] = s.alertsEnabled
+            prefs[Keys.LANDSCAPE_QUIET_MODE] = s.landscapeQuietMode
+            prefs[Keys.AUTO_ROTATE_SUGGESTION] = s.autoRotateSuggestionEnabled
+            prefs[Keys.CALENDAR_REMINDERS] = s.calendarRemindersEnabled
+            prefs[Keys.MUTED_CHANNELS] = json.encodeToString(s.mutedNotificationChannels)
+            prefs[Keys.GLYPH_C_APP] = s.glyphCApp
+            prefs[Keys.GLYPH_W_APP] = s.glyphWApp
+            prefs[Keys.GLYPH_O_APP] = s.glyphOApp
             prefs[Keys.QUICK_TOGGLES] = json.encodeToString(s.includedQuickToggles)
             prefs[Keys.ALLOWED_MUSIC_PACKAGES] = json.encodeToString(s.allowedMusicPackages)
             prefs[Keys.PINNED_APPS] = json.encodeToString(s.pinnedAppPackages)
-            prefs[Keys.FLOATING_APPS] = json.encodeToString(s.floatingAppPackages)
             prefs[Keys.TAP_GESTURE] = s.tapGesture.name
             prefs[Keys.LONG_PRESS_GESTURE] = s.longPressGesture.name
 
@@ -654,7 +663,6 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.WIZARD_COMPLETED] = s.wizardCompleted
             prefs[Keys.FIRST_RUN_TIPS_SHOWN] = s.firstRunTipsShown
             prefs[Keys.ACCESSIBILITY_WAS_ENABLED] = s.accessibilityWasEnabled
-            prefs[Keys.VERIFIED_FLOATING_PATH] = s.verifiedFloatingPath
             if (s.vaultScreenshotsTreeUri != null) {
                 prefs[Keys.VAULT_SCREENSHOTS_TREE_URI] = s.vaultScreenshotsTreeUri
             } else {

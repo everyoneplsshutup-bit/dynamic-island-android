@@ -1,8 +1,13 @@
 package com.example.media
 
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -81,18 +86,39 @@ import kotlinx.coroutines.delay
 /**
  * Pure-Canvas visualizer bars for the short music pill (no title text, zero layout passes).
  */
+@Suppress("UNUSED_PARAMETER")
 @Composable
 fun MusicCompactWaveform(isPlaying: Boolean, accentColor: Color, positionMs: Long = 0L) {
-    val step = ((positionMs / 150L).toInt() and 0x7FFFFFFF)
-    val t0 = if (isPlaying) 0.34f + 0.66f * (((step * 3 + 1) % 7) / 6f) else 0.28f
-    val t1 = if (isPlaying) 0.30f + 0.70f * (((step * 5 + 3) % 7) / 6f) else 0.36f
-    val t2 = if (isPlaying) 0.36f + 0.64f * (((step * 2 + 5) % 7) / 6f) else 0.30f
-    val t3 = if (isPlaying) 0.28f + 0.72f * (((step * 4 + 2) % 7) / 6f) else 0.24f
-
-    val f0 by animateFloatAsState(targetValue = t0, animationSpec = MotionTokens.spatialFast(), label = "cw0")
-    val f1 by animateFloatAsState(targetValue = t1, animationSpec = MotionTokens.spatialFast(), label = "cw1")
-    val f2 by animateFloatAsState(targetValue = t2, animationSpec = MotionTokens.spatialFast(), label = "cw2")
-    val f3 by animateFloatAsState(targetValue = t3, animationSpec = MotionTokens.spatialFast(), label = "cw3")
+    val heights: FloatArray = if (isPlaying) {
+        val transition = rememberInfiniteTransition(label = "compact_waveform")
+        val f0 by transition.animateFloat(
+            initialValue = 0.28f,
+            targetValue = 0.98f,
+            animationSpec = infiniteRepeatable(tween(520, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "cw0"
+        )
+        val f1 by transition.animateFloat(
+            initialValue = 0.88f,
+            targetValue = 0.30f,
+            animationSpec = infiniteRepeatable(tween(640, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "cw1"
+        )
+        val f2 by transition.animateFloat(
+            initialValue = 0.34f,
+            targetValue = 0.94f,
+            animationSpec = infiniteRepeatable(tween(580, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "cw2"
+        )
+        val f3 by transition.animateFloat(
+            initialValue = 0.78f,
+            targetValue = 0.26f,
+            animationSpec = infiniteRepeatable(tween(720, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "cw3"
+        )
+        floatArrayOf(f0, f1, f2, f3)
+    } else {
+        floatArrayOf(0.24f, 0.28f, 0.26f, 0.22f)
+    }
 
     Canvas(
         modifier = Modifier
@@ -101,7 +127,6 @@ fun MusicCompactWaveform(isPlaying: Boolean, accentColor: Color, positionMs: Lon
     ) {
         val barW = 2.6.dp.toPx()
         val gap = (size.width - barW * 4f) / 3f
-        val heights = floatArrayOf(f0, f1, f2, f3)
         val color = if (isPlaying) accentColor else accentColor.copy(alpha = 0.55f)
         for (i in 0 until 4) {
             val h = (size.height * heights[i]).coerceAtLeast(3.dp.toPx())
@@ -117,18 +142,39 @@ fun MusicCompactWaveform(isPlaying: Boolean, accentColor: Color, positionMs: Lon
     }
 }
 
+@Suppress("UNUSED_PARAMETER")
 @Composable
 private fun MusicLiveEqualizer(isPlaying: Boolean, accentColor: Color, positionMs: Long = 0L) {
-    val step = ((positionMs / 160L).toInt() and 0x7FFFFFFF)
-    val t0 = if (isPlaying) 0.30f + 0.64f * (((step * 3 + 0) % 8) / 7f) else 0.22f
-    val t1 = if (isPlaying) 0.36f + 0.64f * (((step * 5 + 2) % 8) / 7f) else 0.28f
-    val t2 = if (isPlaying) 0.32f + 0.68f * (((step * 7 + 4) % 8) / 7f) else 0.24f
-    val t3 = if (isPlaying) 0.28f + 0.66f * (((step * 2 + 6) % 8) / 7f) else 0.20f
-
-    val f0 by animateFloatAsState(targetValue = t0, animationSpec = MotionTokens.spatialFast(), label = "eq0")
-    val f1 by animateFloatAsState(targetValue = t1, animationSpec = MotionTokens.spatialFast(), label = "eq1")
-    val f2 by animateFloatAsState(targetValue = t2, animationSpec = MotionTokens.spatialFast(), label = "eq2")
-    val f3 by animateFloatAsState(targetValue = t3, animationSpec = MotionTokens.spatialFast(), label = "eq3")
+    val heights: FloatArray = if (isPlaying) {
+        val transition = rememberInfiniteTransition(label = "live_eq")
+        val f0 by transition.animateFloat(
+            initialValue = 0.26f,
+            targetValue = 0.96f,
+            animationSpec = infiniteRepeatable(tween(540, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "eq0"
+        )
+        val f1 by transition.animateFloat(
+            initialValue = 0.90f,
+            targetValue = 0.28f,
+            animationSpec = infiniteRepeatable(tween(660, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "eq1"
+        )
+        val f2 by transition.animateFloat(
+            initialValue = 0.32f,
+            targetValue = 0.92f,
+            animationSpec = infiniteRepeatable(tween(600, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "eq2"
+        )
+        val f3 by transition.animateFloat(
+            initialValue = 0.80f,
+            targetValue = 0.24f,
+            animationSpec = infiniteRepeatable(tween(780, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "eq3"
+        )
+        floatArrayOf(f0, f1, f2, f3)
+    } else {
+        floatArrayOf(0.22f, 0.28f, 0.24f, 0.20f)
+    }
 
     Canvas(
         modifier = Modifier
@@ -137,7 +183,6 @@ private fun MusicLiveEqualizer(isPlaying: Boolean, accentColor: Color, positionM
     ) {
         val barW = 2.5.dp.toPx()
         val gap = (size.width - barW * 4f) / 3f
-        val heights = floatArrayOf(f0, f1, f2, f3)
         val color = (if (isPlaying) accentColor else IslandColors.TextSecondary)
             .copy(alpha = if (isPlaying) 0.90f else 0.40f)
         for (i in 0 until 4) {

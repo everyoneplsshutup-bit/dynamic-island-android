@@ -71,6 +71,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BrightnessHigh
 import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Crop
@@ -79,18 +80,20 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DoNotDisturbOn
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DragIndicator
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Screenshot
 import androidx.compose.material.icons.filled.Search
@@ -113,6 +116,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -132,6 +136,7 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -144,12 +149,14 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
 import com.example.DynamicIslandApp
 import com.example.notes.NoteEntity
+import com.example.notes.TaskEntity
 import com.example.notifications.OtpExtractor
 import com.example.ocr.MediaProjectionPromptActivity
 import com.example.search.LaunchableApp
@@ -394,9 +401,7 @@ fun SearchIslandPanel(
                                     onCollapse()
                                 },
                                 onLongClick = {
-                                    app.soundManager.playExpand()
-                                    app.floatingWindowManager.launchAppInFloatingWindow(pinned.packageName)
-                                    onCollapse()
+                                    togglePin(pinned.packageName)
                                 }
                             )
                             .padding(horizontal = 8.dp)
@@ -527,10 +532,7 @@ fun SearchIslandPanel(
                                             onCollapse()
                                         },
                                         onLongClick = {
-                                            app.soundManager.playExpand()
-                                            app.floatingWindowManager.launchAppInFloatingWindow(launchApp.packageName)
-                                            app.islandController.showTransientBanner("Floating · ${launchApp.label}")
-                                            onCollapse()
+                                            togglePin(launchApp.packageName)
                                         }
                                     )
                                     .padding(horizontal = 6.dp, vertical = 4.dp)
@@ -563,24 +565,6 @@ fun SearchIslandPanel(
                                         imageVector = if (isPinned) Icons.Filled.PushPin else Icons.Outlined.PushPin,
                                         contentDescription = if (isPinned) "Unpin ${launchApp.label}" else "Pin ${launchApp.label}",
                                         tint = if (isPinned) accentColor else IslandColors.TextSecondary.copy(alpha = 0.78f),
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                }
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .size(32.dp)
-                                        .clip(CircleShape)
-                                        .clickable {
-                                            app.soundManager.playExpand()
-                                            app.floatingWindowManager.launchAppInFloatingWindow(launchApp.packageName)
-                                            onCollapse()
-                                        }
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Filled.OpenInNew,
-                                        contentDescription = "Open ${launchApp.label} in floating window",
-                                        tint = IslandColors.TextSecondary.copy(alpha = 0.78f),
                                         modifier = Modifier.size(16.dp)
                                     )
                                 }
@@ -726,6 +710,10 @@ fun ToolsIslandPanel(
         mutableIntStateOf(audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: (maxVolume / 2))
     }
     var installedApps by remember { mutableStateOf<List<LaunchableApp>>(emptyList()) }
+    var activeMiniTool by remember { mutableStateOf<String?>(null) }
+    var qrInput by remember { mutableStateOf("") }
+    val glyfStrokes = remember { mutableStateListOf<StrokePoint>() }
+    var glyfStatus by remember { mutableStateOf("Draw C, W, or O") }
 
     LaunchedEffect(Unit) {
         app.quickTogglesManager.refreshSystemStates()
@@ -1084,6 +1072,165 @@ fun ToolsIslandPanel(
                 )
             }
         }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(32.dp)
+                    .clip(CircleShape)
+                    .background(if (activeMiniTool == "QR") accentColor.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.09f))
+                    .border(0.75.dp, if (activeMiniTool == "QR") accentColor else Color.White.copy(alpha = 0.16f), CircleShape)
+                    .clickable {
+                        onHaptic()
+                        app.soundManager.playTap()
+                        activeMiniTool = if (activeMiniTool == "QR") null else "QR"
+                        app.islandController.setKeyboardFocusNeeded(activeMiniTool == "QR")
+                    }
+                    .testTag("tools_qr_btn")
+            ) {
+                Icon(Icons.Filled.QrCode2, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(5.dp))
+                Text("QR Gen", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(32.dp)
+                    .clip(CircleShape)
+                    .background(if (activeMiniTool == "GLYF") accentColor.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.09f))
+                    .border(0.75.dp, if (activeMiniTool == "GLYF") accentColor else Color.White.copy(alpha = 0.16f), CircleShape)
+                    .clickable {
+                        onHaptic()
+                        app.soundManager.playTap()
+                        activeMiniTool = if (activeMiniTool == "GLYF") null else "GLYF"
+                        app.islandController.setKeyboardFocusNeeded(false)
+                    }
+                    .testTag("tools_glyf_btn")
+            ) {
+                Icon(Icons.Filled.Gesture, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                Spacer(Modifier.width(5.dp))
+                Text("Glyf Pad", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+            }
+        }
+
+        if (activeMiniTool == "QR") {
+            val qrBmp = remember(qrInput) {
+                if (qrInput.isNotBlank()) QrCodeGenerator.generateBitmap(qrInput.trim(), 256) else null
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.White.copy(alpha = 0.08f))
+                    .padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.Black.copy(alpha = 0.35f))
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                    ) {
+                        if (qrInput.isEmpty()) {
+                            Text("URL or text for QR…", color = IslandColors.TextTertiary, fontSize = 11.sp)
+                        }
+                        BasicTextField(
+                            value = qrInput,
+                            onValueChange = { qrInput = it },
+                            singleLine = true,
+                            textStyle = TextStyle(color = Color.White, fontSize = 12.sp),
+                            cursorBrush = SolidColor(accentColor),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onFocusChanged { if (it.isFocused) app.islandController.setKeyboardFocusNeeded(true) }
+                        )
+                    }
+                    Text("Offline ZXing QR · No network", color = IslandColors.TextTertiary, fontSize = 11.sp)
+                }
+                if (qrBmp != null) {
+                    Image(
+                        bitmap = qrBmp.asImageBitmap(),
+                        contentDescription = "Generated QR code",
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.White)
+                    )
+                }
+            }
+        } else if (activeMiniTool == "GLYF") {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color.White.copy(alpha = 0.08f))
+                    .padding(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(glyfStatus, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(74.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color.Black.copy(alpha = 0.45f))
+                        .pointerInput(settings.glyphCApp, settings.glyphWApp, settings.glyphOApp) {
+                            detectDragGestures(
+                                onDragStart = { p -> glyfStrokes.clear(); glyfStrokes.add(StrokePoint(p.x, p.y)) },
+                                onDrag = { c, _ -> c.consume(); glyfStrokes.add(StrokePoint(c.position.x, c.position.y)) },
+                                onDragEnd = {
+                                    val g = GlyfStrokeRecognizer.recognize(glyfStrokes.toList())
+                                    val pkg = when (g) {
+                                        GlyfGesture.C -> settings.glyphCApp
+                                        GlyfGesture.W -> settings.glyphWApp
+                                        GlyfGesture.O -> settings.glyphOApp
+                                        null -> ""
+                                    }
+                                    if (g != null && pkg.isNotBlank()) {
+                                        val li = context.packageManager.getLaunchIntentForPackage(pkg)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        if (li != null) {
+                                            runCatching { context.startActivity(li) }
+                                            onCollapse()
+                                        } else {
+                                            glyfStatus = "Cannot launch ${g.symbol}"
+                                        }
+                                    } else if (g != null) {
+                                        glyfStatus = "Assign '${g.symbol}' app in Settings → Features"
+                                    } else {
+                                        glyfStatus = "Try again: C, W, or O"
+                                    }
+                                }
+                            )
+                        }
+                ) {
+                    if (glyfStrokes.size > 1) {
+                        val path = Path().apply {
+                            moveTo(glyfStrokes.first().x, glyfStrokes.first().y)
+                            for (i in 1 until glyfStrokes.size) lineTo(glyfStrokes[i].x, glyfStrokes[i].y)
+                        }
+                        drawPath(path, accentColor, style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round))
+                    }
+                }
+            }
+        }
+
+        Text(
+            text = "Protected / DRM apps appear black in recordings",
+            color = IslandColors.TextTertiary,
+            fontSize = 11.sp
+        )
 
         // Pinned Quick-Launch Apps Strip
         if (pinnedQuickApps.isNotEmpty()) {
@@ -1648,7 +1795,11 @@ fun VaultIslandPanel(
                 }
             }
         } else if (inspectTarget != null) {
-            // Compact Inline Detail View inside Shelf (Crop, Attach, Save, Del/Restore, Back)
+            val isInspectVideo = inspectTarget.isPermanent ||
+                inspectTarget.sourceType == "SCREEN_RECORDING" ||
+                inspectTarget.mimeType.startsWith("video/", ignoreCase = true)
+            var isRenaming by remember(inspectTarget.id) { mutableStateOf(false) }
+            var renameDraft by remember(inspectTarget.id) { mutableStateOf(inspectTarget.displayName) }
             val remainingMs = (inspectTarget.expiresAt - nowMs).coerceAtLeast(0L)
             Row(
                 modifier = Modifier.fillMaxWidth().height(22.dp),
@@ -1670,7 +1821,11 @@ fun VaultIslandPanel(
                     Text(inspectTarget.displayName, color = IslandColors.TextPrimary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(120.dp))
                 }
                 Text(
-                    text = if (inspectTarget.isTrashed) "Trash · 24h" else "Expires ${TimerEngine.formatDuration(remainingMs)}",
+                    text = when {
+                        inspectTarget.isTrashed -> "Trash · 24h"
+                        inspectTarget.isPermanent -> "Saved permanently"
+                        else -> "Expires ${TimerEngine.formatDuration(remainingMs)}"
+                    },
                     color = if (inspectTarget.isTrashed) IslandColors.AccentRed else accentColor,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium
@@ -1684,8 +1839,11 @@ fun VaultIslandPanel(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                val previewModel = remember(inspectTarget.thumbnailPath, inspectTarget.filePath) {
+                    inspectTarget.thumbnailPath?.takeIf { File(it).exists() }?.let { File(it) } ?: File(inspectTarget.filePath)
+                }
                 Image(
-                    painter = rememberAsyncImagePainter(File(inspectTarget.filePath)),
+                    painter = rememberAsyncImagePainter(previewModel),
                     contentDescription = inspectTarget.displayName,
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
@@ -1697,86 +1855,127 @@ fun VaultIslandPanel(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                        if (!inspectTarget.isTrashed) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
+                    if (isInspectVideo && isRenaming) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Box(
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(36.dp)
-                                    .clip(CircleShape)
-                                    .background(accentColor.copy(alpha = 0.22f))
-                                    .clickable {
-                                        app.soundManager.playTap()
-                                        cropLeft = 0.10f; cropTop = 0.10f; cropRight = 0.90f; cropBottom = 0.90f
-                                        croppingItem = inspectTarget
-                                    }
-                                    .testTag("shelf_crop_open_btn")
+                                    .height(32.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.White.copy(alpha = 0.12f))
+                                    .padding(horizontal = 8.dp),
+                                contentAlignment = Alignment.CenterStart
                             ) {
-                                Icon(Icons.Filled.Crop, contentDescription = null, tint = accentColor, modifier = Modifier.size(15.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Crop", color = accentColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                BasicTextField(
+                                    value = renameDraft,
+                                    onValueChange = { renameDraft = it },
+                                    singleLine = true,
+                                    textStyle = TextStyle(color = Color.White, fontSize = 12.sp),
+                                    cursorBrush = SolidColor(accentColor),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .onFocusChanged { if (it.isFocused) app.islandController.setKeyboardFocusNeeded(true) }
+                                )
                             }
+                            Box(
+                                contentAlignment = Alignment.Center,
+                                modifier = Modifier
+                                    .height(32.dp)
+                                    .clip(CircleShape)
+                                    .background(accentColor)
+                                    .clickable {
+                                        val cleaned = renameDraft.trim()
+                                        if (cleaned.isNotEmpty()) {
+                                            scope.launch {
+                                                app.vaultManager.renameItem(inspectTarget.id, cleaned)
+                                                detailItem = inspectTarget.copy(displayName = cleaned)
+                                            }
+                                        }
+                                        isRenaming = false
+                                    }
+                                    .padding(horizontal = 10.dp)
+                            ) {
+                                Text("Save", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    } else if (isInspectVideo) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth()) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center,
                                 modifier = Modifier
                                     .weight(1f)
-                                    .height(36.dp)
+                                    .height(34.dp)
                                     .clip(CircleShape)
                                     .background(accentColor)
                                     .clickable {
                                         app.soundManager.playTap()
-                                        app.vaultManager.attachOrShareItem(inspectTarget, targetChatPackage = foregroundChatPkg)
-                                        detailItem = null
-                                        onCollapse()
+                                        val uri = app.vaultManager.getFileProviderUri(inspectTarget)
+                                        if (uri != null) {
+                                            val playIntent = Intent(Intent.ACTION_VIEW)
+                                                .setDataAndType(uri, "video/mp4")
+                                                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            runCatching { context.startActivity(playIntent) }
+                                            detailItem = null
+                                            onCollapse()
+                                        } else {
+                                            app.islandController.showTransientBanner("Recording file missing")
+                                        }
                                     }
                             ) {
-                                Icon(Icons.Filled.ContentCopy, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                                Spacer(Modifier.width(4.dp))
-                                Text("Attach", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Icon(Icons.Filled.PlayArrow, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                                Spacer(Modifier.width(3.dp))
+                                Text("Play", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(34.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.14f))
+                                    .clickable {
+                                        app.soundManager.playTap()
+                                        renameDraft = inspectTarget.displayName
+                                        isRenaming = true
+                                    }
+                            ) {
+                                Icon(Icons.Filled.Edit, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(3.dp))
+                                Text("Rename", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(34.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.12f))
+                                    .clickable {
+                                        app.soundManager.playCollapse()
+                                        scope.launch {
+                                            app.vaultManager.purgeItemNow(inspectTarget.id)
+                                            detailItem = null
+                                        }
+                                    }
+                            ) {
+                                Icon(Icons.Filled.Delete, contentDescription = null, tint = IslandColors.AccentRed, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(3.dp))
+                                Text("Delete", color = IslandColors.AccentRed, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                             }
                         }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(36.dp)
-                                .clip(CircleShape)
-                                .background(Color.White.copy(alpha = 0.12f))
-                                .clickable {
-                                    app.soundManager.playTap()
-                                    scope.launch {
-                                        if (inspectTarget.isTrashed) app.vaultManager.restoreItem(inspectTarget.id)
-                                        else app.vaultManager.moveToTrash(inspectTarget.id)
-                                        detailItem = null
-                                    }
-                                }
-                        ) {
-                            Icon(
-                                imageVector = if (inspectTarget.isTrashed) Icons.Filled.Restore else Icons.Filled.Delete,
-                                contentDescription = null,
-                                tint = if (inspectTarget.isTrashed) IslandColors.AccentGreen else IslandColors.AccentRed,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(Modifier.width(4.dp))
-                            Text(
-                                text = if (inspectTarget.isTrashed) "Restore" else "Trash",
-                                color = if (inspectTarget.isTrashed) IslandColors.AccentGreen else IslandColors.AccentRed,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-                    if (!inspectTarget.isTrashed) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.Center,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(34.dp)
+                                .height(32.dp)
                                 .clip(CircleShape)
                                 .background(Color.White.copy(alpha = 0.10f))
                                 .clickable {
@@ -1785,14 +1984,113 @@ fun VaultIslandPanel(
                                         val saved = app.vaultManager.saveItemToGallery(inspectTarget)
                                         if (!saved) app.soundManager.playError()
                                         app.islandController.showTransientBanner(
-                                            if (saved) "Saved to Pictures/DynamicIsland" else "Could not save image"
+                                            if (saved) "Saved to Movies/DynamicIsland" else "Could not export video"
                                         )
                                     }
                                 }
                         ) {
                             Icon(Icons.Filled.Download, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
                             Spacer(Modifier.width(6.dp))
-                            Text("Save to Gallery", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            Text("Save to Movies/DynamicIsland", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
+                        }
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                            if (!inspectTarget.isTrashed) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(36.dp)
+                                        .clip(CircleShape)
+                                        .background(accentColor.copy(alpha = 0.22f))
+                                        .clickable {
+                                            app.soundManager.playTap()
+                                            cropLeft = 0.10f; cropTop = 0.10f; cropRight = 0.90f; cropBottom = 0.90f
+                                            croppingItem = inspectTarget
+                                        }
+                                        .testTag("shelf_crop_open_btn")
+                                ) {
+                                    Icon(Icons.Filled.Crop, contentDescription = null, tint = accentColor, modifier = Modifier.size(15.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Crop", color = accentColor, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.Center,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(36.dp)
+                                        .clip(CircleShape)
+                                        .background(accentColor)
+                                        .clickable {
+                                            app.soundManager.playTap()
+                                            app.vaultManager.attachOrShareItem(inspectTarget, targetChatPackage = foregroundChatPkg)
+                                            detailItem = null
+                                            onCollapse()
+                                        }
+                                ) {
+                                    Icon(Icons.Filled.ContentCopy, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                    Spacer(Modifier.width(4.dp))
+                                    Text("Attach", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                }
+                            }
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(36.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.12f))
+                                    .clickable {
+                                        app.soundManager.playTap()
+                                        scope.launch {
+                                            if (inspectTarget.isTrashed) app.vaultManager.restoreItem(inspectTarget.id)
+                                            else app.vaultManager.moveToTrash(inspectTarget.id)
+                                            detailItem = null
+                                        }
+                                    }
+                            ) {
+                                Icon(
+                                    imageVector = if (inspectTarget.isTrashed) Icons.Filled.Restore else Icons.Filled.Delete,
+                                    contentDescription = null,
+                                    tint = if (inspectTarget.isTrashed) IslandColors.AccentGreen else IslandColors.AccentRed,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                                Spacer(Modifier.width(4.dp))
+                                Text(
+                                    text = if (inspectTarget.isTrashed) "Restore" else "Trash",
+                                    color = if (inspectTarget.isTrashed) IslandColors.AccentGreen else IslandColors.AccentRed,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+                        if (!inspectTarget.isTrashed) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(34.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.White.copy(alpha = 0.10f))
+                                    .clickable {
+                                        app.soundManager.playTap()
+                                        scope.launch {
+                                            val saved = app.vaultManager.saveItemToGallery(inspectTarget)
+                                            if (!saved) app.soundManager.playError()
+                                            app.islandController.showTransientBanner(
+                                                if (saved) "Saved to Pictures/DynamicIsland" else "Could not save image"
+                                            )
+                                        }
+                                    }
+                            ) {
+                                Icon(Icons.Filled.Download, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text("Save to Gallery", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                            }
                         }
                     }
                 }
@@ -1970,12 +2268,16 @@ fun VaultIslandPanel(
                         .testTag("vault_thumbnail_grid")
                 ) {
                     items(filteredItems, key = { it.id }) { item ->
-                        val remainingMs = (item.expiresAt - nowMs).coerceAtLeast(0L)
+                        val isVideo = item.isPermanent ||
+                            item.sourceType == "SCREEN_RECORDING" ||
+                            item.mimeType.startsWith("video/", ignoreCase = true)
+                        val remainingMs = if (item.isPermanent) VaultConstants.EXPIRY_MILLIS else (item.expiresAt - nowMs).coerceAtLeast(0L)
                         val fraction = (remainingMs.toFloat() / VaultConstants.EXPIRY_MILLIS.toFloat()).coerceIn(0f, 1f)
                         val isSelected = selectedItemId == item.id
                         val isFocusedTile = isSelected || (selectedItemId == null && filteredItems.firstOrNull()?.id == item.id)
-                        val isExpiredFade = !item.isTrashed && remainingMs == 0L
+                        val isExpiredFade = !item.isPermanent && !item.isTrashed && remainingMs == 0L
                         val ringColor = when {
+                            item.isPermanent -> accentColor
                             item.isTrashed -> IslandColors.AccentRed
                             remainingMs < 60_000L -> IslandColors.AccentRed
                             remainingMs < 120_000L -> IslandColors.AccentAmber
@@ -1997,7 +2299,7 @@ fun VaultIslandPanel(
                         )
                         var swipeY by remember(item.id) { mutableFloatStateOf(0f) }
 
-                        val dragGripMod = if (!item.isTrashed && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        val dragGripMod = if (!item.isTrashed && !isVideo && Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                             Modifier.dragAndDropSource(
                                 drawDragDecoration = {},
                                 block = {
@@ -2051,8 +2353,11 @@ fun VaultIslandPanel(
                                     )
                                     .testTag("vault_grid_item_${item.id}")
                             ) {
+                                val tilePreview = remember(item.thumbnailPath, item.filePath) {
+                                    item.thumbnailPath?.takeIf { File(it).exists() }?.let { File(it) } ?: File(item.filePath)
+                                }
                                 Image(
-                                    painter = rememberAsyncImagePainter(File(item.filePath)),
+                                    painter = rememberAsyncImagePainter(tilePreview),
                                     contentDescription = item.displayName,
                                     contentScale = ContentScale.Crop,
                                     modifier = Modifier
@@ -2061,6 +2366,22 @@ fun VaultIslandPanel(
                                         .clip(RoundedCornerShape(8.dp))
                                         .then(dragGripMod)
                                 )
+
+                                if (isVideo) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier
+                                            .align(Alignment.TopStart)
+                                            .padding(4.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                            .background(Color.Black.copy(alpha = 0.72f))
+                                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                                    ) {
+                                        Icon(Icons.Filled.Videocam, contentDescription = null, tint = IslandColors.AccentRed, modifier = Modifier.size(10.dp))
+                                        Spacer(Modifier.width(2.dp))
+                                        Text("REC", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                                    }
+                                }
 
                                 Canvas(modifier = Modifier.fillMaxSize()) {
                                     val strokePx = if (isFocusedTile) 2.dp.toPx() else 1.dp.toPx()
@@ -2074,7 +2395,7 @@ fun VaultIslandPanel(
                                         style = Stroke(width = strokePx)
                                     )
                                     val topBarLen = (size.width - strokePx) * fraction
-                                    if (topBarLen > 2f && !isFocusedTile) {
+                                    if (topBarLen > 2f && !isFocusedTile && !item.isPermanent) {
                                         drawLine(
                                             color = ringColor,
                                             start = Offset(r * 0.4f, inset),
@@ -2085,7 +2406,7 @@ fun VaultIslandPanel(
                                     }
                                 }
 
-                                if (!item.isTrashed && isFocusedTile) {
+                                if (!item.isTrashed && !isVideo && isFocusedTile) {
                                     Box(
                                         modifier = Modifier
                                             .align(Alignment.BottomEnd)
@@ -2107,7 +2428,7 @@ fun VaultIslandPanel(
                                             modifier = Modifier.size(12.dp)
                                         )
                                     }
-                                } else if (!item.isTrashed) {
+                                } else if (!item.isTrashed && !isVideo) {
                                     Box(
                                         modifier = Modifier
                                             .align(Alignment.BottomEnd)
@@ -2138,7 +2459,7 @@ fun VaultIslandPanel(
                                                 app.soundManager.playCollapse()
                                                 selectedItemId = null
                                                 scope.launch {
-                                                    if (item.isTrashed) app.vaultManager.purgeItemNow(item.id)
+                                                    if (item.isTrashed || item.isPermanent) app.vaultManager.purgeItemNow(item.id)
                                                     else app.vaultManager.moveToTrash(item.id)
                                                 }
                                             },
@@ -2151,9 +2472,17 @@ fun VaultIslandPanel(
 
                             Spacer(Modifier.height(3.dp))
                             Text(
-                                text = if (item.isTrashed) "Trash" else TimerEngine.formatDuration(remainingMs),
+                                text = when {
+                                    item.isTrashed -> "Trash"
+                                    item.isPermanent -> "Saved"
+                                    else -> TimerEngine.formatDuration(remainingMs)
+                                },
                                 style = TextStyle(
-                                    color = if (item.isTrashed || remainingMs < 60_000L) IslandColors.AccentRed else IslandColors.TextSecondary,
+                                    color = when {
+                                        item.isPermanent -> accentColor
+                                        item.isTrashed || remainingMs < 60_000L -> IslandColors.AccentRed
+                                        else -> IslandColors.TextSecondary
+                                    },
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Medium,
                                     fontFeatureSettings = "tnum"
@@ -2254,7 +2583,10 @@ fun NotesIslandPanel(
     accentColor: Color
 ) {
     val notes by app.database.noteDao().observeAll().collectAsState(initial = emptyList())
+    val tasks by app.database.taskDao().observeAll().collectAsState(initial = emptyList())
     val links by app.database.savedLinkDao().observeAll().collectAsState(initial = emptyList())
+    var showTasks by remember { mutableStateOf(false) }
+    var taskDraft by remember { mutableStateOf("") }
     var editingId by remember { mutableStateOf<Long?>(null) }
     var isEditing by remember { mutableStateOf(false) }
     var draftText by remember { mutableStateOf("") }
@@ -2262,8 +2594,8 @@ fun NotesIslandPanel(
     val context = LocalContext.current
     val timeFmt = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
 
-    LaunchedEffect(isEditing) {
-        app.islandController.setKeyboardFocusNeeded(isEditing)
+    LaunchedEffect(isEditing, showTasks) {
+        app.islandController.setKeyboardFocusNeeded(isEditing || showTasks)
     }
 
     fun persistDraft(text: String) {
@@ -2372,34 +2704,157 @@ fun NotesIslandPanel(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "${notes.size} Notes",
-                        color = IslandColors.TextSecondary,
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .background(IslandColors.AccentLime)
-                            .clickable {
-                                app.soundManager.playTap()
-                                editingId = null
-                                draftText = ""
-                                isEditing = true
-                            }
-                            .padding(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Icon(Icons.Filled.Add, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(3.dp))
-                        Text("New note", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(if (!showTasks) accentColor.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.08f))
+                                .clickable { app.soundManager.playTap(); showTasks = false }
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text("Notes (${notes.size})", color = if (!showTasks) accentColor else IslandColors.TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(if (showTasks) accentColor.copy(alpha = 0.25f) else Color.White.copy(alpha = 0.08f))
+                                .clickable { app.soundManager.playTap(); showTasks = true }
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Text("Tasks (${tasks.size})", color = if (showTasks) accentColor else IslandColors.TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+                    if (!showTasks) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(IslandColors.AccentLime)
+                                .clickable {
+                                    app.soundManager.playTap()
+                                    editingId = null
+                                    draftText = ""
+                                    isEditing = true
+                                }
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Icon(Icons.Filled.Add, contentDescription = null, tint = Color.Black, modifier = Modifier.size(14.dp))
+                            Spacer(Modifier.width(3.dp))
+                            Text("New note", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
 
                 Spacer(Modifier.height(6.dp))
 
-                if (notes.isEmpty() && links.isEmpty()) {
+                if (showTasks) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(32.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color.White.copy(alpha = 0.08f))
+                                .padding(horizontal = 10.dp),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            if (taskDraft.isEmpty()) {
+                                Text("Add a quick task…", color = IslandColors.TextTertiary, fontSize = 12.sp)
+                            }
+                            BasicTextField(
+                                value = taskDraft,
+                                onValueChange = { taskDraft = it },
+                                singleLine = true,
+                                textStyle = TextStyle(color = Color.White, fontSize = 12.sp),
+                                cursorBrush = SolidColor(accentColor),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .onFocusChanged { if (it.isFocused) app.islandController.setKeyboardFocusNeeded(true) }
+                            )
+                        }
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .height(32.dp)
+                                .clip(CircleShape)
+                                .background(accentColor)
+                                .clickable {
+                                    val clean = taskDraft.trim()
+                                    if (clean.isNotEmpty()) {
+                                        app.soundManager.playTap()
+                                        taskDraft = ""
+                                        scope.launch { app.database.taskDao().upsert(TaskEntity(title = clean)) }
+                                    }
+                                }
+                                .padding(horizontal = 10.dp)
+                        ) {
+                            Text("Add", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Spacer(Modifier.height(6.dp))
+                    if (tasks.isEmpty()) {
+                        Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
+                            Text("No tasks yet", color = IslandColors.TextSecondary, fontSize = 13.sp)
+                        }
+                    } else {
+                        LazyColumn(
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            modifier = Modifier.fillMaxWidth().weight(1f)
+                        ) {
+                            items(tasks, key = { "task_${it.id}" }) { task ->
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .heightIn(min = 36.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color.White.copy(alpha = 0.07f))
+                                        .clickable {
+                                            app.soundManager.playTap()
+                                            scope.launch { app.database.taskDao().toggleDone(task.id, !task.isDone) }
+                                        }
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Box(
+                                        contentAlignment = Alignment.Center,
+                                        modifier = Modifier
+                                            .size(18.dp)
+                                            .clip(CircleShape)
+                                            .background(if (task.isDone) accentColor else Color.Transparent)
+                                            .border(1.2.dp, if (task.isDone) accentColor else Color.White.copy(alpha = 0.45f), CircleShape)
+                                    ) {
+                                        if (task.isDone) {
+                                            Icon(Icons.Filled.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                                        }
+                                    }
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(
+                                        text = task.title,
+                                        color = if (task.isDone) IslandColors.TextTertiary else IslandColors.TextPrimary,
+                                        fontSize = 12.sp,
+                                        textDecoration = if (task.isDone) TextDecoration.LineThrough else null,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    IconButton(
+                                        onClick = {
+                                            app.soundManager.playCollapse()
+                                            scope.launch { app.database.taskDao().deleteById(task.id) }
+                                        },
+                                        modifier = Modifier.size(26.dp)
+                                    ) {
+                                        Icon(Icons.Filled.Close, contentDescription = "Delete task", tint = IslandColors.TextSecondary, modifier = Modifier.size(13.dp))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else if (notes.isEmpty() && links.isEmpty()) {
                     Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
                         Text("No notes yet", color = IslandColors.TextSecondary, fontSize = 13.sp)
                     }

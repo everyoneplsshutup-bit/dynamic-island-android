@@ -50,17 +50,12 @@ object TierBMlKitOcr {
         return try {
             val inputImage = InputImage.fromBitmap(cropped, 0)
             val latinResult = runLatinRecognizer(inputImage)
-            val latinMatch = latinResult?.let {
-                selectPressedBlock(it, cropRect, frameW, frameH, localTapX, localTapY, tapX, tapY)
-            }
-            if (latinMatch != null) {
-                latinMatch
-            } else {
-                val devResult = runDevanagariRecognizer(inputImage)
-                devResult?.let {
-                    selectPressedBlock(it, cropRect, frameW, frameH, localTapX, localTapY, tapX, tapY)
-                }
-            }
+            val devResult = runDevanagariRecognizer(inputImage)
+            val mergedBlocks = mergeBlocks(
+                latinResult?.textBlocks.orEmpty(),
+                devResult?.textBlocks.orEmpty()
+            )
+            selectPressedBlock(mergedBlocks, cropRect, frameW, frameH, localTapX, localTapY, tapX, tapY)
         } finally {
             if (cropped !== fullFrame && !cropped.isRecycled) {
                 cropped.recycle()
@@ -68,6 +63,37 @@ object TierBMlKitOcr {
                 cropped.recycle()
             }
         }
+    }
+
+    private fun mergeBlocks(
+        primary: List<Text.TextBlock>,
+        secondary: List<Text.TextBlock>
+    ): List<Text.TextBlock> {
+        if (primary.isEmpty()) return secondary
+        if (secondary.isEmpty()) return primary
+        val merged = primary.toMutableList()
+        for (cand in secondary) {
+            val cBox = cand.boundingBox
+            if (cBox == null) {
+                merged.add(cand)
+                continue
+            }
+            val overlapsExisting = merged.any { existing ->
+                val eBox = existing.boundingBox ?: return@any false
+                val inter = Rect(eBox)
+                if (!inter.intersect(cBox)) return@any false
+                val interArea = inter.width().toLong() * inter.height().toLong()
+                val minArea = minOf(
+                    eBox.width().toLong() * eBox.height().toLong(),
+                    cBox.width().toLong() * cBox.height().toLong()
+                ).coerceAtLeast(1L)
+                interArea.toFloat() / minArea.toFloat() > 0.65f
+            }
+            if (!overlapsExisting) {
+                merged.add(cand)
+            }
+        }
+        return merged
     }
 
     suspend fun recognizeCroppedElement(
@@ -108,7 +134,7 @@ object TierBMlKitOcr {
     }
 
     private fun selectPressedBlock(
-        visionText: Text,
+        rawBlocks: List<Text.TextBlock>,
         cropRect: Rect,
         screenW: Int,
         screenH: Int,
@@ -117,7 +143,7 @@ object TierBMlKitOcr {
         rawX: Int,
         rawY: Int
     ): TierBSelectionResult? {
-        val blocks = visionText.textBlocks.filter { block ->
+        val blocks = rawBlocks.filter { block ->
             val box = block.boundingBox ?: return@filter true
             val screenBox = Rect(
                 cropRect.left + box.left,

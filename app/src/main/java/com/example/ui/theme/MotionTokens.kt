@@ -33,11 +33,16 @@ object MotionTokens {
     const val SPATIAL_DEFAULT_DAMPING = 0.8f
     const val SPATIAL_DEFAULT_STIFFNESS = 380f
 
+    const val SPATIAL_SLOW_DAMPING = 0.8f
+    const val SPATIAL_SLOW_STIFFNESS = 200f
+
     const val SPATIAL_FAST_DAMPING = 0.6f
     const val SPATIAL_FAST_STIFFNESS = 800f
 
     const val EFFECTS_DEFAULT_DAMPING = Spring.DampingRatioNoBouncy // 1.0f
     const val EFFECTS_DEFAULT_STIFFNESS = 1600f
+    const val EFFECTS_FAST_STIFFNESS = 3800f
+    const val EFFECTS_SLOW_STIFFNESS = 800f
 
     const val PILL_MORPH_DAMPING = 0.6f
     const val PILL_MORPH_STIFFNESS = Spring.StiffnessLow // 200f
@@ -47,7 +52,8 @@ object MotionTokens {
     const val COLLAPSE_STIFFNESS = 950f
 
     // Choreography timing constants
-    const val TAP_SQUISH_SCALE = 0.97f
+    const val TAP_SQUISH_SCALE = 1.08f
+    const val PRESS_SWELL_SCALE = 1.08f
     const val BUTTON_PRESS_SCALE = TAP_SQUISH_SCALE
     const val GLASS_FADE_MS = 180
     const val CONTENT_ENTER_MS = 300
@@ -90,6 +96,11 @@ object MotionTokens {
         stiffness = SPATIAL_DEFAULT_STIFFNESS
     )
 
+    fun <T> m3SpatialSlow(): SpringSpec<T> = spring(
+        dampingRatio = SPATIAL_SLOW_DAMPING,
+        stiffness = SPATIAL_SLOW_STIFFNESS
+    )
+
     fun <T> m3SpatialFast(): SpringSpec<T> = spring(
         dampingRatio = SPATIAL_FAST_DAMPING,
         stiffness = SPATIAL_FAST_STIFFNESS
@@ -100,10 +111,26 @@ object MotionTokens {
         stiffness = EFFECTS_DEFAULT_STIFFNESS
     )
 
+    fun <T> m3EffectsFast(): SpringSpec<T> = spring(
+        dampingRatio = EFFECTS_DEFAULT_DAMPING,
+        stiffness = EFFECTS_FAST_STIFFNESS
+    )
+
+    fun <T> m3EffectsSlow(): SpringSpec<T> = spring(
+        dampingRatio = EFFECTS_DEFAULT_DAMPING,
+        stiffness = EFFECTS_SLOW_STIFFNESS
+    )
+
     fun <T> m3PillMorph(): SpringSpec<T> = spring(
         dampingRatio = PILL_MORPH_DAMPING,
         stiffness = PILL_MORPH_STIFFNESS
     )
+
+    fun computeMorphFraction(currentW: Float, startW: Float, targetW: Float): Float {
+        val span = targetW - startW
+        if (kotlin.math.abs(span) < 1f) return 1f
+        return ((currentW - startW) / span).coerceIn(0f, 1f)
+    }
 
     fun <T> liquidOpenSpec(
         style: AnimationStyle = AnimationStyle.FRUIT,

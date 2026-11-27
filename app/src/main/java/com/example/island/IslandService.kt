@@ -89,6 +89,7 @@ class IslandService : AccessibilityService() {
     private var screenshotObserver: ContentObserver? = null
     private var screenshotCheckJob: Job? = null
     private var lastTreePromptTimeMs: Long = 0L
+    private var lastScreenshotRequestMs: Long = 0L
     private var postedInitialWelcome = false
 
     private var screenReceiverRegistered = false
@@ -100,7 +101,6 @@ class IslandService : AccessibilityService() {
             when (intent?.action) {
                 Intent.ACTION_SCREEN_OFF -> {
                     app.islandController.setDwellPaused(DwellPauseReason.SCREEN_OFF, true)
-                    app.islandController.setFloatingSidebarOpen(false)
                     app.islandController.setFlashlightCardOpen(false)
                 }
                 Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> {
@@ -163,11 +163,16 @@ class IslandService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        if (event?.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            val pkg = event.packageName?.toString()
-            if (!pkg.isNullOrBlank() && pkg != packageName && pkg !in ignoredForegroundPackages) {
-                _currentForegroundApp.value = pkg
-                (applicationContext as? DynamicIslandApp)?.islandController?.setForegroundPackage(pkg)
+        when (event?.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
+                val pkg = event.packageName?.toString()
+                if (!pkg.isNullOrBlank() && pkg != packageName && pkg !in ignoredForegroundPackages) {
+                    _currentForegroundApp.value = pkg
+                    (applicationContext as? DynamicIslandApp)?.islandController?.setForegroundPackage(pkg)
+                }
+            }
+            AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED -> {
+                TierAAccessibilityReader.onTextSelectionChanged()
             }
         }
     }
@@ -281,7 +286,7 @@ class IslandService : AccessibilityService() {
 
             delay(65L)
 
-            val result = TierAAccessibilityReader.readNodeAtPoint(
+            val result = TierAAccessibilityReader.readNodeAtPointAsync(
                 service = this@IslandService,
                 screenReadingAllowed = true,
                 x = rawX,
@@ -310,27 +315,45 @@ class IslandService : AccessibilityService() {
                     }
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        val elapsed = android.os.SystemClock.elapsedRealtime() - lastScreenshotRequestMs
+                        if (elapsed < 1000L) {
+                            delay(1000L - elapsed)
+                        }
                         overlayHost?.setOverlayHiddenForCapture(true)
                         delay(60L)
-                        val captured = captureDisplayScreenshotR()
+                        var outcome = captureDisplayScreenshotR()
+                        if (outcome is ScreenshotOutcome.RateLimited) {
+                            delay(1000L)
+                            outcome = captureDisplayScreenshotR()
+                        }
                         overlayHost?.setOverlayHiddenForCapture(false)
-                        if (captured != null) {
-                            val recognized = TierBMlKitOcr.recognizeSelectionAtPoint(
-                                fullFrame = captured,
-                                elementBounds = result.bounds,
-                                tapX = rawX,
-                                tapY = rawY,
-                                preserveFrozenFrameForOverlay = true
-                            )
-                            if (recognized != null) {
-                                app.soundManager.playTap()
-                                app.islandController.setOcrSelection(recognized.selectionState)
-                            } else {
+
+                        when (outcome) {
+                            is ScreenshotOutcome.SecureWindow -> {
                                 OcrBitmapHolder.clear()
-                                if (!captured.isRecycled) captured.recycle()
-                                app.islandController.showTransientBanner("No text detected at pressed point")
+                                app.islandController.showTransientBanner("Protected window: screen text cannot be read")
+                                return@launch
                             }
-                            return@launch
+                            is ScreenshotOutcome.Success -> {
+                                val captured = outcome.bitmap
+                                val recognized = TierBMlKitOcr.recognizeSelectionAtPoint(
+                                    fullFrame = captured,
+                                    elementBounds = result.bounds,
+                                    tapX = rawX,
+                                    tapY = rawY,
+                                    preserveFrozenFrameForOverlay = true
+                                )
+                                if (recognized != null) {
+                                    app.soundManager.playTap()
+                                    app.islandController.setOcrSelection(recognized.selectionState)
+                                } else {
+                                    OcrBitmapHolder.clear()
+                                    if (!captured.isRecycled) captured.recycle()
+                                    app.islandController.showTransientBanner("No text detected at pressed point")
+                                }
+                                return@launch
+                            }
+                            else -> Unit
                         }
                     }
 
@@ -345,8 +368,16 @@ class IslandService : AccessibilityService() {
         }
     }
 
-    private suspend fun captureDisplayScreenshotR(): Bitmap? {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+    private sealed interface ScreenshotOutcome {
+        data class Success(val bitmap: Bitmap) : ScreenshotOutcome
+        data object RateLimited : ScreenshotOutcome
+        data object SecureWindow : ScreenshotOutcome
+        data object Failed : ScreenshotOutcome
+    }
+
+    private suspend fun captureDisplayScreenshotR(): ScreenshotOutcome {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return ScreenshotOutcome.Failed
+        lastScreenshotRequestMs = android.os.SystemClock.elapsedRealtime()
         return suspendCancellableCoroutine { cont ->
             runCatching {
                 takeScreenshot(
@@ -363,16 +394,24 @@ class IslandService : AccessibilityService() {
                                 hw.close()
                                 soft
                             }.getOrNull()
-                            if (cont.isActive) cont.resume(bmp)
+                            if (cont.isActive) {
+                                cont.resume(if (bmp != null) ScreenshotOutcome.Success(bmp) else ScreenshotOutcome.Failed)
+                            }
                         }
 
                         override fun onFailure(errorCode: Int) {
-                            if (cont.isActive) cont.resume(null)
+                            if (!cont.isActive) return
+                            val outcome = when (errorCode) {
+                                2 -> ScreenshotOutcome.SecureWindow
+                                3 -> ScreenshotOutcome.RateLimited
+                                else -> ScreenshotOutcome.Failed
+                            }
+                            cont.resume(outcome)
                         }
                     }
                 )
             }.onFailure {
-                if (cont.isActive) cont.resume(null)
+                if (cont.isActive) cont.resume(ScreenshotOutcome.Failed)
             }
         }
     }

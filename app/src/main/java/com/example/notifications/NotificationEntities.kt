@@ -26,8 +26,7 @@ data class AppRuleEntity(
     @PrimaryKey val packageName: String,
     val appName: String,
     val allowIslandPreview: Boolean = true,
-    val isExemptFromAutoCollapse: Boolean = false,
-    val allowFloatingWindow: Boolean = false
+    val isExemptFromAutoCollapse: Boolean = false
 )
 
 @Dao
@@ -67,9 +66,6 @@ interface AppRuleDao {
 
     @Query("UPDATE app_rules SET allowIslandPreview = :allowed WHERE packageName = :pkg")
     suspend fun setIslandPreviewAllowed(pkg: String, allowed: Boolean)
-
-    @Query("UPDATE app_rules SET allowFloatingWindow = :allowed WHERE packageName = :pkg")
-    suspend fun setFloatingAllowed(pkg: String, allowed: Boolean)
 
     @Query("DELETE FROM app_rules")
     suspend fun clearAll()

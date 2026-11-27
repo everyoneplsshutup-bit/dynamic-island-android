@@ -307,7 +307,6 @@ class IslandController(
                 mode = nextMode,
                 isMoreRowOpen = false,
                 isFlashlightCardOpen = false,
-                isMochiMenuOpen = false,
                 pullDownProgress = 0f,
                 needsKeyboardFocus = false
             )
@@ -324,7 +323,6 @@ class IslandController(
                 mode = IslandMode.IDLE,
                 isMoreRowOpen = false,
                 isFlashlightCardOpen = false,
-                isMochiMenuOpen = false,
                 pullDownProgress = 0f,
                 needsKeyboardFocus = false
             )
@@ -589,30 +587,6 @@ class IslandController(
         _state.update { it.copy(isFlashlightCardOpen = open) }
     }
 
-    fun setFloatingSidebarOpen(open: Boolean) {
-        _state.update { it.copy(isFloatingSidebarOpen = open) }
-    }
-
-    fun setFloatingMiniTab(tab: IslandTab?) {
-        if (tab == IslandTab.TIMER) {
-            _state.update {
-                it.copy(
-                    activeFloatingMiniTab = null,
-                    isFloatingSidebarOpen = false
-                )
-            }
-            expand(IslandTab.TIMER)
-            return
-        }
-        _state.update {
-            it.copy(
-                activeFloatingMiniTab = tab,
-                isFloatingSidebarOpen = false,
-                needsKeyboardFocus = (tab == IslandTab.SEARCH || tab == IslandTab.NOTES)
-            )
-        }
-    }
-
     fun setDragOverIsland(active: Boolean) {
         _state.update { it.copy(isDragOverIsland = active) }
     }
@@ -719,19 +693,18 @@ class IslandController(
         }
     }
 
-    fun setMochiMenuOpen(open: Boolean) {
+    fun setLandscapeQuiet(quiet: Boolean) {
         _state.update { current ->
-            if (current.isMochiMenuOpen == open) current
-            else current.copy(isMochiMenuOpen = open)
+            if (current.isLandscapeQuiet == quiet) current
+            else current.copy(isLandscapeQuiet = quiet)
         }
-        if (open) onSoundEvent(IslandSoundEvent.TAP)
     }
 
-    fun triggerMochiJump() {
+    fun setAutoRotateSuggestion(targetRotation: Int?) {
         _state.update { current ->
-            current.copy(mochiJumpTrigger = current.mochiJumpTrigger + 1)
+            if (current.pendingAutoRotateSuggestion == targetRotation) current
+            else current.copy(pendingAutoRotateSuggestion = targetRotation)
         }
-        onSoundEvent(IslandSoundEvent.TAP)
     }
 
     fun clearAlerts() {
@@ -753,9 +726,9 @@ class IslandController(
         a is IslandActivity.Timer && b is IslandActivity.Timer ->
             a.label == b.label && (a.remainingMs / 1000L) == (b.remainingMs / 1000L) && a.isRunning == b.isRunning
         a is IslandActivity.Charging && b is IslandActivity.Charging ->
-            a.levelPercent == b.levelPercent && a.isCharging == b.isCharging && a.isFull == b.isFull && a.pluggedLabel == b.pluggedLabel
+            a.levelPercent == b.levelPercent && a.isCharging == b.isCharging && a.isFull == b.isFull && a.pluggedLabel == b.pluggedLabel && a.chargeEtaMinutes == b.chargeEtaMinutes
         a is IslandActivity.NotificationPreview && b is IslandActivity.NotificationPreview ->
-            a.packageName == b.packageName && a.appName == b.appName && a.title == b.title && a.text == b.text
+            a.packageName == b.packageName && a.appName == b.appName && a.title == b.title && a.text == b.text && a.otpCode == b.otpCode
         a is IslandActivity.DownloadProgress && b is IslandActivity.DownloadProgress ->
             a.title == b.title && a.progress == b.progress && a.max == b.max && a.indeterminate == b.indeterminate && a.speedText == b.speedText
         a is IslandActivity.ScreenRecording && b is IslandActivity.ScreenRecording ->

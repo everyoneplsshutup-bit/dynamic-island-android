@@ -13,22 +13,18 @@ import android.graphics.Rect
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
+import android.media.MediaMetadataRetriever
 import android.media.MediaRecorder
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
-import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.os.ParcelFileDescriptor
-import android.provider.MediaStore
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
 import com.example.DynamicIslandApp
 import com.example.R
-import com.example.island.AlertKind
 import com.example.island.IslandActivity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,11 +33,17 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /**
  * Handles both:
  * 1. Single-frame MediaProjection capture (Shelf screenshot / <API 30 Tier B OCR fallback)
- * 2. Interactive Screen Recording initiated from Dynamic Island Tools with 3-2-1 countdown & Movies/DynamicIsland MP4 output.
+ * 2. Interactive Screen Recording initiated from Dynamic Island Tools with 3-2-1 countdown & permanent Shelf MP4 storage.
  */
 class MediaProjectionCaptureService : Service() {
 
@@ -60,8 +62,8 @@ class MediaProjectionCaptureService : Service() {
 
     private var mediaRecorder: MediaRecorder? = null
     private var recordingJob: Job? = null
-    private var outputUri: Uri? = null
-    private var outputPfd: ParcelFileDescriptor? = null
+    private var recordingVideoFile: File? = null
+    private var recordingDisplayName: String? = null
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -176,19 +178,17 @@ class MediaProjectionCaptureService : Service() {
             val rawH = (dm.heightPixels.coerceAtLeast(640) / 2) * 2
             val density = dm.densityDpi
 
-            val fileName = "DynamicIsland_${System.currentTimeMillis()}.mp4"
-            val values = ContentValues().apply {
-                put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
-                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/DynamicIsland")
-                    put(MediaStore.Video.Media.IS_PENDING, 1)
-                }
+            val vaultDir = File(filesDir, "vault").apply { if (!exists()) mkdirs() }
+            val stamp = SimpleDateFormat("yyyy-MM-dd_HHmm", Locale.US).format(Date())
+            val baseName = "Screen_$stamp"
+            var candidate = File(vaultDir, "$baseName.mp4")
+            var suffix = 1
+            while (candidate.exists()) {
+                candidate = File(vaultDir, "${baseName}_$suffix.mp4")
+                suffix++
             }
-            val uri = contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return false
-            val pfd = contentResolver.openFileDescriptor(uri, "rw") ?: return false
-            outputUri = uri
-            outputPfd = pfd
+            recordingVideoFile = candidate
+            recordingDisplayName = candidate.name
 
             val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 MediaRecorder(this)
@@ -201,7 +201,7 @@ class MediaProjectionCaptureService : Service() {
             recorder.setVideoSize(rawW, rawH)
             recorder.setVideoFrameRate(30)
             recorder.setVideoEncodingBitRate(4_500_000)
-            recorder.setOutputFile(pfd.fileDescriptor)
+            recorder.setOutputFile(candidate.absolutePath)
             recorder.prepare()
 
             virtualDisplay = mp.createVirtualDisplay(
@@ -228,38 +228,69 @@ class MediaProjectionCaptureService : Service() {
         runCatching { mediaRecorder?.reset() }
         runCatching { mediaRecorder?.release() }
         mediaRecorder = null
-        runCatching { outputPfd?.close() }
-        outputPfd = null
 
-        val uri = outputUri
-        outputUri = null
-        if (uri != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            runCatching {
-                val values = ContentValues().apply {
-                    put(MediaStore.Video.Media.IS_PENDING, 0)
-                }
-                contentResolver.update(uri, values, null, null)
-            }
-        }
+        val videoFile = recordingVideoFile
+        val displayName = recordingDisplayName ?: videoFile?.name ?: "Screen_recording.mp4"
+        recordingVideoFile = null
+        recordingDisplayName = null
 
         val app = applicationContext as? DynamicIslandApp
         app?.islandController?.removeActivity("screen_rec")
         app?.islandController?.setScreenRecording(false)
-        if (notifySaved && hadRecorder) {
-            app?.soundManager?.playSuccess()
-            app?.islandController?.upsertActivity(
-                IslandActivity.Alert(
-                    id = "screen_rec_saved_${System.currentTimeMillis()}",
-                    kind = AlertKind.GENERAL,
-                    title = "Recording saved",
-                    subtitle = "Saved to Movies/DynamicIsland"
-                ),
-                autoShowCompact = true,
-                autoDismissMs = 2200L
-            )
+
+        if (notifySaved && hadRecorder && videoFile != null && videoFile.exists() && videoFile.length() > 0L) {
+            scope.launch {
+                try {
+                    val thumbFile = withContext(Dispatchers.IO) {
+                        extractFrame0Thumbnail(videoFile)
+                    }
+                    app?.vaultManager?.saveScreenRecording(
+                        videoFile = videoFile,
+                        displayName = displayName,
+                        thumbnailFile = thumbFile
+                    )
+                    app?.soundManager?.playSuccess()
+                } finally {
+                    cleanupAndStop()
+                }
+            }
+        } else {
+            if (!notifySaved && videoFile != null && videoFile.exists()) {
+                runCatching { videoFile.delete() }
+            }
+            cleanupAndStop()
         }
-        cleanupAndStop()
     }
+
+    private fun extractFrame0Thumbnail(videoFile: File): File? = runCatching {
+        val retriever = MediaMetadataRetriever()
+        try {
+            retriever.setDataSource(videoFile.absolutePath)
+            val rawFrame = retriever.getFrameAtTime(0L, MediaMetadataRetriever.OPTION_CLOSEST_SYNC)
+                ?: retriever.frameAtTime
+                ?: return@runCatching null
+            val maxSide = 360
+            val scale = (maxSide.toFloat() / maxOf(rawFrame.width, rawFrame.height).coerceAtLeast(1)).coerceAtMost(1f)
+            val scaled = if (scale < 0.99f) {
+                Bitmap.createScaledBitmap(
+                    rawFrame,
+                    (rawFrame.width * scale).toInt().coerceAtLeast(16),
+                    (rawFrame.height * scale).toInt().coerceAtLeast(16),
+                    true
+                ).also { if (it !== rawFrame) rawFrame.recycle() }
+            } else {
+                rawFrame
+            }
+            val thumb = File(videoFile.parentFile, "thumb_${System.currentTimeMillis()}.png")
+            FileOutputStream(thumb).use { out ->
+                scaled.compress(Bitmap.CompressFormat.PNG, 90, out)
+            }
+            scaled.recycle()
+            thumb.takeIf { it.exists() && it.length() > 0L }
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }.getOrNull()
 
     private fun captureSingleFrame(mp: MediaProjection, mode: String, bounds: Rect?, tapX: Int, tapY: Int) {
         val dm = resources.displayMetrics

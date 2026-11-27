@@ -19,11 +19,15 @@ import android.view.DragEvent
 import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.OrientationEventListener
+import android.view.Surface
 import android.view.View
 import android.view.WindowManager
 import androidx.compose.runtime.MutableFloatState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.ComposeView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
@@ -84,7 +88,11 @@ class OverlayWindowHost(
 
     private var lastTouchSignature: String = ""
     private var lastDrawingSignature: String = ""
-    private val pillPressedState = androidx.compose.runtime.mutableStateOf(false)
+    private var lastDrawingWasFullCanvas: Boolean = true
+    private var shrinkDrawingJob: kotlinx.coroutines.Job? = null
+    private var orientationListener: OrientationEventListener? = null
+    private val pillPressedState = mutableStateOf(false)
+    private val windowOffsetDpState = mutableStateOf(Offset.Zero)
     private var activeWindowType: Int = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
 
     private var latestSettings: IslandSettings = IslandSettings()
@@ -241,6 +249,7 @@ class OverlayWindowHost(
                         app = app,
                         exclusionZone = liveZone ?: DeadZoneGeometry.measureLive(uiCtx, latestSettings),
                         crossWindowBlurSupported = blurSupported,
+                        windowOriginDp = windowOffsetDpState.value,
                         pullDownProgressProvider = { pullDownFractionState.floatValue },
                         isPillPressedProvider = { pillPressedState.value },
                         onRequestHaptic = { performSelectionHaptic() },
@@ -283,16 +292,6 @@ class OverlayWindowHost(
                     onSelectModePoint(e.rawX.toInt(), e.rawY.toInt())
                     return true
                 }
-                if (isMochiShoulderHit(e.x, density)) {
-                    // Top-right corner of the Mochi area opens the Remove / Hide menu; body tap makes Mochi jump
-                    if (e.y < 18f * density && e.x > ((touchView?.width ?: 0) - 18f * density)) {
-                        app.islandController.setMochiMenuOpen(true)
-                    } else {
-                        performSelectionHaptic()
-                        app.islandController.triggerMochiJump()
-                    }
-                    return true
-                }
                 handlePillTap(app)
                 return true
             }
@@ -301,8 +300,6 @@ class OverlayWindowHost(
                 performSelectionHaptic()
                 if (latestState.isSelectModeActive) {
                     onSelectModePoint(e.rawX.toInt(), e.rawY.toInt())
-                } else if (isMochiShoulderHit(e.x, density)) {
-                    app.islandController.setMochiMenuOpen(true)
                 } else {
                     handlePillLongPress(app)
                 }
@@ -400,6 +397,7 @@ class OverlayWindowHost(
 
         if (added) {
             registerBlurListener(wm)
+            registerOrientationListener(app, uiCtx)
             _isAttached.value = true
             updateLayout(latestState, latestSettings, latestKeepAwake, liveExclusionZone.value, forceTouch = true)
         }
@@ -418,7 +416,7 @@ class OverlayWindowHost(
         latestKeepAwake = keepAwake
         if (!_isAttached.value) return
 
-        updateDrawingWindowAttributes(state, settings, keepAwake)
+        updateDrawingWindowAttributes(state, settings, keepAwake, zone)
         updateTouchWindowBounds(state, settings, zone, force = forceTouch)
     }
 
@@ -438,6 +436,10 @@ class OverlayWindowHost(
     }
 
     fun detach() {
+        shrinkDrawingJob?.cancel()
+        shrinkDrawingJob = null
+        orientationListener?.disable()
+        orientationListener = null
         unregisterBlurListener()
         val wm = windowManager
         if (wm != null) {
@@ -453,7 +455,55 @@ class OverlayWindowHost(
         windowManager = null
         lastDrawingSignature = ""
         lastTouchSignature = ""
+        lastDrawingWasFullCanvas = true
+        windowOffsetDpState.value = Offset.Zero
         _isAttached.value = false
+    }
+
+    private fun registerOrientationListener(app: DynamicIslandApp, uiCtx: Context) {
+        orientationListener?.disable()
+        val listener = object : OrientationEventListener(serviceContext) {
+            override fun onOrientationChanged(orientation: Int) {
+                if (orientation == ORIENTATION_UNKNOWN) return
+                val isLandscapeHold = (orientation in 55..125) || (orientation in 235..305)
+                val isPortraitHold = (orientation in 0..40) || (orientation in 320..359)
+                if (!isLandscapeHold && !isPortraitHold) return
+
+                if (latestSettings.landscapeQuietMode) {
+                    app.islandController.setLandscapeQuiet(isLandscapeHold)
+                } else if (latestState.isLandscapeQuiet) {
+                    app.islandController.setLandscapeQuiet(false)
+                }
+
+                if (latestSettings.autoRotateSuggestionEnabled && isLandscapeHold) {
+                    val accelOff = runCatching {
+                        Settings.System.getInt(
+                            serviceContext.contentResolver,
+                            Settings.System.ACCELEROMETER_ROTATION,
+                            1
+                        ) == 0
+                    }.getOrDefault(false)
+                    val canWrite = runCatching { Settings.System.canWrite(serviceContext) }.getOrDefault(false)
+                    if (accelOff && canWrite) {
+                        val targetRot = if (orientation in 55..125) Surface.ROTATION_270 else Surface.ROTATION_90
+                        val currentRot = runCatching { uiCtx.display?.rotation }.getOrNull() ?: Surface.ROTATION_0
+                        if (currentRot != targetRot) {
+                            app.islandController.setAutoRotateSuggestion(targetRot)
+                        } else {
+                            app.islandController.setAutoRotateSuggestion(null)
+                        }
+                    } else {
+                        app.islandController.setAutoRotateSuggestion(null)
+                    }
+                } else if (isPortraitHold || !latestSettings.autoRotateSuggestionEnabled) {
+                    app.islandController.setAutoRotateSuggestion(null)
+                }
+            }
+        }
+        if (listener.canDetectOrientation()) {
+            listener.enable()
+            orientationListener = listener
+        }
     }
 
     private fun registerBlurListener(wm: WindowManager) {
@@ -461,7 +511,7 @@ class OverlayWindowHost(
         onBlurSupportedChanged(runCatching { wm.isCrossWindowBlurEnabled }.getOrDefault(false))
         val listener = Consumer<Boolean> { enabled ->
             onBlurSupportedChanged(enabled)
-            updateDrawingWindowAttributes(latestState, latestSettings, latestKeepAwake)
+            updateDrawingWindowAttributes(latestState, latestSettings, latestKeepAwake, liveExclusionZone.value)
         }
         blurEnabledListener = listener
         runCatching { wm.addCrossWindowBlurEnabledListener(listener) }
@@ -477,25 +527,33 @@ class OverlayWindowHost(
     private fun updateDrawingWindowAttributes(
         state: IslandState,
         settings: IslandSettings,
-        keepAwake: Boolean
+        keepAwake: Boolean,
+        zoneInput: ExclusionZone?
     ) {
         val wm = windowManager ?: return
         val view = drawingComposeView ?: return
         val params = drawingParams ?: return
+        val zone = zoneInput ?: DeadZoneGeometry.measureLive(serviceContext, settings)
+        val density = zone.density
 
+        val hasRotateChip = state.pendingAutoRotateSuggestion != null && settings.autoRotateSuggestionEnabled
         val isInteractive = state.mode == IslandMode.EXPANDED ||
             state.mode == IslandMode.MEDIUM ||
             state.ocrSelection != null ||
             state.isFlashlightCardOpen ||
-            state.isFloatingSidebarOpen ||
-            state.activeFloatingMiniTab != null ||
             state.approvalPrompt != null ||
-            state.isMochiMenuOpen
+            hasRotateChip
         val needsIme = isInteractive && state.needsKeyboardFocus
 
-        // Keep home screen & wallpaper crisp behind the MATCH_PARENT drawing canvas so translucent
-        // Liquid Glass shows sharp background content cleanly through the card instead of blurring the whole screen.
-        val useCrossBlur = false
+        val effectiveStyle = if (settings.solidFallback) PillStyle.BLACK else settings.pillStyle
+        val useCrossBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+            crossWindowBlurSupported.value &&
+            (state.mode == IslandMode.MEDIUM || state.mode == IslandMode.EXPANDED) &&
+            !settings.reduceGlass &&
+            !settings.solidFallback &&
+            !settings.performanceMode &&
+            effectiveStyle != PillStyle.BLACK
+        val blurRadius = if (useCrossBlur) 28 else 0
 
         var flags = WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
             WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
@@ -515,16 +573,98 @@ class OverlayWindowHost(
             flags = flags or WindowManager.LayoutParams.FLAG_BLUR_BEHIND
         }
 
-        val blurRadius = 0
+        val requireFullCanvas = state.mode == IslandMode.EXPANDED ||
+            state.mode == IslandMode.MEDIUM ||
+            state.ocrSelection != null ||
+            state.isFlashlightCardOpen ||
+            state.approvalPrompt != null ||
+            state.statusBanner != null ||
+            state.isSelectModeActive ||
+            !settings.islandEnabled ||
+            zone.isLandscape ||
+            state.privacyIndicator.anyActive
 
-        val sig = "$flags:$blurRadius"
-        if (lastDrawingSignature != sig) {
-            lastDrawingSignature = sig
+        val targetW: Int
+        val targetH: Int
+        val targetX: Int
+        val targetY: Int
+        val offsetDp: Offset
+
+        if (requireFullCanvas) {
+            targetW = WindowManager.LayoutParams.MATCH_PARENT
+            targetH = WindowManager.LayoutParams.MATCH_PARENT
+            targetX = 0
+            targetY = 0
+            offsetDp = Offset.Zero
+        } else {
+            val isMusicPrimary = state.primaryActivity is IslandActivity.Music && state.mode == IslandMode.COMPACT
+            val metrics = if (isMusicPrimary) {
+                DeadZoneGeometry.musicCompactPillMetrics(zone.holeWidthDp, zone.holeHeightDp, isLandscape = false)
+            } else {
+                DeadZoneGeometry.compactSlotMetrics(
+                    holeWidthDp = zone.holeWidthDp,
+                    holeHeightDp = zone.holeHeightDp,
+                    isLandscape = false,
+                    slotWidthDp = settings.pillSizePreset.slotWidthDp
+                )
+            }
+            val idleCameraMetrics = DeadZoneGeometry.idleCameraPillMetrics(
+                holeWidthDp = zone.holeWidthDp,
+                holeHeightDp = zone.holeHeightDp,
+                appleWidth = settings.appleWidthIdlePill
+            )
+            val idleWidthDp = when (settings.whenIdleMode) {
+                WhenIdleMode.INFO_PILL -> metrics.totalWidthDp
+                WhenIdleMode.CAMERA_ONLY -> idleCameraMetrics.widthDp
+                WhenIdleMode.HIDDEN -> idleCameraMetrics.widthDp
+            }
+            val pillWidthDp = when (state.mode) {
+                IslandMode.IDLE -> idleWidthDp
+                IslandMode.COMPACT -> metrics.totalWidthDp
+                IslandMode.SPLIT -> metrics.totalWidthDp + 48f
+                else -> metrics.totalWidthDp
+            }
+            val sideMarginDp = if (hasRotateChip) 96f else 28f
+            val boxWidthDp = (pillWidthDp + sideMarginDp * 2f).coerceAtMost(zone.screenWidthPx / density)
+            val boxHeightDp = maxOf(metrics.pillHeightDp, zone.holeHeightDp) + 26f
+            targetW = (boxWidthDp * density).toInt().coerceAtLeast(1)
+            targetH = (boxHeightDp * density).toInt().coerceAtLeast(1)
+            targetX = (zone.cutoutRectPx.centerX() - targetW / 2).coerceIn(0, (zone.screenWidthPx - targetW).coerceAtLeast(0))
+            targetY = (zone.cutoutRectPx.top - (8f * density).toInt()).coerceAtLeast(0)
+            offsetDp = Offset(targetX / density, targetY / density)
+        }
+
+        val sig = "$flags:$blurRadius:$targetW:$targetH:$targetX:$targetY"
+        if (lastDrawingSignature == sig) return
+        lastDrawingSignature = sig
+
+        val applyParams = {
             params.flags = flags
+            params.width = targetW
+            params.height = targetH
+            params.x = targetX
+            params.y = targetY
+            windowOffsetDpState.value = offsetDp
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 params.blurBehindRadius = blurRadius
             }
             runCatching { wm.updateViewLayout(view, params) }
+        }
+
+        if (requireFullCanvas) {
+            shrinkDrawingJob?.cancel()
+            shrinkDrawingJob = null
+            lastDrawingWasFullCanvas = true
+            applyParams()
+        } else if (lastDrawingWasFullCanvas) {
+            shrinkDrawingJob?.cancel()
+            shrinkDrawingJob = scope.launch {
+                kotlinx.coroutines.delay(340L)
+                lastDrawingWasFullCanvas = false
+                applyParams()
+            }
+        } else {
+            applyParams()
         }
     }
 
@@ -571,10 +711,7 @@ class OverlayWindowHost(
             state.mode == IslandMode.MEDIUM ||
             state.ocrSelection != null ||
             state.isFlashlightCardOpen ||
-            state.isFloatingSidebarOpen ||
-            state.activeFloatingMiniTab != null ||
-            state.approvalPrompt != null ||
-            state.isMochiMenuOpen
+            state.approvalPrompt != null
 
         if (hideTouchWindow) {
             val sig = "GONE"
@@ -602,10 +739,6 @@ class OverlayWindowHost(
             appleWidth = settings.appleWidthIdlePill
         )
 
-        val mochiActive = isMochiCurrentlyActive(state, settings)
-        val mochiExtraTopDp = if (mochiActive) 28f else 0f
-        val mochiExtraRightDp = if (mochiActive && !zone.isLandscape) 42f else 0f
-
         if (!zone.isLandscape) {
             val idleWidthDp = when (settings.whenIdleMode) {
                 WhenIdleMode.INFO_PILL -> metrics.totalWidthDp
@@ -619,12 +752,12 @@ class OverlayWindowHost(
                 IslandMode.MEDIUM -> DeadZoneGeometry.MEDIUM_MAX_WIDTH_DP
                 IslandMode.EXPANDED -> DeadZoneGeometry.FULL_MAX_WIDTH_DP
             }
-            val touchW = ((pillWidthDp + 12f + mochiExtraRightDp * 2f) * density).toInt()
-            val touchH = ((metrics.pillHeightDp + 12f + mochiExtraTopDp).coerceAtLeast(48f) * density).toInt()
+            val touchW = ((pillWidthDp + 12f) * density).toInt()
+            val touchH = ((metrics.pillHeightDp + 12f).coerceAtLeast(48f) * density).toInt()
             val targetX = ((zone.cutoutRectPx.centerX() - zone.screenWidthPx / 2f)).toInt()
             val targetY = (zone.cutoutRectPx.top - (2f * density).toInt()).coerceAtLeast(0)
 
-            val sig = "PORTRAIT:$touchW:$touchH:$targetX:$targetY:$mochiActive"
+            val sig = "PORTRAIT:$touchW:$touchH:$targetX:$targetY"
             if (!force && lastTouchSignature == sig) return
             lastTouchSignature = sig
 
@@ -657,23 +790,6 @@ class OverlayWindowHost(
         view.setBackgroundColor(android.graphics.Color.TRANSPARENT)
         view.visibility = View.VISIBLE
         runCatching { wm.updateViewLayout(view, params) }
-    }
-
-    private fun isMochiCurrentlyActive(state: IslandState, settings: IslandSettings): Boolean {
-        if (!settings.mochiPetEnabled || System.currentTimeMillis() < settings.mochiHiddenUntilMs) return false
-        if (state.mode != IslandMode.IDLE && state.mode != IslandMode.COMPACT && state.mode != IslandMode.SPLIT) return false
-        if (state.primaryActivity is IslandActivity.Music || state.primaryActivity is IslandActivity.Alert) {
-            // Mochi stays beside/outside the pill rather than inside music/alert cards
-            return true
-        }
-        return true
-    }
-
-    private fun isMochiShoulderHit(localX: Float, density: Float): Boolean {
-        if (!isMochiCurrentlyActive(latestState, latestSettings)) return false
-        val w = touchView?.width ?: return false
-        val shoulderWidthPx = 42f * density
-        return localX >= (w - shoulderWidthPx).coerceAtLeast(0f)
     }
 
     private fun handlePillTap(app: DynamicIslandApp) {

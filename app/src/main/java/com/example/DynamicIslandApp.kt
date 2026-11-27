@@ -9,13 +9,13 @@ import android.os.Build
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
-import com.example.floating.FloatingWindowManager
 import com.example.island.IslandController
 import com.example.media.MediaHub
 import com.example.notes.ClipboardMonitor
 import com.example.notes.ShareToIslandActivity
 import com.example.notes.VoiceMemoManager
 import com.example.search.SearchEngine
+import com.example.system.AppColorAccentCache
 import com.example.system.AppDatabase
 import com.example.system.BatteryMonitor
 import com.example.system.IslandSoundManager
@@ -61,7 +61,7 @@ class DynamicIslandApp : Application() {
         private set
     lateinit var clipboardMonitor: ClipboardMonitor
         private set
-    lateinit var floatingWindowManager: FloatingWindowManager
+    lateinit var appColorAccentCache: AppColorAccentCache
         private set
     lateinit var searchEngine: SearchEngine
         private set
@@ -96,8 +96,8 @@ class DynamicIslandApp : Application() {
         )
         voiceMemoManager = VoiceMemoManager(this, database.voiceMemoDao(), islandController)
         clipboardMonitor = ClipboardMonitor(this, database.clipboardDao())
-        floatingWindowManager = FloatingWindowManager(this, settingsRepository)
-        searchEngine = SearchEngine(this, database.noteDao(), floatingWindowManager)
+        appColorAccentCache = AppColorAccentCache(this)
+        searchEngine = SearchEngine(this, database.noteDao())
         privacyOpsMonitor = PrivacyOpsMonitor(this, islandController)
 
         batteryMonitor.start()
@@ -172,6 +172,7 @@ class DynamicIslandApp : Application() {
         database.voiceMemoDao().clearAll()
         database.clipboardDao().clearAll()
         database.savedLinkDao().clearAll()
+        database.taskDao().clearAll()
         vaultManager.clearAllVaultFiles()
         settingsRepository.resetSettings()
     }

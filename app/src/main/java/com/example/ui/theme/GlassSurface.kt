@@ -59,20 +59,24 @@ private const val LIQUID_EDGE_AGSL = """
         float2 center = iResolution * 0.5;
         float2 p = fragCoord - center;
         float dist = sdSuperellipse(p, center * 0.96);
-        float edgeMask = smoothstep(-22.0, 0.0, dist);
+        float edgeNorm = clamp((dist + 22.0) / 22.0, 0.0, 1.0);
+        float edgeMask = pow(edgeNorm, 2.4);
         float2 dir = normalize(p + float2(0.001));
         float2 disp = dir * edgeMask * iRefractStrength;
 
-        // Subtle RGB dispersion along curved glass boundary
+        // Chromatic RGB dispersion stronger at optical rim, zero distortion in flat center
         half4 baseCol = content.eval(fragCoord - disp);
-        half4 redCol = content.eval(fragCoord - disp * 1.18);
-        half4 blueCol = content.eval(fragCoord - disp * 0.82);
+        half4 redCol = content.eval(fragCoord - disp * 1.22);
+        half4 blueCol = content.eval(fragCoord - disp * 0.78);
         half3 refracted = half3(redCol.r, baseCol.g, blueCol.b);
 
-        // Soft specular caustic rim oriented toward light position
-        float2 lightDir = normalize(iLightPos - center + float2(0.001));
-        float rimDot = clamp(dot(dir, lightDir) * 0.5 + 0.5, 0.0, 1.0);
-        float fresnel = smoothstep(-14.0, -1.0, dist) * (0.14 + 0.24 * rimDot);
+        // Dual opposed specular caustic rim oriented to primary and counter light
+        float2 lightDir1 = normalize(iLightPos - center + float2(0.001));
+        float2 lightDir2 = -lightDir1;
+        float rimDot1 = pow(clamp(dot(dir, lightDir1) * 0.5 + 0.5, 0.0, 1.0), 1.8);
+        float rimDot2 = pow(clamp(dot(dir, lightDir2) * 0.5 + 0.5, 0.0, 1.0), 2.4);
+        float rimBand = smoothstep(-14.0, -0.8, dist);
+        float fresnel = rimBand * (0.10 + 0.28 * rimDot1 + 0.14 * rimDot2);
 
         return half4(clamp(refracted + half3(fresnel), 0.0, 1.0), baseCol.a);
     }
@@ -125,7 +129,8 @@ fun Modifier.islandGlassChrome(
     isHighlighted: Boolean = false,
     backdrop: LayerBackdrop? = null,
     crossWindowBlurActive: Boolean = false,
-    allowDarkBorder: Boolean = true
+    allowDarkBorder: Boolean = true,
+    performanceMode: Boolean = false
 ): Modifier {
     val effectiveStyle = if (solidFallback) PillStyle.BLACK else pillStyle
     if (effectiveStyle == PillStyle.BLACK) {
@@ -148,7 +153,7 @@ fun Modifier.islandGlassChrome(
         materialYouColor = accentColor,
         density = density,
         pillStyle = effectiveStyle,
-        reduceGlass = reduceGlass
+        reduceGlass = reduceGlass || performanceMode
     )
     val borderBrush = IslandColors.liquidBorderBrush(
         useGlass = true,
@@ -157,12 +162,14 @@ fun Modifier.islandGlassChrome(
         isLiquidStyle = isLiquid
     )
 
-    val kyantBackdropMod = if (backdrop != null && !reduceGlass && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+    val kyantBackdropMod = if (backdrop != null && !reduceGlass && !performanceMode && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
         Modifier.drawBackdrop(
             backdrop = backdrop,
             shape = { shape },
             effects = {
-                backdropBlur(radius = if (isLiquid) 12.dp.toPx() else 22.dp.toPx())
+                if (!isLiquid) {
+                    backdropBlur(radius = 22.dp.toPx())
+                }
                 if (isLiquid) {
                     lens(
                         refractionHeight = 18.dp.toPx(),
@@ -176,7 +183,7 @@ fun Modifier.islandGlassChrome(
         Modifier
     }
 
-    val agslRefractMod = if (isLiquid && !reduceGlass && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+    val agslRefractMod = if (isLiquid && !reduceGlass && !performanceMode && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         val shader = runCatching { RuntimeShader(LIQUID_EDGE_AGSL) }.getOrNull()
         if (shader != null) {
             Modifier.graphicsLayer {
@@ -205,7 +212,7 @@ fun Modifier.islandGlassChrome(
         .then(agslRefractMod)
         .drawWithContent {
             drawContent()
-            if (isLiquid && !reduceGlass) {
+            if (isLiquid && !reduceGlass && !performanceMode) {
                 // Curved internal dome caustic + opposite chromatic shimmer
                 drawRect(
                     brush = Brush.radialGradient(

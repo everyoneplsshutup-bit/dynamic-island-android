@@ -1,11 +1,17 @@
 package com.example.setup
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.provider.DocumentsContract
+import android.provider.Settings
+import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
@@ -83,7 +89,6 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.BuildConfig
 import com.example.DynamicIslandApp
-import com.example.floating.FloatingLaunchPath
 import com.example.ocr.OcrPrivacyGate
 import com.example.search.LaunchableApp
 import com.example.system.AccentTheme
@@ -137,6 +142,14 @@ fun SettingsGroupDetailScreen(
     var motionSubSection by remember { mutableIntStateOf(0) }
     var backupText by remember { mutableStateOf("") }
     var showAppMultiPickerFor by remember { mutableStateOf<String?>(null) }
+    var showGlyphPickerFor by remember { mutableStateOf<String?>(null) }
+
+    val calendarPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        scope.launch { app.settingsRepository.update { it.copy(calendarRemindersEnabled = granted) } }
+        if (!granted) {
+            Toast.makeText(context, "Calendar permission denied", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     val screenshotsFolderPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { treeUri ->
         if (treeUri != null) {
@@ -150,6 +163,16 @@ fun SettingsGroupDetailScreen(
                 app.settingsRepository.update { it.copy(vaultScreenshotsTreeUri = treeUri.toString()) }
                 Toast.makeText(context, "Screenshots folder linked for 10-min Auto-Shelf", Toast.LENGTH_SHORT).show()
             }
+        }
+    }
+
+    val crossWindowBlurEnabled = remember(context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            runCatching {
+                context.getSystemService(WindowManager::class.java)?.isCrossWindowBlurEnabled == true
+            }.getOrDefault(false)
+        } else {
+            true
         }
     }
 
@@ -420,11 +443,32 @@ fun SettingsGroupDetailScreen(
                         }
                         item {
                             SwitchRow(
-                                title = "Purple Edge Sidebar Tint",
-                                helper = "Apply subtle purple accent to the curved floating-apps sidebar.",
-                                checked = settings.purpleSidebarTheme,
-                                onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(purpleSidebarTheme = c) } } }
+                                title = "Performance Mode",
+                                helper = "Use crisp zero-blur translucent glass for lowest latency on high refresh displays.",
+                                checked = settings.performanceMode,
+                                onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(performanceMode = c) } } }
                             )
+                        }
+                        item {
+                            SwitchRow(
+                                title = "Match app colour",
+                                helper = "Tint incoming notification borders and dots using the app icon's dominant colour.",
+                                checked = settings.matchAppColor,
+                                onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(matchAppColor = c) } } }
+                            )
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !crossWindowBlurEnabled) {
+                            item {
+                                ObsidianGlassCard(highlighted = true, accentColor = IslandColors.AccentAmber) {
+                                    Text("MIUI Live Blur Disabled", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(
+                                        "Enable 'Advanced textures' / 'Window blur' in MIUI Settings for real behind-window Liquid Glass refraction.",
+                                        color = IslandColors.TextSecondary,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                            }
                         }
                     }
 
@@ -812,7 +856,7 @@ fun SettingsGroupDetailScreen(
                         }
                     }
 
-                    SettingsGroup.MEDIA_PET -> {
+                    SettingsGroup.MEDIA -> {
                         item {
                             SettingsSectionHeader("Lyrics & Music Playback")
                         }
@@ -869,53 +913,6 @@ fun SettingsGroupDetailScreen(
                                 checked = settings.expandedLyricsMarquee,
                                 onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(expandedLyricsMarquee = c) } } }
                             )
-                        }
-                        item {
-                            SettingsSectionHeader("Mochi Island Pet")
-                        }
-                        item {
-                            SwitchRow(
-                                title = "Island pet",
-                                helper = "Cute pixel panda resting beside the idle Dynamic Island. Long-press Mochi anytime to hide or remove.",
-                                checked = settings.mochiPetEnabled,
-                                onCheckedChange = { c ->
-                                    scope.launch {
-                                        app.settingsRepository.update {
-                                            it.copy(mochiPetEnabled = c, mochiHiddenUntilMs = if (c) 0L else it.mochiHiddenUntilMs)
-                                        }
-                                    }
-                                }
-                            )
-                        }
-                        item {
-                            SwitchRow(
-                                title = "Quiet Hours Animation (11 PM–7 AM)",
-                                helper = "Allow Mochi idle animations overnight instead of sleeping still.",
-                                checked = settings.mochiQuietHoursAnimate,
-                                enabled = settings.mochiPetEnabled,
-                                onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(mochiQuietHoursAnimate = c) } } }
-                            )
-                        }
-                        if (settings.mochiHiddenUntilMs > System.currentTimeMillis()) {
-                            item {
-                                ObsidianGlassCard(highlighted = true) {
-                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text("Mochi is hidden for today", color = Color.White, fontWeight = FontWeight.SemiBold)
-                                            Text("Tap Restore to bring Mochi back immediately.", color = IslandColors.TextSecondary, fontSize = 12.sp)
-                                        }
-                                        Button(
-                                            onClick = {
-                                                app.soundManager.playSuccess()
-                                                scope.launch {
-                                                    app.settingsRepository.update { it.copy(mochiPetEnabled = true, mochiHiddenUntilMs = 0L) }
-                                                }
-                                            },
-                                            shape = CircleShape
-                                        ) { Text("Restore") }
-                                    }
-                                }
-                            }
                         }
                     }
 
@@ -1086,13 +1083,6 @@ fun SettingsGroupDetailScreen(
                         }
                         item {
                             ActionRow(
-                                title = "Floating-Window Apps (${settings.floatingAppPackages.size} selected)",
-                                helper = "MIUI path status: ${runCatching { FloatingLaunchPath.valueOf(settings.verifiedFloatingPath).title }.getOrDefault(settings.verifiedFloatingPath)}",
-                                onClick = { showAppMultiPickerFor = "FLOATING" }
-                            )
-                        }
-                        item {
-                            ActionRow(
                                 title = "Pinned Quick Launch Shortcuts (${settings.pinnedAppPackages.size})",
                                 helper = "Apps shown in the Quick Launch strip inside the expanded island.",
                                 onClick = { showAppMultiPickerFor = "PINNED" }
@@ -1114,6 +1104,81 @@ fun SettingsGroupDetailScreen(
                                 selectedLabel = settings.longPressGesture.name.replace("_", " "),
                                 options = IslandGesture.entries.map { it.name.replace("_", " ") to it },
                                 onSelect = { g -> scope.launch { app.settingsRepository.update { it.copy(longPressGesture = g) } } }
+                            )
+                        }
+                        item { SettingsSectionHeader("Round 4 Utilities & Smart Modes") }
+                        item {
+                            SwitchRow(
+                                title = "Calendar Reminders",
+                                helper = "Show next 12h meeting countdown & Join link inside expanded card.",
+                                checked = settings.calendarRemindersEnabled,
+                                onCheckedChange = { c ->
+                                    if (c && ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CALENDAR) != PackageManager.PERMISSION_GRANTED) {
+                                        calendarPermissionLauncher.launch(Manifest.permission.READ_CALENDAR)
+                                    } else {
+                                        scope.launch { app.settingsRepository.update { it.copy(calendarRemindersEnabled = c) } }
+                                    }
+                                }
+                            )
+                        }
+                        item {
+                            SwitchRow(
+                                title = "Landscape Quiet Mode",
+                                helper = "Shrink idle island and mute banner pop-ups during landscape video or gaming.",
+                                checked = settings.landscapeQuietMode,
+                                onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(landscapeQuietMode = c) } } }
+                            )
+                        }
+                        item {
+                            SwitchRow(
+                                title = "Auto-Rotate Suggestion Pill",
+                                helper = "Show temporary Rotate button when rotating the phone while system auto-rotate is off.",
+                                checked = settings.autoRotateSuggestionEnabled,
+                                onCheckedChange = { c ->
+                                    scope.launch { app.settingsRepository.update { it.copy(autoRotateSuggestionEnabled = c) } }
+                                    if (c && !Settings.System.canWrite(context)) {
+                                        Toast.makeText(context, "Grant Modify System Settings to apply rotation", Toast.LENGTH_SHORT).show()
+                                        runCatching {
+                                            context.startActivity(
+                                                Intent(Settings.ACTION_MANAGE_WRITE_SETTINGS, Uri.parse("package:${context.packageName}"))
+                                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            )
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                        item {
+                            ActionRow(
+                                title = "Glyf Gesture 'C'",
+                                helper = settings.glyphCApp.ifBlank { "Not assigned · Tap to pick app" },
+                                onClick = { showGlyphPickerFor = "C" }
+                            )
+                        }
+                        item {
+                            ActionRow(
+                                title = "Glyf Gesture 'W'",
+                                helper = settings.glyphWApp.ifBlank { "Not assigned · Tap to pick app" },
+                                onClick = { showGlyphPickerFor = "W" }
+                            )
+                        }
+                        item {
+                            ActionRow(
+                                title = "Glyf Gesture 'O'",
+                                helper = settings.glyphOApp.ifBlank { "Not assigned · Tap to pick app" },
+                                onClick = { showGlyphPickerFor = "O" }
+                            )
+                        }
+                        item {
+                            ActionRow(
+                                title = "Reset Muted Channels (${settings.mutedNotificationChannels.size})",
+                                helper = "Clear notification channels muted directly from the island.",
+                                onClick = {
+                                    scope.launch {
+                                        app.settingsRepository.update { it.copy(mutedNotificationChannels = emptySet()) }
+                                        Toast.makeText(context, "Muted channels cleared", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
                             )
                         }
                         item { SettingsSectionHeader("Master Feature Toggles") }
@@ -1143,17 +1208,17 @@ fun SettingsGroupDetailScreen(
                             }
                         }
                         item {
-                            SwitchRow("Quick Toggles & Floating Windows", "Torch, DND, brightness, Wi-Fi/BT panels & sidebar", settings.togglesEnabled) { c ->
-                                scope.launch { app.settingsRepository.update { it.copy(togglesEnabled = c, floatingEnabled = c) } }
+                            SwitchRow("Quick Toggles & Tools", "Torch, DND, brightness, Wi-Fi/BT panels, QR & Glyf", settings.togglesEnabled) { c ->
+                                scope.launch { app.settingsRepository.update { it.copy(togglesEnabled = c) } }
                             }
                         }
                         item {
-                            SwitchRow("10-Minute Photo Shelf", "Auto-expiring screenshots & shared images", settings.vaultEnabled) { c ->
+                            SwitchRow("10-Minute Photo Shelf", "Auto-expiring screenshots & permanent Screen Recordings", settings.vaultEnabled) { c ->
                                 scope.launch { app.settingsRepository.update { it.copy(vaultEnabled = c) } }
                             }
                         }
                         item {
-                            SwitchRow("Notes, Voice Memo & Clips", "Quick notes, microphone memos & foreground clips", settings.notesEnabled) { c ->
+                            SwitchRow("Notes, Tasks, Voice Memo & Clips", "Quick notes, task checklist, memos & foreground clips", settings.notesEnabled) { c ->
                                 scope.launch { app.settingsRepository.update { it.copy(notesEnabled = c, memoEnabled = c, clipsEnabled = c) } }
                             }
                         }
@@ -1496,17 +1561,16 @@ fun SettingsGroupDetailScreen(
     }
 
     if (showAppMultiPickerFor != null) {
-        val mode = showAppMultiPickerFor!!
         var allApps by remember { mutableStateOf<List<LaunchableApp>>(emptyList()) }
         LaunchedEffect(Unit) { allApps = app.searchEngine.getInstalledApps() }
-        val currentSelection = if (mode == "FLOATING") settings.floatingAppPackages else settings.pinnedAppPackages
+        val currentSelection = settings.pinnedAppPackages
 
         AlertDialog(
             onDismissRequest = { showAppMultiPickerFor = null },
             containerColor = IslandColors.ObsidianCardElevated,
             titleContentColor = Color.White,
             textContentColor = Color.White,
-            title = { Text(if (mode == "FLOATING") "Pick Floating-Window Apps" else "Pin Quick Launch Shortcuts") },
+            title = { Text("Pin Quick Launch Shortcuts") },
             text = {
                 LazyColumn(modifier = Modifier.height(300.dp)) {
                     items(allApps, key = { it.packageName }) { item ->
@@ -1518,9 +1582,9 @@ fun SettingsGroupDetailScreen(
                                 .clickable {
                                     scope.launch {
                                         app.settingsRepository.update { s ->
-                                            val list = (if (mode == "FLOATING") s.floatingAppPackages else s.pinnedAppPackages).toMutableList()
+                                            val list = s.pinnedAppPackages.toMutableList()
                                             if (item.packageName in list) list.remove(item.packageName) else list.add(item.packageName)
-                                            if (mode == "FLOATING") s.copy(floatingAppPackages = list) else s.copy(pinnedAppPackages = list)
+                                            s.copy(pinnedAppPackages = list)
                                         }
                                     }
                                 }
@@ -1539,6 +1603,78 @@ fun SettingsGroupDetailScreen(
                     onClick = { showAppMultiPickerFor = null },
                     colors = ButtonDefaults.buttonColors(containerColor = IslandColors.CrimsonPrimary)
                 ) { Text("Done") }
+            }
+        )
+    }
+
+    if (showGlyphPickerFor != null) {
+        val glyphKey = showGlyphPickerFor!!
+        var allApps by remember { mutableStateOf<List<LaunchableApp>>(emptyList()) }
+        LaunchedEffect(Unit) { allApps = app.searchEngine.getInstalledApps() }
+        val currentPkg = when (glyphKey) {
+            "C" -> settings.glyphCApp
+            "W" -> settings.glyphWApp
+            else -> settings.glyphOApp
+        }
+        AlertDialog(
+            onDismissRequest = { showGlyphPickerFor = null },
+            containerColor = IslandColors.ObsidianCardElevated,
+            titleContentColor = Color.White,
+            textContentColor = Color.White,
+            title = { Text("Assign Glyf Gesture '$glyphKey'") },
+            text = {
+                LazyColumn(modifier = Modifier.height(300.dp)) {
+                    item {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    scope.launch {
+                                        app.settingsRepository.update { s ->
+                                            when (glyphKey) {
+                                                "C" -> s.copy(glyphCApp = "")
+                                                "W" -> s.copy(glyphWApp = "")
+                                                else -> s.copy(glyphOApp = "")
+                                            }
+                                        }
+                                    }
+                                    showGlyphPickerFor = null
+                                }
+                                .padding(vertical = 10.dp)
+                        ) {
+                            Text("None (Unassigned)", color = IslandColors.TextSecondary, modifier = Modifier.weight(1f))
+                        }
+                    }
+                    items(allApps, key = { it.packageName }) { item ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    scope.launch {
+                                        app.settingsRepository.update { s ->
+                                            when (glyphKey) {
+                                                "C" -> s.copy(glyphCApp = item.packageName)
+                                                "W" -> s.copy(glyphWApp = item.packageName)
+                                                else -> s.copy(glyphOApp = item.packageName)
+                                            }
+                                        }
+                                    }
+                                    showGlyphPickerFor = null
+                                }
+                                .padding(vertical = 10.dp)
+                        ) {
+                            Text(item.label, color = Color.White, modifier = Modifier.weight(1f))
+                            if (item.packageName == currentPkg) {
+                                Icon(Icons.Filled.Check, contentDescription = "Selected", tint = IslandColors.CrimsonBright)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showGlyphPickerFor = null }) { Text("Close") }
             }
         )
     }

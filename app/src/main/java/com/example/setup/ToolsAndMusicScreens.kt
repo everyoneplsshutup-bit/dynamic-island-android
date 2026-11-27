@@ -14,6 +14,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -45,10 +46,12 @@ import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.FlashlightOn
+import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Repeat
 import androidx.compose.material.icons.filled.ScreenLockRotation
 import androidx.compose.material.icons.filled.Shuffle
@@ -66,14 +69,17 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -84,11 +90,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -96,6 +104,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.DynamicIslandApp
+import com.example.island.GlyfGesture
+import com.example.island.GlyfStrokeRecognizer
+import com.example.island.QrCodeGenerator
+import com.example.island.StrokePoint
 import com.example.ocr.MediaProjectionPromptActivity
 import com.example.ocr.OcrPrivacyGate
 import com.example.system.IslandSettings
@@ -132,7 +144,10 @@ fun ToolsTabScreen(
     var mediaVolume by remember { mutableFloatStateOf((audioMgr?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 8).toFloat()) }
     var showCompassDialog by remember { mutableStateOf(false) }
     var showLevelDialog by remember { mutableStateOf(false) }
+    var showQrDialog by remember { mutableStateOf(false) }
+    var showGlyfDialog by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
+    val settings by app.settingsRepository.settingsFlow.collectAsState(initial = IslandSettings())
 
     ObsidianCrimsonBackground(modifier = modifier) {
         Column(
@@ -325,7 +340,7 @@ fun ToolsTabScreen(
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                     ToolBentoTile(
                         title = "Screen Record",
-                        subtitle = if (isScreenRecording) "Recording ON · Tap stop" else "Record MP4 to Movies",
+                        subtitle = if (isScreenRecording) "Recording ON · Tap stop" else "Saves MP4 to Shelf",
                         icon = Icons.Filled.FiberManualRecord,
                         isActive = isScreenRecording,
                         onClick = {
@@ -338,8 +353,39 @@ fun ToolsTabScreen(
                         },
                         modifier = Modifier.weight(1f)
                     )
+                    ToolBentoTile(
+                        title = "QR Generator",
+                        subtitle = "Offline QR bitmap",
+                        icon = Icons.Filled.QrCode2,
+                        isActive = showQrDialog,
+                        onClick = {
+                            app.soundManager.playTap()
+                            showQrDialog = true
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    ToolBentoTile(
+                        title = "Glyf Pad",
+                        subtitle = "Draw C, W, O shortcut",
+                        icon = Icons.Filled.Gesture,
+                        isActive = showGlyfDialog,
+                        onClick = {
+                            app.soundManager.playTap()
+                            showGlyfDialog = true
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
                     Spacer(Modifier.weight(1f))
                 }
+
+                Text(
+                    text = "Note: Protected / DRM apps appear black in screen recordings.",
+                    color = IslandColors.TextTertiary,
+                    fontSize = 11.sp
+                )
 
                 // Real Display Brightness, Media Volume & System Connectivity Panels
                 ObsidianGlassCard {
@@ -406,6 +452,133 @@ fun ToolsTabScreen(
     if (showLevelDialog) {
         LiveBubbleLevelDialog(onDismiss = { showLevelDialog = false })
     }
+    if (showQrDialog) {
+        QrGeneratorDialog(onDismiss = { showQrDialog = false })
+    }
+    if (showGlyfDialog) {
+        GlyfPadDialog(settings = settings, onDismiss = { showGlyfDialog = false })
+    }
+}
+
+@Composable
+private fun QrGeneratorDialog(onDismiss: () -> Unit) {
+    var content by remember { mutableStateOf("") }
+    val bmp = remember(content) {
+        if (content.isNotBlank()) QrCodeGenerator.generateBitmap(content.trim(), 512) else null
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = IslandColors.ObsidianCardElevated,
+        titleContentColor = Color.White,
+        textContentColor = Color.White,
+        title = { Text("Offline QR Code Generator") },
+        text = {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedTextField(
+                    value = content,
+                    onValueChange = { content = it },
+                    label = { Text("Text, URL, or Wi-Fi payload") },
+                    singleLine = false,
+                    maxLines = 3,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                if (bmp != null) {
+                    Image(
+                        bitmap = bmp.asImageBitmap(),
+                        contentDescription = "Generated QR code",
+                        modifier = Modifier
+                            .size(180.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.White)
+                            .padding(8.dp)
+                    )
+                } else {
+                    Text("Type text above to render a scannable QR code offline.", color = IslandColors.TextSecondary, fontSize = 12.sp)
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {
+                Text("Close")
+            }
+        }
+    )
+}
+
+@Composable
+private fun GlyfPadDialog(settings: IslandSettings, onDismiss: () -> Unit) {
+    val context = LocalContext.current
+    val strokes = remember { mutableStateListOf<StrokePoint>() }
+    var status by remember { mutableStateOf("Draw C, W, or O to launch configured shortcut") }
+    val accent = MaterialTheme.colorScheme.primary
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        containerColor = IslandColors.ObsidianCardElevated,
+        titleContentColor = Color.White,
+        textContentColor = Color.White,
+        title = { Text("Glyf Gesture Pad") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                Text(status, color = IslandColors.TextSecondary, fontSize = 12.sp)
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(180.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(IslandColors.ObsidianBg)
+                        .pointerInput(settings.glyphCApp, settings.glyphWApp, settings.glyphOApp) {
+                            detectDragGestures(
+                                onDragStart = { pos ->
+                                    strokes.clear()
+                                    strokes.add(StrokePoint(pos.x, pos.y))
+                                },
+                                onDrag = { change, _ ->
+                                    change.consume()
+                                    strokes.add(StrokePoint(change.position.x, change.position.y))
+                                },
+                                onDragEnd = {
+                                    val g = GlyfStrokeRecognizer.recognize(strokes.toList())
+                                    val pkg = when (g) {
+                                        GlyfGesture.C -> settings.glyphCApp
+                                        GlyfGesture.W -> settings.glyphWApp
+                                        GlyfGesture.O -> settings.glyphOApp
+                                        null -> ""
+                                    }
+                                    if (g != null && pkg.isNotBlank()) {
+                                        val intent = context.packageManager.getLaunchIntentForPackage(pkg)
+                                            ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                        if (intent != null) {
+                                            runCatching { context.startActivity(intent) }
+                                            onDismiss()
+                                        } else {
+                                            status = "Assigned app for '${g.symbol}' not launchable"
+                                        }
+                                    } else if (g != null) {
+                                        status = "Recognized '${g.symbol}' — assign an app in Settings → Features"
+                                    } else {
+                                        status = "Not recognized — draw C, W, or O cleanly"
+                                    }
+                                }
+                            )
+                        }
+                ) {
+                    if (strokes.size > 1) {
+                        val path = Path().apply {
+                            moveTo(strokes.first().x, strokes.first().y)
+                            for (i in 1 until strokes.size) lineTo(strokes[i].x, strokes[i].y)
+                        }
+                        drawPath(path, accent, style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round))
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)) {
+                Text("Close")
+            }
+        }
+    )
 }
 
 @Composable

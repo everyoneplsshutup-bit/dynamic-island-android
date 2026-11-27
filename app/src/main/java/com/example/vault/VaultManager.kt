@@ -109,6 +109,55 @@ class VaultManager(
             }
         }
 
+    suspend fun saveScreenRecording(
+        videoFile: File,
+        displayName: String,
+        thumbnailFile: File? = null
+    ): VaultItemEntity? = withContext(Dispatchers.IO) {
+        ingestMutex.withLock {
+            runCatching {
+                if (!videoFile.exists() || videoFile.length() == 0L) return@withContext null
+                val now = System.currentTimeMillis()
+                val entity = VaultItemEntity(
+                    filePath = videoFile.absolutePath,
+                    mimeType = "video/mp4",
+                    displayName = displayName,
+                    sourceType = "SCREEN_RECORDING",
+                    createdAt = now,
+                    expiresAt = Long.MAX_VALUE,
+                    isTrashed = false,
+                    isPermanent = true,
+                    thumbnailPath = thumbnailFile?.takeIf { it.exists() && it.length() > 0L }?.absolutePath
+                )
+                val id = vaultDao.insert(entity)
+                val saved = entity.copy(id = id)
+                onVaultAddedSound()
+                val vaultCfg = settingsRepository?.settingsFlow?.first()?.eventConfig(EventKind.VAULT)
+                if (vaultCfg?.enabled != false) {
+                    islandController.upsertActivity(
+                        IslandActivity.Alert(
+                            id = "shelf_rec_$id",
+                            kind = AlertKind.GENERAL,
+                            title = "Recording saved",
+                            subtitle = "$displayName · Saved permanently in Shelf"
+                        ),
+                        autoShowCompact = true,
+                        autoDismissMs = 2000L,
+                        autoExpandToFull = false
+                    )
+                }
+                saved
+            }.onFailure {
+                android.util.Log.e("VaultManager", "saveScreenRecording failed", it)
+            }.getOrNull()
+        }
+    }
+
+    suspend fun renameItem(id: Long, newName: String) = withContext(Dispatchers.IO) {
+        val cleaned = newName.trim().ifBlank { return@withContext }
+        vaultDao.renameItem(id, cleaned)
+    }
+
     suspend fun ingestRecentScreenshotFromTree(treeUri: Uri): VaultItemEntity? = withContext(Dispatchers.IO) {
         runCatching {
             val now = System.currentTimeMillis()
@@ -177,11 +226,11 @@ class VaultManager(
         displayName: String,
         sourceType: String
     ): VaultItemEntity {
-        // Enforce 12-item Shelf cap: expire oldest first before inserting
-        val existingActive = vaultDao.getActiveOldestFirst()
-        if (existingActive.size >= VaultConstants.MAX_ACTIVE_ITEMS) {
-            val overflow = existingActive.size - VaultConstants.MAX_ACTIVE_ITEMS + 1
-            existingActive.take(overflow).forEach { old ->
+        // Enforce 12-item Shelf cap on temporary items only (permanent screen recordings are exempt)
+        val existingTemp = vaultDao.getTemporaryActiveOldestFirst()
+        if (existingTemp.size >= VaultConstants.MAX_ACTIVE_ITEMS) {
+            val overflow = existingTemp.size - VaultConstants.MAX_ACTIVE_ITEMS + 1
+            existingTemp.take(overflow).forEach { old ->
                 purgeItemNow(old.id)
             }
         }
@@ -240,6 +289,7 @@ class VaultManager(
         val item = vaultDao.getById(id)
         if (item != null) {
             runCatching { File(item.filePath).delete() }
+            item.thumbnailPath?.let { tp -> runCatching { File(tp).delete() } }
             vaultDao.deleteById(id)
         }
         runCatching {
@@ -249,9 +299,11 @@ class VaultManager(
     }
 
     suspend fun clearAllActiveItemsImmediate(): Unit = withContext(Dispatchers.IO) {
-        val existing = vaultDao.getActiveOldestFirst()
+        // Only clear temporary active items; permanent Screen Recordings stay untouched
+        val existing = vaultDao.getTemporaryActiveOldestFirst()
         existing.forEach { item ->
             runCatching { File(item.filePath).delete() }
+            item.thumbnailPath?.let { tp -> runCatching { File(tp).delete() } }
             vaultDao.deleteById(item.id)
             runCatching {
                 WorkManager.getInstance(context).cancelUniqueWork("vault_expire_${item.id}")
@@ -284,6 +336,7 @@ class VaultManager(
         val readyToPurge = vaultDao.findReadyToPurge(now)
         readyToPurge.forEach { item ->
             runCatching { File(item.filePath).delete() }
+            item.thumbnailPath?.let { tp -> runCatching { File(tp).delete() } }
             vaultDao.deleteById(item.id)
         }
     }
@@ -373,26 +426,45 @@ class VaultManager(
     suspend fun saveItemToGallery(item: VaultItemEntity): Boolean = withContext(Dispatchers.IO) {
         val src = File(item.filePath)
         if (!src.exists()) return@withContext false
+        val isVideo = item.mimeType.startsWith("video/", ignoreCase = true) ||
+            item.sourceType == "SCREEN_RECORDING" ||
+            item.displayName.endsWith(".mp4", ignoreCase = true)
         runCatching {
-            val values = ContentValues().apply {
-                put(MediaStore.Images.Media.DISPLAY_NAME, item.displayName)
-                put(MediaStore.Images.Media.MIME_TYPE, item.mimeType.ifBlank { "image/jpeg" })
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/DynamicIsland")
-                    put(MediaStore.Images.Media.IS_PENDING, 1)
-                }
-            }
             val resolver = context.contentResolver
-            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return@withContext false
+            val uri = if (isVideo) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Video.Media.DISPLAY_NAME, item.displayName)
+                    put(MediaStore.Video.Media.MIME_TYPE, item.mimeType.ifBlank { "video/mp4" })
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_MOVIES + "/DynamicIsland")
+                        put(MediaStore.Video.Media.IS_PENDING, 1)
+                    }
+                }
+                resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values) ?: return@withContext false
+            } else {
+                val values = ContentValues().apply {
+                    put(MediaStore.Images.Media.DISPLAY_NAME, item.displayName)
+                    put(MediaStore.Images.Media.MIME_TYPE, item.mimeType.ifBlank { "image/jpeg" })
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/DynamicIsland")
+                        put(MediaStore.Images.Media.IS_PENDING, 1)
+                    }
+                }
+                resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return@withContext false
+            }
             resolver.openOutputStream(uri)?.use { out ->
                 FileInputStream(src).use { input ->
                     input.copyTo(out)
                 }
             }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                values.clear()
-                values.put(MediaStore.Images.Media.IS_PENDING, 0)
-                resolver.update(uri, values, null, null)
+                val doneValues = ContentValues().apply {
+                    put(
+                        if (isVideo) MediaStore.Video.Media.IS_PENDING else MediaStore.Images.Media.IS_PENDING,
+                        0
+                    )
+                }
+                resolver.update(uri, doneValues, null, null)
             }
             true
         }.getOrDefault(false)

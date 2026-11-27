@@ -45,3 +45,9 @@
 # Optional MIUI / OEM reflection helpers
 -dontwarn android.os.SystemProperties
 -dontwarn android.hardware.camera2.**
+
+# Offline QR Generator (ZXing) & Baseline ProfileInstaller
+-keep class com.google.zxing.** { *; }
+-dontwarn com.google.zxing.**
+-keep class androidx.profileinstaller.** { *; }
+-dontwarn androidx.profileinstaller.**

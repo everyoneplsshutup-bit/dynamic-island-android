@@ -86,10 +86,25 @@ class PrivacyOpsMonitor(
 
     private fun publish() {
         val camOn = activeCameraIds.isNotEmpty()
+        val fgPkg = islandController.state.value.currentForegroundPackage
+        val fgLabel = fgPkg?.let { pkg ->
+            runCatching {
+                val ai = context.packageManager.getApplicationInfo(pkg, 0)
+                context.packageManager.getApplicationLabel(ai).toString().trim()
+            }.getOrNull()?.takeIf { it.isNotBlank() }
+        }
         val apps = buildList {
-            if (camOn) add("Camera in use")
+            if (camOn) {
+                add(if (fgLabel != null) "Camera · $fgLabel" else "Camera in use")
+            }
             if (micActive) {
-                if (micApps.isNotEmpty()) addAll(micApps) else add("Microphone active")
+                if (fgLabel != null) {
+                    add("Microphone · $fgLabel")
+                } else if (micApps.isNotEmpty()) {
+                    addAll(micApps)
+                } else {
+                    add("Microphone active")
+                }
             }
         }
         islandController.updatePrivacyIndicator(

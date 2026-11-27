@@ -128,6 +128,8 @@ dependencies {
   implementation(libs.kotlinx.serialization.json)
   // implementation(libs.haze)
   implementation(libs.kyant.backdrop)
+  implementation(libs.zxing.core)
+  implementation(libs.androidx.profileinstaller)
   // implementation(libs.converter.moshi)
   // implementation(libs.firebase.ai)
   // Uncomment to use Firestore:

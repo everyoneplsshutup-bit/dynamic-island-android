@@ -1,6 +1,7 @@
 package com.example.island
 
 import android.app.PendingIntent
+import android.app.RemoteInput
 import android.graphics.Bitmap
 import android.graphics.Rect
 import com.example.system.IslandTab
@@ -40,6 +41,7 @@ data class NotificationActionItem(
 object NotificationMediaCache {
     private val pictureBitmaps = ConcurrentHashMap<String, Bitmap>()
     private val contentIntents = ConcurrentHashMap<String, PendingIntent>()
+    private val replyActions = ConcurrentHashMap<String, Pair<RemoteInput, PendingIntent>>()
 
     fun putPicture(notifId: String, bitmap: Bitmap?) {
         if (bitmap == null) {
@@ -68,14 +70,29 @@ object NotificationMediaCache {
 
     fun getContentIntent(notifId: String): PendingIntent? = contentIntents[notifId]
 
+    fun putReplyAction(notifId: String, pair: Pair<RemoteInput, PendingIntent>?) {
+        if (pair == null) replyActions.remove(notifId)
+        else {
+            if (replyActions.size > 32) {
+                val oldest = replyActions.keys().nextElement()
+                replyActions.remove(oldest)
+            }
+            replyActions[notifId] = pair
+        }
+    }
+
+    fun getReplyAction(notifId: String): Pair<RemoteInput, PendingIntent>? = replyActions[notifId]
+
     fun remove(notifId: String) {
         pictureBitmaps.remove(notifId)
         contentIntents.remove(notifId)
+        replyActions.remove(notifId)
     }
 
     fun clear() {
         pictureBitmaps.clear()
         contentIntents.clear()
+        replyActions.clear()
     }
 }
 
@@ -173,7 +190,8 @@ sealed interface IslandActivity {
         val isCharging: Boolean,
         val isFull: Boolean,
         val wattageWatts: Float? = null,
-        val pluggedLabel: String = "Fast AC"
+        val pluggedLabel: String = "Fast AC",
+        val chargeEtaMinutes: Int? = null
     ) : IslandActivity
 
     data class NotificationPreview(
@@ -185,7 +203,11 @@ sealed interface IslandActivity {
         val title: String,
         val text: String,
         val hasPicture: Boolean = false,
-        val actions: List<NotificationActionItem> = emptyList()
+        val actions: List<NotificationActionItem> = emptyList(),
+        val otpCode: String? = null,
+        val channelId: String? = null,
+        val hasReplyAction: Boolean = false,
+        val accentArgb: Int? = null
     ) : IslandActivity
 
     data class Alert(
@@ -241,11 +263,9 @@ data class IslandState(
     val isFlashlightCardOpen: Boolean = false,
     val pullDownProgress: Float = 0f,
     val promotedPrimaryId: String? = null,
-    val isFloatingSidebarOpen: Boolean = false,
     val isDeviceLocked: Boolean = false,
     val isCalibrationPreview: Boolean = false,
     val isDragOverIsland: Boolean = false,
-    val activeFloatingMiniTab: IslandTab? = null,
     val needsKeyboardFocus: Boolean = false,
     val statusBanner: String? = null,
     val batteryLevelPercent: Int = 100,
@@ -258,8 +278,8 @@ data class IslandState(
     val diagnostics: DiagnosticsSnapshot = DiagnosticsSnapshot(),
     val privacyIndicator: PrivacyIndicatorState = PrivacyIndicatorState(),
     val isScreenRecording: Boolean = false,
-    val isMochiMenuOpen: Boolean = false,
-    val mochiJumpTrigger: Int = 0,
+    val isLandscapeQuiet: Boolean = false,
+    val pendingAutoRotateSuggestion: Int? = null,
     val dwellTargetActivityId: String? = null,
     val dwellTotalMs: Long = 0L,
     val dwellRemainingMs: Long = 0L,

@@ -16,7 +16,6 @@ import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.toBitmap
-import com.example.floating.FloatingWindowManager
 import com.example.notes.NoteDao
 import com.example.notes.NoteEntity
 import com.example.system.CalculatorEngine
@@ -52,8 +51,7 @@ data class SearchResults(
 
 class SearchEngine(
     private val context: Context,
-    private val noteDao: NoteDao,
-    private val floatingWindowManager: FloatingWindowManager
+    private val noteDao: NoteDao
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val iconCache = object : LruCache<String, ImageBitmap>(180) {}
@@ -212,7 +210,7 @@ class SearchEngine(
         runCatching { context.startActivity(intent) }
     }
 
-    fun launchWebSearch(query: String, preferFloating: Boolean = false) {
+    fun launchWebSearch(query: String, @Suppress("UNUSED_PARAMETER") preferFloating: Boolean = false) {
         val trimmed = query.trim()
         if (trimmed.isEmpty()) return
 
@@ -241,11 +239,6 @@ class SearchEngine(
             }
             webSearchIntent.resolveActivity(pm) != null -> webSearchIntent
             else -> browserIntent
-        }
-
-        if (preferFloating) {
-            floatingWindowManager.launchIntentFloatingOrFallback(targetIntent)
-            return
         }
 
         val directResult = runCatching { context.startActivity(targetIntent) }

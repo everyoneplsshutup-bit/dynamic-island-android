@@ -43,6 +43,15 @@ data class SavedLinkEntity(
     val createdAt: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "tasks")
+data class TaskEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val title: String,
+    val isDone: Boolean = false,
+    val dueTimeMs: Long? = null,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
 @Dao
 interface NoteDao {
     @Query("SELECT * FROM notes ORDER BY isPinned DESC, updatedAt DESC")
@@ -106,5 +115,23 @@ interface SavedLinkDao {
     suspend fun deleteById(id: Long)
 
     @Query("DELETE FROM saved_links")
+    suspend fun clearAll()
+}
+
+@Dao
+interface TaskDao {
+    @Query("SELECT * FROM tasks ORDER BY isDone ASC, createdAt DESC")
+    fun observeAll(): Flow<List<TaskEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsert(task: TaskEntity): Long
+
+    @Query("UPDATE tasks SET isDone = :done WHERE id = :id")
+    suspend fun toggleDone(id: Long, done: Boolean)
+
+    @Query("DELETE FROM tasks WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM tasks")
     suspend fun clearAll()
 }

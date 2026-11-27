@@ -13,6 +13,9 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import com.example.island.OcrSelectionState
 import com.example.island.OcrTextToken
+import java.text.BreakIterator
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.hypot
 
 sealed interface TierAResult {
@@ -42,6 +45,13 @@ sealed interface TierAResult {
  */
 object TierAAccessibilityReader {
 
+    @Volatile
+    private var selectionChangedSignal: CompletableDeferred<Unit>? = null
+
+    fun onTextSelectionChanged() {
+        selectionChangedSignal?.complete(Unit)
+    }
+
     private data class CandidateNode(
         val node: AccessibilityNodeInfo,
         val text: String?,
@@ -51,7 +61,7 @@ object TierAAccessibilityReader {
         val depth: Int
     )
 
-    fun readNodeAtPoint(
+    suspend fun readNodeAtPointAsync(
         service: AccessibilityService?,
         screenReadingAllowed: Boolean,
         x: Int,
@@ -65,7 +75,52 @@ object TierAAccessibilityReader {
         if (service == null) {
             return TierAResult.NoText(null)
         }
+        val collected = collectCandidateState(service, x, y, ownPackageName, context)
+            ?: return TierAResult.NoText(null)
+        if (collected.hitSensitive) return TierAResult.Refused("Refused: protected password or sensitive screen")
+        if (collected.hitWebView != null) return TierAResult.NoText(collected.hitWebView)
+        val chosen = collected.chosen ?: return TierAResult.NoText(collected.smallestBounds)
+        val extracted = chosen.text ?: chosen.contentDesc ?: return TierAResult.NoText(chosen.bounds)
+        val charRects = if (chosen.text != null) queryCharacterLocations(chosen.node, extracted) else null
 
+        if (chosen.text != null && (chosen.node.isTextSelectable || chosen.node.isEditable)) {
+            val delegated = delegateSelectionSuspend(
+                node = chosen.node,
+                text = extracted,
+                bounds = chosen.bounds,
+                charLocations = charRects,
+                tapX = x,
+                tapY = y,
+                context = context
+            )
+            if (delegated != null) return delegated
+        }
+
+        val selectionState = buildSelectionState(
+            text = extracted,
+            bounds = chosen.bounds,
+            tapX = x,
+            tapY = y,
+            charLocations = charRects,
+            isFromTierB = false
+        )
+        return TierAResult.TextFound(extracted, chosen.bounds, selectionState)
+    }
+
+    private data class CollectionResult(
+        val hitSensitive: Boolean = false,
+        val hitWebView: Rect? = null,
+        val smallestBounds: Rect? = null,
+        val chosen: CandidateNode? = null
+    )
+
+    private fun collectCandidateState(
+        service: AccessibilityService,
+        x: Int,
+        y: Int,
+        ownPackageName: String,
+        context: Context?
+    ): CollectionResult? {
         val dm = (context ?: service).resources.displayMetrics
         val screenW = dm.widthPixels.coerceAtLeast(360)
         val screenH = dm.heightPixels.coerceAtLeast(640)
@@ -86,23 +141,30 @@ object TierAAccessibilityReader {
         }
 
         if (targetRoots.isEmpty()) {
-            val activeRoot = runCatching { service.rootInActiveWindow }.getOrNull()
-                ?: return TierAResult.NoText(null)
+            val activeRoot = runCatching { service.rootInActiveWindow }.getOrNull() ?: return null
             targetRoots.add(activeRoot)
         }
 
         val candidates = mutableListOf<CandidateNode>()
         var hitSensitive = false
+        var hitWebViewRect: Rect? = null
         var smallestBounds: Rect? = null
         var smallestArea = Long.MAX_VALUE
 
         fun visit(node: AccessibilityNodeInfo, depth: Int) {
+            runCatching { node.refresh() }
             val rect = Rect()
             node.getBoundsInScreen(rect)
             if (!rect.contains(x, y)) return
 
             if (isSensitiveOrPassword(node)) {
                 hitSensitive = true
+                return
+            }
+
+            val className = node.className?.toString().orEmpty()
+            if (className == "android.webkit.WebView" || className.endsWith(".WebView")) {
+                hitWebViewRect = Rect(rect)
                 return
             }
 
@@ -113,7 +175,6 @@ object TierAAccessibilityReader {
             }
 
             val text = node.text?.toString()?.trim()?.takeIf { it.isNotEmpty() }
-            val className = node.className?.toString().orEmpty()
             val isTextWidget = className.endsWith("TextView") ||
                 className.endsWith("EditText") ||
                 className.endsWith("Button")
@@ -143,33 +204,46 @@ object TierAAccessibilityReader {
             for (i in 0 until node.childCount) {
                 val child = node.getChild(i) ?: continue
                 visit(child, depth + 1)
-                if (hitSensitive) return
+                if (hitSensitive || hitWebViewRect != null) return
             }
         }
 
         for (root in targetRoots) {
             if (root.packageName?.toString() == ownPackageName && targetRoots.size > 1) continue
             visit(root, 0)
-            if (hitSensitive) {
-                return TierAResult.Refused("Refused: protected password or sensitive screen")
-            }
+            if (hitSensitive) return CollectionResult(hitSensitive = true)
+            if (hitWebViewRect != null) return CollectionResult(hitWebView = hitWebViewRect)
             if (candidates.isNotEmpty()) break
-        }
-
-        if (candidates.isEmpty()) {
-            return TierAResult.NoText(smallestBounds)
         }
 
         val withText = candidates.filter { it.text != null }
         val chosen = (if (withText.isNotEmpty()) withText else candidates)
-            .minWithOrNull(compareBy<CandidateNode> { it.area }.thenByDescending { it.depth })!!
+            .minWithOrNull(compareBy<CandidateNode> { it.area }.thenByDescending { it.depth })
+        return CollectionResult(smallestBounds = smallestBounds, chosen = chosen)
+    }
 
+    fun readNodeAtPoint(
+        service: AccessibilityService?,
+        screenReadingAllowed: Boolean,
+        x: Int,
+        y: Int,
+        ownPackageName: String,
+        context: Context? = service
+    ): TierAResult {
+        if (!screenReadingAllowed) {
+            return TierAResult.Refused("Screen reading is OFF in Privacy Settings")
+        }
+        if (service == null) {
+            return TierAResult.NoText(null)
+        }
+        val collected = collectCandidateState(service, x, y, ownPackageName, context)
+            ?: return TierAResult.NoText(null)
+        if (collected.hitSensitive) return TierAResult.Refused("Refused: protected password or sensitive screen")
+        if (collected.hitWebView != null) return TierAResult.NoText(collected.hitWebView)
+        val chosen = collected.chosen ?: return TierAResult.NoText(collected.smallestBounds)
         val extracted = chosen.text ?: chosen.contentDesc ?: return TierAResult.NoText(chosen.bounds)
-        val charRects = if (chosen.text != null) {
-            queryCharacterLocations(chosen.node, extracted)
-        } else null
+        val charRects = if (chosen.text != null) queryCharacterLocations(chosen.node, extracted) else null
 
-        // Path A: Try native host selection delegation when the leaf node supports text selection
         if (chosen.text != null && (chosen.node.isTextSelectable || chosen.node.isEditable)) {
             val delegated = tryNativeDelegateSelection(
                 node = chosen.node,
@@ -180,9 +254,7 @@ object TierAAccessibilityReader {
                 tapY = y,
                 context = context
             )
-            if (delegated != null) {
-                return delegated
-            }
+            if (delegated != null) return delegated
         }
 
         val selectionState = buildSelectionState(
@@ -201,6 +273,65 @@ object TierAAccessibilityReader {
      * Returns DelegatedToHost ONLY if performAction() returned true and a valid non-empty
      * substring slice was obtained; otherwise returns null so caller falls back cleanly.
      */
+    suspend fun delegateSelectionSuspend(
+        node: AccessibilityNodeInfo,
+        text: String,
+        bounds: Rect,
+        charLocations: Array<RectF>?,
+        tapX: Int,
+        tapY: Int,
+        context: Context?
+    ): TierAResult.DelegatedToHost? {
+        if (text.isEmpty()) return null
+        val (wordStart, wordEnd) = SelectionCoordinateMapper.computeCharIndexAtPoint(
+            text = text,
+            nodeBounds = bounds,
+            charLocations = charLocations,
+            tapX = tapX,
+            tapY = tapY
+        )
+
+        val setSelectionArgs = Bundle().apply {
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, wordStart)
+            putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, wordEnd)
+        }
+
+        val signal = CompletableDeferred<Unit>()
+        selectionChangedSignal = signal
+        val actionAccepted = runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, Bundle.EMPTY)
+            }
+            val setOk = node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, setSelectionArgs)
+            if (setOk) true else node.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)
+        }.getOrDefault(false)
+
+        if (!actionAccepted) {
+            selectionChangedSignal = null
+            return null
+        }
+
+        withTimeoutOrNull(300L) { signal.await() }
+        selectionChangedSignal = null
+        runCatching { node.refresh() }
+        val selStart = node.textSelectionStart
+        val selEnd = node.textSelectionEnd
+        if (selStart < 0 || selEnd <= selStart || selEnd > text.length) {
+            return null
+        }
+
+        val slice = text.substring(selStart, selEnd).trim()
+        if (slice.isEmpty()) return null
+
+        if (context != null) {
+            runCatching {
+                val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+                cm?.setPrimaryClip(ClipData.newPlainText("Selected text", slice))
+            }
+        }
+        return TierAResult.DelegatedToHost(bounds = bounds, copiedText = slice)
+    }
+
     fun tryNativeDelegateSelection(
         node: AccessibilityNodeInfo,
         text: String,
@@ -283,10 +414,20 @@ object TierAAccessibilityReader {
         isFromTierB: Boolean = false
     ): OcrSelectionState {
         val safeBounds = if (bounds.isEmpty) Rect(tapX - 120, tapY - 30, tapX + 120, tapY + 30) else bounds
-        val tokenRegex = Regex("""\S+""")
-        val matches = tokenRegex.findAll(text).toList()
+        val iterator = BreakIterator.getWordInstance().apply { setText(text) }
+        val wordSpans = mutableListOf<IntRange>()
+        var start = iterator.first()
+        var end = iterator.next()
+        while (end != BreakIterator.DONE) {
+            val slice = text.substring(start, end)
+            if (slice.any { !it.isWhitespace() }) {
+                wordSpans.add(start until end)
+            }
+            start = end
+            end = iterator.next()
+        }
 
-        val tokens = if (matches.isEmpty()) {
+        val tokens = if (wordSpans.isEmpty()) {
             listOf(
                 OcrTextToken(
                     text = text,
@@ -311,9 +452,10 @@ object TierAAccessibilityReader {
                 running += rawLines[li].length + 1
             }
 
-            matches.map { match ->
-                val sIdx = match.range.first
-                val eIdx = match.range.last + 1
+            wordSpans.map { span ->
+                val sIdx = span.first
+                val eIdx = span.last + 1
+                val word = text.substring(sIdx, eIdx)
 
                 val exactRect: Rect? = if (charLocations != null && sIdx < charLocations.size) {
                     val lastLocIdx = (eIdx - 1).coerceAtMost(charLocations.lastIndex)
@@ -335,7 +477,7 @@ object TierAAccessibilityReader {
 
                 if (exactRect != null) {
                     OcrTextToken(
-                        text = match.value,
+                        text = word,
                         startChar = sIdx,
                         endChar = eIdx,
                         leftPx = exactRect.left,
@@ -358,7 +500,7 @@ object TierAAccessibilityReader {
                     val tokLeft = safeBounds.left + (width * lFrac).toInt()
                     val tokRight = (safeBounds.left + (width * rFrac).toInt()).coerceAtLeast(tokLeft + 18)
                     OcrTextToken(
-                        text = match.value,
+                        text = word,
                         startChar = sIdx,
                         endChar = eIdx,
                         leftPx = tokLeft,
@@ -370,8 +512,10 @@ object TierAAccessibilityReader {
             }
         }
 
+        val avgLineH = tokens.map { (it.bottomPx - it.topPx).coerceAtLeast(18) }.average().toInt().coerceAtLeast(24)
+        val lineTol = (avgLineH * 0.5f).toInt().coerceAtLeast(12)
         val hitIdx = tokens.indexOfFirst { tok ->
-            tapX in (tok.leftPx - 12)..(tok.rightPx + 12) && tapY in (tok.topPx - 18)..(tok.bottomPx + 18)
+            tapX in (tok.leftPx - 12)..(tok.rightPx + 12) && tapY in (tok.topPx - lineTol)..(tok.bottomPx + lineTol)
         }.takeIf { it >= 0 } ?: tokens.indices.minByOrNull { idx ->
             val tok = tokens[idx]
             val cx = (tok.leftPx + tok.rightPx) / 2.0

@@ -41,12 +41,14 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.AttachFile
 import androidx.compose.material.icons.filled.CalendarToday
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Crop
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Mic
@@ -60,6 +62,7 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -96,12 +99,14 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.rememberAsyncImagePainter
 import com.example.DynamicIslandApp
 import com.example.notes.NoteEntity
+import com.example.notes.TaskEntity
 import com.example.notifications.OtpExtractor
 import com.example.system.IslandSettings
 import com.example.system.TimerEngine
@@ -129,12 +134,14 @@ fun NotesTabScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val notes by app.database.noteDao().observeAll().collectAsState(initial = emptyList())
+    val tasks by app.database.taskDao().observeAll().collectAsState(initial = emptyList())
     val clips by app.clipboardMonitor.historyFlow.collectAsState(initial = emptyList())
     val memos by app.voiceMemoManager.memosFlow.collectAsState(initial = emptyList())
     val memoState by app.voiceMemoManager.uiState.collectAsState()
 
-    var filterMode by remember { mutableIntStateOf(0) } // 0=Notes, 1=Clips, 2=Memos
+    var filterMode by remember { mutableIntStateOf(0) } // 0=Notes, 1=Clips, 2=Memos, 3=Tasks
     var searchQuery by remember { mutableStateOf("") }
+    var taskDraft by remember { mutableStateOf("") }
     var editingNote by remember { mutableStateOf<NoteEntity?>(null) }
     var showNoteDialog by remember { mutableStateOf(false) }
     var showOverflow by remember { mutableStateOf(false) }
@@ -156,6 +163,10 @@ fun NotesTabScreen(
     val filteredClips = remember(clips, searchQuery) {
         val q = searchQuery.trim()
         if (q.isEmpty()) clips else clips.filter { it.content.contains(q, ignoreCase = true) }
+    }
+    val filteredTasks = remember(tasks, searchQuery) {
+        val q = searchQuery.trim()
+        if (q.isEmpty()) tasks else tasks.filter { it.title.contains(q, ignoreCase = true) }
     }
 
     ObsidianCrimsonBackground(modifier = modifier) {
@@ -251,7 +262,8 @@ fun NotesTabScreen(
                     listOf(
                         "Notes (${notes.size})",
                         "Clips (${clips.size})",
-                        "Memos (${memos.size})"
+                        "Memos (${memos.size})",
+                        "Tasks (${tasks.size})"
                     ).forEachIndexed { idx, label ->
                         val active = filterMode == idx
                         Box(
@@ -440,6 +452,79 @@ fun NotesTabScreen(
                                         }
                                         IconButton(onClick = { app.clipboardMonitor.deleteClip(clip.id) }) {
                                             Icon(Icons.Filled.DeleteOutline, contentDescription = "Delete", tint = IslandColors.TextSecondary)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                3 -> {
+                    LazyColumn(
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 140.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        item {
+                            ObsidianGlassCard {
+                                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    OutlinedTextField(
+                                        value = taskDraft,
+                                        onValueChange = { taskDraft = it },
+                                        placeholder = { Text("New persistent task…", color = IslandColors.TextSecondary) },
+                                        singleLine = true,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                    CrimsonPillButton(
+                                        text = "Add",
+                                        onClick = {
+                                            val clean = taskDraft.trim()
+                                            if (clean.isNotEmpty()) {
+                                                app.soundManager.playTap()
+                                                taskDraft = ""
+                                                scope.launch { app.database.taskDao().upsert(TaskEntity(title = clean)) }
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+                        if (filteredTasks.isEmpty()) {
+                            item {
+                                Text(
+                                    "No tasks yet. Add a quick checklist item above.",
+                                    color = IslandColors.TextSecondary,
+                                    modifier = Modifier.padding(16.dp)
+                                )
+                            }
+                        } else {
+                            items(filteredTasks, key = { "task_${it.id}" }) { task ->
+                                ObsidianGlassCard(onClick = {
+                                    app.soundManager.playToggle(!task.isDone)
+                                    scope.launch { app.database.taskDao().toggleDone(task.id, !task.isDone) }
+                                }) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            contentAlignment = Alignment.Center,
+                                            modifier = Modifier
+                                                .size(22.dp)
+                                                .clip(CircleShape)
+                                                .background(if (task.isDone) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                                .border(1.5.dp, if (task.isDone) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.4f), CircleShape)
+                                        ) {
+                                            if (task.isDone) Icon(Icons.Filled.Check, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                                        }
+                                        Spacer(Modifier.width(12.dp))
+                                        Text(
+                                            text = task.title,
+                                            color = if (task.isDone) IslandColors.TextTertiary else Color.White,
+                                            fontSize = 14.sp,
+                                            textDecoration = if (task.isDone) TextDecoration.LineThrough else null,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                        IconButton(onClick = { scope.launch { app.database.taskDao().deleteById(task.id) } }) {
+                                            Icon(Icons.Filled.DeleteOutline, contentDescription = "Delete task", tint = IslandColors.TextSecondary)
                                         }
                                     }
                                 }
@@ -924,6 +1009,7 @@ fun ShelfTabScreen(
     var filterTab by remember { mutableIntStateOf(0) } // 0=Photos/All, 1=Screenshots, 2=Trash
     var selectedItemId by remember { mutableStateOf<Long?>(null) }
     var cropTargetItem by remember { mutableStateOf<VaultItemEntity?>(null) }
+    var renameTargetItem by remember { mutableStateOf<VaultItemEntity?>(null) }
     var showMenu by remember { mutableStateOf(false) }
 
     var nowMs by remember { mutableLongStateOf(System.currentTimeMillis()) }
@@ -1115,7 +1201,13 @@ fun ShelfTabScreen(
                 ) {
                     items(displayed, key = { it.id }) { item ->
                         val isSelected = selectedItem?.id == item.id
+                        val isVideo = item.isPermanent ||
+                            item.sourceType == "SCREEN_RECORDING" ||
+                            item.mimeType.startsWith("video/", ignoreCase = true)
                         val remMs = (item.expiresAt - nowMs).coerceAtLeast(0L)
+                        val previewFile = remember(item.thumbnailPath, item.filePath) {
+                            item.thumbnailPath?.takeIf { File(it).exists() }?.let { File(it) } ?: File(item.filePath)
+                        }
                         Box(
                             modifier = Modifier
                                 .aspectRatio(1f)
@@ -1129,13 +1221,27 @@ fun ShelfTabScreen(
                                 .clickable { selectedItemId = item.id }
                         ) {
                             Image(
-                                painter = rememberAsyncImagePainter(model = File(item.filePath)),
+                                painter = rememberAsyncImagePainter(model = previewFile),
                                 contentDescription = item.displayName,
                                 contentScale = ContentScale.Crop,
                                 modifier = Modifier.fillMaxSize()
                             )
 
-                            if (!item.isTrashed) {
+                            if (isVideo) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier
+                                        .align(Alignment.TopStart)
+                                        .padding(6.dp)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color(0xC8000000))
+                                        .padding(horizontal = 5.dp, vertical = 2.dp)
+                                ) {
+                                    Icon(Icons.Filled.Videocam, contentDescription = null, tint = IslandColors.AccentRed, modifier = Modifier.size(12.dp))
+                                    Spacer(Modifier.width(3.dp))
+                                    Text("Saved", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                            } else if (!item.isTrashed) {
                                 Text(
                                     text = TimerEngine.formatDuration(remMs),
                                     color = if (remMs < 120_000L) IslandColors.AccentAmber else Color.White,
@@ -1170,10 +1276,13 @@ fun ShelfTabScreen(
                 }
             }
 
-            // Bottom Action Bar matching Shelf mockup (Attach + Save to Gallery / Restore / Crop) - NO Share button!
+            // Bottom Action Bar matching Shelf mockup (Attach + Save / Restore / Crop; Play/Rename/Save/Delete for Videos) - NO Share button!
             if (selectedItem != null) {
+                val selectedIsVideo = selectedItem.isPermanent ||
+                    selectedItem.sourceType == "SCREEN_RECORDING" ||
+                    selectedItem.mimeType.startsWith("video/", ignoreCase = true)
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 104.dp)
@@ -1187,6 +1296,50 @@ fun ShelfTabScreen(
                         )
                         ObsidianPillButton(
                             text = "Purge",
+                            icon = Icons.Filled.DeleteOutline,
+                            onClick = { scope.launch { app.vaultManager.purgeItemNow(selectedItem.id) } },
+                            modifier = Modifier.weight(1f)
+                        )
+                    } else if (selectedIsVideo) {
+                        CrimsonPillButton(
+                            text = "Play",
+                            icon = Icons.Filled.PlayArrow,
+                            onClick = {
+                                val uri = app.vaultManager.getFileProviderUri(selectedItem)
+                                if (uri != null) {
+                                    val playIntent = Intent(Intent.ACTION_VIEW)
+                                        .setDataAndType(uri, "video/mp4")
+                                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    runCatching { context.startActivity(playIntent) }
+                                } else {
+                                    Toast.makeText(context, "Recording file missing", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        ObsidianPillButton(
+                            text = "Rename",
+                            icon = Icons.Filled.Edit,
+                            onClick = { renameTargetItem = selectedItem },
+                            modifier = Modifier.weight(1f)
+                        )
+                        ObsidianPillButton(
+                            text = "Save",
+                            icon = Icons.Filled.Download,
+                            onClick = {
+                                scope.launch {
+                                    val ok = app.vaultManager.saveItemToGallery(selectedItem)
+                                    Toast.makeText(
+                                        context,
+                                        if (ok) "Saved to Movies/DynamicIsland" else "Could not export video",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                }
+                            },
+                            modifier = Modifier.weight(0.95f)
+                        )
+                        ObsidianPillButton(
+                            text = "Delete",
                             icon = Icons.Filled.DeleteOutline,
                             onClick = { scope.launch { app.vaultManager.purgeItemNow(selectedItem.id) } },
                             modifier = Modifier.weight(1f)
@@ -1228,6 +1381,42 @@ fun ShelfTabScreen(
                 Spacer(Modifier.height(104.dp))
             }
         }
+    }
+
+    if (renameTargetItem != null) {
+        val target = renameTargetItem!!
+        var nameDraft by remember(target.id) { mutableStateOf(target.displayName) }
+        AlertDialog(
+            onDismissRequest = { renameTargetItem = null },
+            containerColor = IslandColors.ObsidianCardElevated,
+            titleContentColor = Color.White,
+            textContentColor = Color.White,
+            title = { Text("Rename Recording") },
+            text = {
+                OutlinedTextField(
+                    value = nameDraft,
+                    onValueChange = { nameDraft = it },
+                    label = { Text("Recording name") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val cleaned = nameDraft.trim()
+                        renameTargetItem = null
+                        if (cleaned.isNotEmpty()) {
+                            scope.launch { app.vaultManager.renameItem(target.id, cleaned) }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) { Text("Save") }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameTargetItem = null }) { Text("Cancel") }
+            }
+        )
     }
 
     if (cropTargetItem != null) {

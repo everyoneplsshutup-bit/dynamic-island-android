@@ -80,12 +80,12 @@ object DeadZoneGeometry {
     const val LANDSCAPE_SLOT_HEIGHT_DP = 44f
     const val SCREEN_EDGE_MARGIN_DP = 12f
 
-    // Round 2 Roomy Card Bounds (fit inside screen width with >=12dp margin, top card, never squeezed)
+    // Round 4 §0 Card Bounds (369 dp hard cap = 393 - 24 dp)
     const val MEDIUM_MIN_WIDTH_DP = 340f
     const val MEDIUM_MIN_HEIGHT_DP = 170f
-    const val MEDIUM_MAX_WIDTH_DP = 380f
+    const val MEDIUM_MAX_WIDTH_DP = 360f
     const val MEDIUM_MAX_HEIGHT_DP = 240f
-    const val FULL_MAX_WIDTH_DP = 380f
+    const val FULL_MAX_WIDTH_DP = 369f
     const val FULL_MAX_HEIGHT_DP = 340f
 
     fun isCompactExpansionWithinCap(widthDp: Float, heightDp: Float, isExpanded: Boolean): Boolean {

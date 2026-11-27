@@ -60,7 +60,7 @@ object Build4Checklist {
             id = 8,
             area = "Quick Toggles, Keep Awake & Uncapped Sidebar",
             summary = "Keep Awake toggle wiring FLAG_KEEP_SCREEN_ON, compact Torch Beam card, Screenshot -> Shelf action, and uncapped curved 56/280 dp Floating Sidebar with unread badges.",
-            implementationRef = "QuickTogglesManager.kt, IslandToolsAndModules.kt (ToolsIslandPanel), FloatingSidebarOverlay.kt"
+            implementationRef = "QuickTogglesManager.kt, IslandToolsAndModules.kt (ToolsIslandPanel)"
         ),
         ChecklistEntry(
             id = 9,

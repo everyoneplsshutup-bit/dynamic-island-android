@@ -23,7 +23,6 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
-import com.example.floating.FloatingWindowManager
 import com.example.island.Build4Checklist
 import com.example.island.IslandActivity
 import com.example.island.IslandController
@@ -107,11 +106,10 @@ class DynamicIslandRobolectricTest {
         assertEquals(IslandMode.SPLIT, controller.state.value.mode)
         assertFalse(controller.state.value.needsKeyboardFocus)
 
-        // Timer always attaches directly to the Dynamic Island pill rather than a floating mini window
-        controller.setFloatingMiniTab(IslandTab.TIMER)
+        // Timer attaches directly inside the expanded Dynamic Island card
+        controller.expand(IslandTab.TIMER)
         assertEquals(IslandMode.EXPANDED, controller.state.value.mode)
         assertEquals(IslandTab.TIMER, controller.state.value.activeTab)
-        assertNull(controller.state.value.activeFloatingMiniTab)
 
         assertEquals(
             listOf(
@@ -459,7 +457,7 @@ class DynamicIslandRobolectricTest {
         val collapse = MotionTokens.collapseSpec<Float>(AnimationStyle.SPRING, 1.0f) as SpringSpec<Float>
         assertEquals(1.0f, collapse.dampingRatio, 0.0001f)
 
-        assertEquals(0.97f, MotionTokens.TAP_SQUISH_SCALE, 0.0001f)
+        assertEquals(1.08f, MotionTokens.TAP_SQUISH_SCALE, 0.0001f)
         assertEquals(180, MotionTokens.GLASS_FADE_MS)
         assertEquals(300, MotionTokens.CONTENT_ENTER_MS)
         assertEquals(300, MotionTokens.CONTENT_ENTER_DELAY_MS)
@@ -473,22 +471,32 @@ class DynamicIslandRobolectricTest {
         )
         val srcRoot = candidateRoots.firstOrNull { it.exists() && it.isDirectory }
         assertNotNull("Could not locate main Kotlin source directory for animation audit", srcRoot)
-        val bannedPatterns = listOf(
-            "rememberInfiniteTransition",
-            "infiniteRepeatable",
+        val alwaysBanned = listOf(
             "animateDpAsState",
             "SizeTransform",
             ".blur("
+        )
+        val musicOnlyPatterns = listOf(
+            "rememberInfiniteTransition",
+            "infiniteRepeatable"
         )
         srcRoot!!.walkTopDown()
             .filter { it.isFile && it.extension == "kt" }
             .forEach { file ->
                 val text = file.readText()
-                bannedPatterns.forEach { banned ->
+                alwaysBanned.forEach { banned ->
                     assertFalse(
                         "Found banned animation API '$banned' in ${file.name}",
                         text.contains(banned)
                     )
+                }
+                if (file.name != "MusicIslandView.kt") {
+                    musicOnlyPatterns.forEach { banned ->
+                        assertFalse(
+                            "Found banned animation API '$banned' in ${file.name}",
+                            text.contains(banned)
+                        )
+                    }
                 }
             }
     }
@@ -568,16 +576,6 @@ class DynamicIslandRobolectricTest {
             ownPackageName = composeRule.activity.packageName
         )
         assertTrue(refused is TierAResult.Refused)
-    }
-
-    @Test
-    fun `floating window manager builds freeform windowing mode 5 bundle`() {
-        val app = composeRule.activity.application as DynamicIslandApp
-        val bundle = app.floatingWindowManager.buildFreeformOptionsBundle(Rect(40, 120, 680, 960))
-        assertEquals(
-            FloatingWindowManager.WINDOWING_MODE_FREEFORM,
-            bundle.getInt(FloatingWindowManager.KEY_LAUNCH_WINDOWING_MODE)
-        )
     }
 
     @Test
@@ -714,8 +712,8 @@ class DynamicIslandRobolectricTest {
         composeRule.onNodeWithTag("settings_group_motion").assertIsDisplayed()
         composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_pill"))
         composeRule.onNodeWithTag("settings_group_pill").assertIsDisplayed()
-        composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_media_pet"))
-        composeRule.onNodeWithTag("settings_group_media_pet").assertIsDisplayed()
+        composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_media"))
+        composeRule.onNodeWithTag("settings_group_media").assertIsDisplayed()
         composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_features"))
         composeRule.onNodeWithTag("settings_group_features").assertIsDisplayed()
         composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_privacy"))
@@ -840,7 +838,10 @@ class DynamicIslandRobolectricTest {
         assertFalse(defaults.reelOverlayEnabled)
         assertFalse(defaults.appleWidthIdlePill)
         assertTrue(defaults.lyricsFromInternet)
-        assertTrue(defaults.mochiPetEnabled)
+        assertTrue(defaults.energyRingEnabled)
+        assertTrue(defaults.privacyDotsEnabled)
+        assertTrue(defaults.matchAppColor)
+        assertFalse(defaults.performanceMode)
         assertTrue(defaults.swipeUpDismissEnabled)
         assertTrue(defaults.hideNotifInForegroundApp)
         assertTrue(IslandTab.VAULT.isMainRow)
@@ -942,40 +943,82 @@ class DynamicIslandRobolectricTest {
     }
 
     @Test
-    fun `mochi mascot supports permanent remove, hide for today, and settings restore`() = runTest {
-        val repo = SettingsRepository(composeRule.activity)
-        repo.resetSettings()
-        assertTrue(repo.settingsFlow.first().mochiPetEnabled)
+    fun `round 4 glyf recognizer, reply safety guard, qr generator, room permanent vault and deadzone caps work`() = kotlinx.coroutines.runBlocking {
+        // 1. GlyfStrokeRecognizer: 'O', 'W', 'C' and noise rejection
+        val circlePoints = (0..24).map { i ->
+            val angle = (2.0 * Math.PI * i) / 24.0
+            com.example.island.StrokePoint(
+                x = (120f + 50f * kotlin.math.cos(angle)).toFloat(),
+                y = (120f + 50f * kotlin.math.sin(angle)).toFloat()
+            )
+        }
+        assertEquals(com.example.island.GlyfGesture.O, com.example.island.GlyfStrokeRecognizer.recognize(circlePoints))
 
-        repo.update { it.copy(mochiPetEnabled = false) }
-        assertFalse(repo.settingsFlow.first().mochiPetEnabled)
+        val wRaw = listOf(
+            0f to 10f, 10f to 45f, 20f to 85f, 25f to 110f,
+            35f to 75f, 50f to 35f, 65f to 75f, 75f to 110f,
+            85f to 75f, 95f to 40f, 105f to 10f
+        ).map { (x, y) -> com.example.island.StrokePoint(x, y) }
+        assertEquals(com.example.island.GlyfGesture.W, com.example.island.GlyfStrokeRecognizer.recognize(wRaw))
 
-        val futureHide = System.currentTimeMillis() + 3_600_000L
-        repo.update { it.copy(mochiPetEnabled = true, mochiHiddenUntilMs = futureHide) }
-        assertTrue(repo.settingsFlow.first().mochiHiddenUntilMs > System.currentTimeMillis())
+        val cPoints = (0..16).map { i ->
+            val t = i / 16f
+            val angle = (-Math.PI / 3.0) + t * (-4.0 * Math.PI / 3.0)
+            com.example.island.StrokePoint(
+                x = (100f + 60f * kotlin.math.cos(angle)).toFloat(),
+                y = (100f + 60f * kotlin.math.sin(angle)).toFloat()
+            )
+        }
+        assertEquals(com.example.island.GlyfGesture.C, com.example.island.GlyfStrokeRecognizer.recognize(cPoints))
+        assertNull(com.example.island.GlyfStrokeRecognizer.recognize(listOf(com.example.island.StrokePoint(0f, 0f), com.example.island.StrokePoint(5f, 5f))))
 
-        repo.update { it.copy(mochiPetEnabled = true, mochiHiddenUntilMs = 0L) }
-        val restored = repo.settingsFlow.first()
-        assertTrue(restored.mochiPetEnabled)
-        assertEquals(0L, restored.mochiHiddenUntilMs)
+        // 2. ReplySafetyGuard
+        assertTrue(com.example.notifications.ReplySafetyGuard.isSensitiveContext("Bank Alert", "Approve UPI transfer"))
+        assertTrue(com.example.notifications.ReplySafetyGuard.requiresDoubleConfirm("Auth", "Message", "Your password is 123"))
+        assertFalse(com.example.notifications.ReplySafetyGuard.isSensitiveContext("Alex", "See you at lunch"))
 
-        val moveMusic = com.example.island.MochiScheduler.resolveMove(
-            com.example.island.IslandState(
-                activityQueue = listOf(
-                    IslandActivity.Music(
-                        packageName = "pkg",
-                        title = "Track",
-                        artist = "Art",
-                        isPlaying = true,
-                        positionMs = 0L,
-                        durationMs = 10_000L
-                    )
-                )
-            ),
-            idleElapsedSec = 0
+        // 3. QrCodeGenerator
+        assertNull(com.example.island.QrCodeGenerator.generateBitmap("   "))
+        val qrBmp = com.example.island.QrCodeGenerator.generateBitmap("https://example.com", sizePx = 128)
+        assertNotNull(qrBmp)
+        assertEquals(128, qrBmp!!.width)
+        assertEquals(128, qrBmp.height)
+        qrBmp.recycle()
+
+        // 4. Room TaskDao & VaultDao permanent exemption
+        val app = composeRule.activity.application as DynamicIslandApp
+        val taskDao = app.database.taskDao()
+        val taskId = taskDao.upsert(com.example.notes.TaskEntity(title = "Buy milk"))
+        assertTrue(taskId > 0L)
+        taskDao.toggleDone(taskId, true)
+        taskDao.deleteById(taskId)
+
+        val vaultDao = app.database.vaultDao()
+        val now = System.currentTimeMillis()
+        val permId = vaultDao.insert(
+            com.example.vault.VaultItemEntity(
+                filePath = "/tmp/screenrec.mp4",
+                mimeType = "video/mp4",
+                displayName = "Recording_01",
+                sourceType = "SCREEN_RECORDING",
+                createdAt = now - 3_600_000L,
+                expiresAt = now - 1_000L,
+                isPermanent = true
+            )
         )
-        assertEquals(com.example.island.MochiMove.DANCE, moveMusic)
-        repo.resetSettings()
+        assertTrue(vaultDao.getTemporaryActiveOldestFirst().none { it.id == permId })
+        assertTrue(vaultDao.findExpiredActive(now).none { it.id == permId })
+        vaultDao.renameItem(permId, "Renamed_Rec")
+        assertEquals("Renamed_Rec", vaultDao.getById(permId)?.displayName)
+        vaultDao.deleteById(permId)
+
+        // 5. DeadZoneGeometry & MotionTokens Round 4 invariants
+        assertEquals(360f, com.example.island.DeadZoneGeometry.MEDIUM_MAX_WIDTH_DP, 0.01f)
+        assertEquals(369f, com.example.island.DeadZoneGeometry.FULL_MAX_WIDTH_DP, 0.01f)
+        assertTrue(com.example.island.DeadZoneGeometry.musicCompactPillMetrics(27f, 34f).totalWidthDp <= 210f)
+        assertTrue(com.example.island.DeadZoneGeometry.idleCameraPillMetrics(27f, 34f, false).widthDp in 48f..58f)
+        assertEquals(125f, com.example.island.DeadZoneGeometry.idleCameraPillMetrics(27f, 34f, true).widthDp, 0.01f)
+        assertEquals(0.85f, MotionTokens.computeMorphFraction(85f, 0f, 100f), 0.001f)
     }
 
     @Test

@@ -46,6 +46,8 @@ media3 = "1.11.1"
 mlkitTextRecognition = "16.0.1"
 workRuntimeKtx = "2.10.0"
 kotlinxSerializationJson = "1.8.0"
+zxingCore = "3.5.3"
+profileinstaller = "1.4.1"
 
 
 [libraries]
@@ -109,6 +111,8 @@ androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx"
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "kotlinxSerializationJson" }
 haze = { group = "dev.chrisbanes.haze", name = "haze", version.ref = "haze" }
 kyant-backdrop = { group = "io.github.kyant0", name = "backdrop", version.ref = "backdrop" }
+zxing-core = { group = "com.google.zxing", name = "core", version.ref = "zxingCore" }
+androidx-profileinstaller = { group = "androidx.profileinstaller", name = "profileinstaller", version.ref = "profileinstaller" }
 
 
 [plugins]

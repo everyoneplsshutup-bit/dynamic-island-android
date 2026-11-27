@@ -19,7 +19,9 @@ data class VaultItemEntity(
     val expiresAt: Long = System.currentTimeMillis() + VaultConstants.EXPIRY_MILLIS,
     val isTrashed: Boolean = false,
     val trashedAt: Long? = null,
-    val purgeAt: Long? = null
+    val purgeAt: Long? = null,
+    val isPermanent: Boolean = false,
+    val thumbnailPath: String? = null
 )
 
 object VaultConstants {
@@ -42,7 +44,10 @@ interface VaultDao {
     @Query("SELECT * FROM vault_items WHERE isTrashed = 0 ORDER BY createdAt ASC")
     suspend fun getActiveOldestFirst(): List<VaultItemEntity>
 
-    @Query("SELECT * FROM vault_items WHERE isTrashed = 0 AND expiresAt <= :now")
+    @Query("SELECT * FROM vault_items WHERE isTrashed = 0 AND isPermanent = 0 ORDER BY createdAt ASC")
+    suspend fun getTemporaryActiveOldestFirst(): List<VaultItemEntity>
+
+    @Query("SELECT * FROM vault_items WHERE isTrashed = 0 AND isPermanent = 0 AND expiresAt <= :now")
     suspend fun findExpiredActive(now: Long): List<VaultItemEntity>
 
     @Query("SELECT * FROM vault_items WHERE isTrashed = 1 AND purgeAt IS NOT NULL AND purgeAt <= :now")
@@ -59,6 +64,12 @@ interface VaultDao {
 
     @Query("UPDATE vault_items SET filePath = :filePath, mimeType = :mimeType WHERE id = :id")
     suspend fun updateFilePath(id: Long, filePath: String, mimeType: String)
+
+    @Query("UPDATE vault_items SET displayName = :displayName WHERE id = :id")
+    suspend fun renameItem(id: Long, displayName: String)
+
+    @Query("UPDATE vault_items SET thumbnailPath = :thumbnailPath WHERE id = :id")
+    suspend fun updateThumbnail(id: Long, thumbnailPath: String?)
 
     @Query("DELETE FROM vault_items WHERE id = :id")
     suspend fun deleteById(id: Long)

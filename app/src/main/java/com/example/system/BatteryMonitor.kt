@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.BatteryManager
+import android.os.Build
 import com.example.island.AlertKind
 import com.example.island.IslandActivity
 import com.example.island.IslandController
@@ -23,7 +24,8 @@ data class BatteryUiState(
     val isCharging: Boolean = false,
     val isFull: Boolean = false,
     val pluggedLabel: String = "Battery",
-    val wattageWatts: Float? = null
+    val wattageWatts: Float? = null,
+    val chargeEtaMinutes: Int? = null
 )
 
 class BatteryMonitor(
@@ -72,6 +74,7 @@ class BatteryMonitor(
                         pct = cur.levelPercent,
                         isFull = cur.isFull,
                         wattage = cur.wattageWatts,
+                        etaMinutes = cur.chargeEtaMinutes,
                         pluggedLabel = cur.pluggedLabel,
                         isFreshConnect = true
                     )
@@ -154,13 +157,32 @@ class BatteryMonitor(
             null
         }
 
+        val etaMinutes = if (isCharging && !isFull) {
+            val apiMs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                runCatching { batteryManager?.computeChargeTimeRemaining() ?: -1L }.getOrDefault(-1L)
+            } else {
+                -1L
+            }
+            if (apiMs > 0L) {
+                (apiMs / 60_000L).toInt().coerceIn(1, 600)
+            } else if (wattage != null && wattage > 0.5f) {
+                // Estimate against typical 5000 mAh / 19 Wh smartphone cell
+                (((100 - pct).coerceAtLeast(1) / 100f) * (19f / wattage) * 60f).toInt().coerceIn(1, 360)
+            } else {
+                null
+            }
+        } else {
+            null
+        }
+
         val lowWarningActive = !isCharging && pct <= 15
         _state.value = BatteryUiState(
             levelPercent = pct,
             isCharging = isCharging,
             isFull = isFull,
             pluggedLabel = pluggedLabel,
-            wattageWatts = wattage
+            wattageWatts = wattage,
+            chargeEtaMinutes = etaMinutes
         )
         islandController.updateBatteryTelemetry(
             levelPercent = pct,
@@ -176,9 +198,9 @@ class BatteryMonitor(
             shownLow15 = false
             shownLow10 = false
             if (wasCharging == false) {
-                emitChargingCapsule(pct, isFull, wattage, pluggedLabel, isFreshConnect = true)
+                emitChargingCapsule(pct, isFull, wattage, etaMinutes, pluggedLabel, isFreshConnect = true)
             } else if (islandController.state.value.activityQueue.any { it.id == "battery_charging" }) {
-                emitChargingCapsule(pct, isFull, wattage, pluggedLabel, isFreshConnect = false)
+                emitChargingCapsule(pct, isFull, wattage, etaMinutes, pluggedLabel, isFreshConnect = false)
             }
         } else {
             if (pct > 22) {
@@ -249,6 +271,7 @@ class BatteryMonitor(
         pct: Int,
         isFull: Boolean,
         wattage: Float?,
+        etaMinutes: Int?,
         pluggedLabel: String,
         isFreshConnect: Boolean
     ) {
@@ -262,7 +285,8 @@ class BatteryMonitor(
                 isCharging = true,
                 isFull = isFull,
                 wattageWatts = wattage,
-                pluggedLabel = pluggedLabel
+                pluggedLabel = pluggedLabel,
+                chargeEtaMinutes = etaMinutes
             ),
             autoShowCompact = isFreshConnect,
             autoDismissMs = if (isFreshConnect) capsuleDuration else null,
