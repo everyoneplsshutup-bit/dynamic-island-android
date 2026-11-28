@@ -14,7 +14,6 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,7 +28,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -38,15 +36,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.BrightnessHigh
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.DoNotDisturbOn
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Favorite
 import androidx.compose.material.icons.filled.FavoriteBorder
-import androidx.compose.material.icons.filled.FiberManualRecord
 import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.Layers
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -58,6 +55,7 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.filled.Straighten
 import androidx.compose.material.icons.filled.TextFields
 import androidx.compose.material.icons.filled.Timer
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -67,17 +65,14 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -88,20 +83,20 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.DynamicIslandApp
+import com.example.island.IslandActivity
 import com.example.ocr.MediaProjectionPromptActivity
 import com.example.ocr.OcrPrivacyGate
 import com.example.system.IslandSettings
@@ -132,14 +127,14 @@ fun ToolsTabScreen(
     val scope = rememberCoroutineScope()
     val toggleState by app.quickTogglesManager.state.collectAsState()
     val islandState by app.islandController.state.collectAsState()
-    val isScreenRecording = islandState.activityQueue.any { it is com.example.island.IslandActivity.ScreenRecording }
+    val isScreenRecording = islandState.activityQueue.any { it is IslandActivity.ScreenRecording }
     val audioMgr = remember(context) { context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager }
     val maxMusicVol = remember(audioMgr) { (audioMgr?.getStreamMaxVolume(AudioManager.STREAM_MUSIC) ?: 15).coerceAtLeast(1) }
     var mediaVolume by remember { mutableFloatStateOf((audioMgr?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: 8).toFloat()) }
     var showCompassDialog by remember { mutableStateOf(false) }
     var showLevelDialog by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
-    val settings by app.settingsRepository.settingsFlow.collectAsState(initial = IslandSettings())
+    val accent = MaterialTheme.colorScheme.primary
 
     ObsidianCrimsonBackground(modifier = modifier) {
         Column(
@@ -157,12 +152,12 @@ fun ToolsTabScreen(
                         IconButton(
                             onClick = { showMenu = true },
                             modifier = Modifier
-                                .size(44.dp)
+                                .size(46.dp)
                                 .clip(CircleShape)
-                                .background(IslandColors.ObsidianCard)
+                                .background(Color(0xD41B1D23))
                                 .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
                         ) {
-                            Icon(Icons.Filled.BrightnessHigh, contentDescription = "Tool permissions", tint = Color.White)
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Tool options", tint = Color.White)
                         }
                         DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
                             DropdownMenuItem(
@@ -195,13 +190,13 @@ fun ToolsTabScreen(
                 modifier = Modifier
                     .weight(1f)
                     .verticalScroll(rememberScrollState())
-                    .padding(start = 16.dp, end = 16.dp, bottom = 104.dp),
+                    .padding(start = 16.dp, end = 16.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
+                // Hero 2x3 Spacious Grid matching youtubers742-tools.png (no QR Gen / Glyf Pad)
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    ToolBentoTile(
+                    ToolHeroTile(
                         title = "Flashlight",
-                        subtitle = if (toggleState.isTorchOn) "Beam ON" else "Tap to toggle",
                         icon = Icons.Filled.FlashlightOn,
                         isActive = toggleState.isTorchOn,
                         onClick = {
@@ -210,13 +205,8 @@ fun ToolsTabScreen(
                         },
                         modifier = Modifier.weight(1f)
                     )
-                    ToolBentoTile(
+                    ToolHeroTile(
                         title = "Do Not Disturb",
-                        subtitle = when {
-                            !toggleState.hasDndPermission -> "Grant DND access"
-                            toggleState.isDndOn -> "Silenced"
-                            else -> "Normal alerts"
-                        },
                         icon = Icons.Filled.DoNotDisturbOn,
                         isActive = toggleState.isDndOn,
                         onClick = {
@@ -227,29 +217,23 @@ fun ToolsTabScreen(
                     )
                 }
 
-                if (toggleState.isTorchOn && toggleState.maxTorchStrength > 1) {
-                    ObsidianGlassCard(highlighted = true) {
-                        val accent = MaterialTheme.colorScheme.primary
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Torch Intensity", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                            Text("${toggleState.torchStrength} / ${toggleState.maxTorchStrength}", color = accent, fontSize = 12.sp)
-                        }
-                        Slider(
-                            value = toggleState.torchStrength.toFloat(),
-                            onValueChange = { app.quickTogglesManager.setTorchStrength(it.roundToInt()) },
-                            valueRange = 1f..toggleState.maxTorchStrength.toFloat(),
-                            colors = SliderDefaults.colors(
-                                thumbColor = accent,
-                                activeTrackColor = accent
-                            )
-                        )
-                    }
-                }
-
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    ToolBentoTile(
+                    ToolHeroTile(
+                        title = "Screen Recorder",
+                        icon = Icons.Filled.Videocam,
+                        isActive = isScreenRecording,
+                        onClick = {
+                            app.soundManager.playToggle(!isScreenRecording)
+                            if (isScreenRecording) {
+                                ScreenRecorderManager.stopRecording(context)
+                            } else {
+                                ScreenRecorderManager.startRecording(context)
+                            }
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    ToolHeroTile(
                         title = "Compass",
-                        subtitle = "Live magnetometer",
                         icon = Icons.Filled.Explore,
                         isActive = showCompassDialog,
                         onClick = {
@@ -258,9 +242,11 @@ fun ToolsTabScreen(
                         },
                         modifier = Modifier.weight(1f)
                     )
-                    ToolBentoTile(
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    ToolHeroTile(
                         title = "Level",
-                        subtitle = "2-axis tilt bubble",
                         icon = Icons.Filled.Straighten,
                         isActive = showLevelDialog,
                         onClick = {
@@ -269,23 +255,8 @@ fun ToolsTabScreen(
                         },
                         modifier = Modifier.weight(1f)
                     )
-                }
-
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    ToolBentoTile(
-                        title = "Keep Awake",
-                        subtitle = if (toggleState.isKeepAwakeOn) "Screen awake ON" else "Normal timeout",
-                        icon = Icons.Filled.ScreenLockRotation,
-                        isActive = toggleState.isKeepAwakeOn,
-                        onClick = {
-                            app.soundManager.playToggle(!toggleState.isKeepAwakeOn)
-                            app.quickTogglesManager.toggleKeepAwake()
-                        },
-                        modifier = Modifier.weight(1f)
-                    )
-                    ToolBentoTile(
+                    ToolHeroTile(
                         title = "Stopwatch",
-                        subtitle = "Millisecond laps",
                         icon = Icons.Filled.Timer,
                         isActive = false,
                         onClick = {
@@ -296,10 +267,35 @@ fun ToolsTabScreen(
                     )
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    ToolBentoTile(
+                if (toggleState.isTorchOn && toggleState.maxTorchStrength > 1) {
+                    ObsidianGlassCard(cornerRadius = 22.dp, highlighted = true) {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Torch Intensity", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.5.sp)
+                            Text("${toggleState.torchStrength} / ${toggleState.maxTorchStrength}", color = accent, fontSize = 12.sp)
+                        }
+                        Slider(
+                            value = toggleState.torchStrength.toFloat(),
+                            onValueChange = { app.quickTogglesManager.setTorchStrength(it.roundToInt()) },
+                            valueRange = 1f..toggleState.maxTorchStrength.toFloat(),
+                            colors = SliderDefaults.colors(thumbColor = accent, activeTrackColor = accent)
+                        )
+                    }
+                }
+
+                // Secondary Tools Row (Keep Awake / Select OCR / Shot -> Shelf) below fold
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                    ToolCompactChip(
+                        title = if (toggleState.isKeepAwakeOn) "Awake ON" else "Keep Awake",
+                        icon = Icons.Filled.ScreenLockRotation,
+                        isActive = toggleState.isKeepAwakeOn,
+                        onClick = {
+                            app.soundManager.playToggle(!toggleState.isKeepAwakeOn)
+                            app.quickTogglesManager.toggleKeepAwake()
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    ToolCompactChip(
                         title = "Select OCR",
-                        subtitle = "Copy screen text",
                         icon = Icons.Filled.TextFields,
                         isActive = false,
                         onClick = {
@@ -316,9 +312,8 @@ fun ToolsTabScreen(
                         },
                         modifier = Modifier.weight(1f)
                     )
-                    ToolBentoTile(
+                    ToolCompactChip(
                         title = "Shot → Shelf",
-                        subtitle = "Capture 10m shelf",
                         icon = Icons.Filled.Layers,
                         isActive = false,
                         onClick = {
@@ -329,34 +324,8 @@ fun ToolsTabScreen(
                     )
                 }
 
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    ToolBentoTile(
-                        title = "Screen Record",
-                        subtitle = if (isScreenRecording) "Recording ON · Tap stop" else "Saves MP4 to Shelf",
-                        icon = Icons.Filled.FiberManualRecord,
-                        isActive = isScreenRecording,
-                        onClick = {
-                            app.soundManager.playToggle(!isScreenRecording)
-                            if (isScreenRecording) {
-                                ScreenRecorderManager.stopRecording(context)
-                            } else {
-                                ScreenRecorderManager.startRecording(context)
-                            }
-                        },
-                        modifier = Modifier.weight(1f)
-                    )
-                    Spacer(Modifier.weight(1f))
-                }
-
-                Text(
-                    text = "Note: Protected / DRM apps appear black in screen recordings.",
-                    color = IslandColors.TextTertiary,
-                    fontSize = 11.sp
-                )
-
-                // Real Display Brightness, Media Volume & System Connectivity Panels
-                ObsidianGlassCard {
-                    val accent = MaterialTheme.colorScheme.primary
+                // Brightness, Volume & Connectivity Sliders Card
+                ObsidianGlassCard(cornerRadius = 22.dp, contentPadding = PaddingValues(16.dp)) {
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Text("Screen Brightness", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                         Text(
@@ -369,12 +338,9 @@ fun ToolsTabScreen(
                         value = toggleState.brightness.toFloat(),
                         onValueChange = { app.quickTogglesManager.setScreenBrightness(it.roundToInt()) },
                         valueRange = 10f..255f,
-                        colors = SliderDefaults.colors(
-                            thumbColor = accent,
-                            activeTrackColor = accent
-                        )
+                        colors = SliderDefaults.colors(thumbColor = accent, activeTrackColor = accent)
                     )
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(4.dp))
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, tint = accent, modifier = Modifier.size(16.dp))
@@ -389,11 +355,9 @@ fun ToolsTabScreen(
                             runCatching { audioMgr?.setStreamVolume(AudioManager.STREAM_MUSIC, v.roundToInt(), 0) }
                         },
                         valueRange = 0f..maxMusicVol.toFloat(),
-                        colors = SliderDefaults.colors(
-                            thumbColor = accent,
-                            activeTrackColor = accent
-                        )
+                        colors = SliderDefaults.colors(thumbColor = accent, activeTrackColor = accent)
                     )
+                    Spacer(Modifier.height(4.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
                         ObsidianQuickLinkChip(
                             text = "Wi-Fi Panel",
@@ -422,29 +386,65 @@ fun ToolsTabScreen(
 }
 
 @Composable
-private fun ToolBentoTile(
+private fun ToolHeroTile(
     title: String,
-    subtitle: String,
     icon: ImageVector,
     isActive: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     ObsidianGlassCard(
+        cornerRadius = 24.dp,
         highlighted = isActive,
-        contentPadding = PaddingValues(vertical = 18.dp, horizontal = 12.dp),
+        contentPadding = PaddingValues(14.dp),
         onClick = onClick,
-        modifier = modifier
+        modifier = modifier.height(136.dp)
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.fillMaxWidth()
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxSize()
         ) {
-            CrimsonCircularHaloIcon(icon = icon, isActive = isActive)
+            CrimsonCircularHaloIcon(
+                icon = icon,
+                size = 64.dp,
+                iconSize = 30.dp,
+                isActive = isActive
+            )
             Spacer(Modifier.height(12.dp))
-            Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp, maxLines = 1)
-            Spacer(Modifier.height(2.dp))
-            Text(subtitle, color = IslandColors.TextSecondary, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                text = title,
+                color = Color.White,
+                fontWeight = FontWeight.Medium,
+                fontSize = 14.5.sp,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun ToolCompactChip(
+    title: String,
+    icon: ImageVector,
+    isActive: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val accent = MaterialTheme.colorScheme.primary
+    ObsidianGlassCard(
+        cornerRadius = 18.dp,
+        highlighted = isActive,
+        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 10.dp),
+        onClick = onClick,
+        modifier = modifier
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+            Icon(icon, contentDescription = null, tint = if (isActive) Color.White else accent, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.height(4.dp))
+            Text(title, color = Color.White, fontSize = 11.5.sp, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -463,8 +463,8 @@ private fun ObsidianQuickLinkChip(
         modifier = modifier
             .height(44.dp)
             .clip(CircleShape)
-            .background(IslandColors.ObsidianCard)
-            .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
+            .background(Color(0xD41B1D23))
+            .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape)
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp)
     ) {
@@ -632,6 +632,7 @@ fun MusicTabScreen(
     val context = LocalContext.current
     val mediaState by app.mediaHub.state.collectAsState()
     val settings by app.settingsRepository.settingsFlow.collectAsState(initial = IslandSettings())
+    var showMenu by remember { mutableStateOf(false) }
 
     val spinDeg = if (mediaState.isPlaying && settings.rotateAlbumArt) {
         (mediaState.positionMs / 38f) % 360f
@@ -640,6 +641,8 @@ fun MusicTabScreen(
     val progress = if (mediaState.durationMs > 0L) {
         (mediaState.positionMs.toFloat() / mediaState.durationMs.toFloat()).coerceIn(0f, 1f)
     } else 0f
+
+    val accent = MaterialTheme.colorScheme.primary
 
     ObsidianCrimsonBackground(modifier = modifier) {
         Column(
@@ -650,31 +653,50 @@ fun MusicTabScreen(
         ) {
             MockupScreenHeader(
                 title = "Music",
-                subtitle = mediaState.appLabel.ifBlank { "On-Device Media Session" },
+                subtitle = mediaState.appLabel.ifBlank { "Music Player" },
                 icon = Icons.Filled.MusicNote,
                 trailingAction = {
-                    IconButton(
-                        onClick = { app.mediaHub.openPlayerApp() },
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(IslandColors.ObsidianCard)
-                            .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
-                    ) {
-                        Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Open player app", tint = Color.White)
+                    Box {
+                        IconButton(
+                            onClick = { showMenu = true },
+                            modifier = Modifier
+                                .size(46.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xD41B1D23))
+                                .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
+                        ) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Player options", tint = Color.White)
+                        }
+                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Open Player App") },
+                                leadingIcon = { Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = null) },
+                                onClick = {
+                                    showMenu = false
+                                    app.mediaHub.openPlayerApp()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Refresh Media Session") },
+                                onClick = {
+                                    showMenu = false
+                                    app.mediaHub.start()
+                                }
+                            )
+                        }
                     }
                 }
             )
 
             LazyColumn(
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 104.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier.weight(1f)
             ) {
                 if (!mediaState.hasNotificationAccess) {
                     item {
-                        ObsidianGlassCard(highlighted = true) {
+                        ObsidianGlassCard(cornerRadius = 22.dp, highlighted = true) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text("Notification Access Required", color = Color.White, fontWeight = FontWeight.Bold)
@@ -690,19 +712,20 @@ fun MusicTabScreen(
                     }
                 }
 
+                // Large centered album artwork matching youtubers742-music.png
                 item {
-                    val accent = MaterialTheme.colorScheme.primary
                     Box(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
-                            .size(210.dp)
-                            .clip(RoundedCornerShape(28.dp))
+                            .padding(top = 4.dp)
+                            .size(230.dp)
+                            .clip(RoundedCornerShape(26.dp))
                             .background(
                                 Brush.radialGradient(
-                                    colors = listOf(accent.copy(alpha = 0.28f), IslandColors.ObsidianCard)
+                                    colors = listOf(accent.copy(alpha = 0.26f), Color(0xFF171920))
                                 )
                             )
-                            .border(1.2.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(28.dp))
+                            .border(1.2.dp, Color.White.copy(alpha = 0.16f), RoundedCornerShape(26.dp))
                             .clickable { app.mediaHub.openPlayerApp() }
                     ) {
                         val bmp = mediaState.albumArt
@@ -718,30 +741,33 @@ fun MusicTabScreen(
                         } else {
                             CrimsonCircularHaloIcon(
                                 icon = Icons.Filled.MusicNote,
-                                size = 96.dp,
-                                iconSize = 46.dp,
+                                size = 104.dp,
+                                iconSize = 48.dp,
                                 isActive = mediaState.isPlaying
                             )
                         }
                     }
                 }
 
+                // Track Title + Artist
                 item {
                     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
                         Text(
                             text = mediaState.title.ifBlank { "Nothing Playing" },
                             color = Color.White,
-                            fontSize = 18.sp,
+                            fontSize = 22.sp,
                             fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
                         )
                         if (mediaState.artist.isNotBlank()) {
-                            Spacer(Modifier.height(2.dp))
+                            Spacer(Modifier.height(4.dp))
                             Text(
                                 text = mediaState.artist,
                                 color = IslandColors.TextSecondary,
-                                fontSize = 14.sp,
+                                fontSize = 14.5.sp,
+                                textAlign = TextAlign.Center,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
@@ -749,9 +775,9 @@ fun MusicTabScreen(
                     }
                 }
 
+                // Scrubber + timestamps
                 item {
-                    val accent = MaterialTheme.colorScheme.primary
-                    Column(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp)) {
                         WavyProgressBar(
                             progress = progress,
                             isActiveWave = mediaState.isPlaying,
@@ -762,6 +788,7 @@ fun MusicTabScreen(
                                 app.mediaHub.seekTo(target)
                             }
                         )
+                        Spacer(Modifier.height(2.dp))
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             Text(TimerEngine.formatDuration(mediaState.positionMs), color = IslandColors.TextSecondary, fontSize = 12.sp)
                             Text(TimerEngine.formatDuration(mediaState.durationMs), color = IslandColors.TextSecondary, fontSize = 12.sp)
@@ -769,8 +796,8 @@ fun MusicTabScreen(
                     }
                 }
 
+                // 5 Transport Controls matching youtubers742-music.png
                 item {
-                    // 5 Transport Controls matching youtubers742-music.png
                     Row(
                         horizontalArrangement = Arrangement.SpaceEvenly,
                         verticalAlignment = Alignment.CenterVertically,
@@ -799,16 +826,16 @@ fun MusicTabScreen(
                                 app.mediaHub.togglePlayPause()
                             },
                             modifier = Modifier
-                                .size(66.dp)
+                                .size(68.dp)
                                 .clip(CircleShape)
-                                .background(MaterialTheme.colorScheme.primary)
-                                .border(1.5.dp, Color.White.copy(alpha = 0.25f), CircleShape)
+                                .background(accent)
+                                .border(1.5.dp, Color.White.copy(alpha = 0.28f), CircleShape)
                         ) {
                             Icon(
                                 imageVector = if (mediaState.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
                                 contentDescription = if (mediaState.isPlaying) "Pause" else "Play",
                                 tint = Color.White,
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.size(34.dp)
                             )
                         }
                         TransportCircleButton(
@@ -831,40 +858,81 @@ fun MusicTabScreen(
                     }
                 }
 
-                // On-Device + LRCLIB Lyrics with Timing Offset
-                if (mediaState.lyrics.isNotEmpty()) {
+                // Bottom Structured Glass Card (Synced Lyrics / Active Session) matching youtubers742-music.png
+                item {
                     val adjustedPos = (mediaState.positionMs + settings.lyricsOffsetMs).coerceAtLeast(0L)
-                    item {
-                        val accent = MaterialTheme.colorScheme.primary
-                        ObsidianGlassCard {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Synced Lyrics", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                if (settings.lyricsOffsetMs != 0) {
-                                    Text("${if (settings.lyricsOffsetMs > 0) "+" else ""}${settings.lyricsOffsetMs} ms", color = accent, fontSize = 12.sp)
-                                }
-                            }
-                        }
-                    }
-                    items(mediaState.lyrics) { line ->
-                        val accent = MaterialTheme.colorScheme.primary
-                        val active = line.timestampMs >= 0L && kotlin.math.abs(line.timestampMs - adjustedPos) < 3500L
-                        Text(
-                            text = line.text,
-                            color = if (active) accent else IslandColors.TextSecondary,
-                            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
-                            fontSize = if (active) 15.sp else 13.sp,
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)
-                        )
-                    }
-                } else {
-                    item {
-                        ObsidianGlassCard {
+                    ObsidianGlassCard(cornerRadius = 24.dp, contentPadding = PaddingValues(16.dp)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
                             Text(
-                                text = if (mediaState.hasActiveSession) "Playing from ${mediaState.appLabel}. Tap album art to open player."
-                                else "Start playback in PixelMusic or your configured player app.",
-                                color = IslandColors.TextSecondary,
-                                fontSize = 13.sp
+                                text = if (mediaState.lyrics.isNotEmpty()) "Synced Lyrics" else "Now Playing Session",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.5.sp
                             )
+                            Text(
+                                text = if (mediaState.lyrics.isNotEmpty()) {
+                                    "${mediaState.lyrics.size} lines"
+                                } else if (mediaState.hasActiveSession) {
+                                    mediaState.appLabel.ifBlank { "Active" }
+                                } else {
+                                    "Idle"
+                                },
+                                color = IslandColors.TextSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+
+                        Spacer(Modifier.height(12.dp))
+
+                        if (mediaState.lyrics.isNotEmpty()) {
+                            mediaState.lyrics.forEachIndexed { idx, line ->
+                                val active = line.timestampMs >= 0L && kotlin.math.abs(line.timestampMs - adjustedPos) < 3500L
+                                if (idx > 0) Spacer(Modifier.height(8.dp))
+                                Text(
+                                    text = line.text,
+                                    color = if (active) accent else IslandColors.TextSecondary,
+                                    fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = if (active) 14.5.sp else 13.sp,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        } else {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable { app.mediaHub.openPlayerApp() }
+                                    .padding(vertical = 4.dp)
+                            ) {
+                                CrimsonCircularHaloIcon(
+                                    icon = Icons.Filled.MusicNote,
+                                    size = 44.dp,
+                                    iconSize = 20.dp,
+                                    isActive = mediaState.isPlaying
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = if (mediaState.hasActiveSession) mediaState.appLabel.ifBlank { "Active Player" }
+                                        else "Open music player",
+                                        color = Color.White,
+                                        fontWeight = FontWeight.SemiBold,
+                                        fontSize = 14.sp
+                                    )
+                                    Text(
+                                        text = if (mediaState.hasActiveSession) "Synced lyrics load automatically when available"
+                                        else "Start playback in PixelMusic or any audio app",
+                                        color = IslandColors.TextSecondary,
+                                        fontSize = 12.sp
+                                    )
+                                }
+                                Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Open player", tint = IslandColors.TextSecondary, modifier = Modifier.size(18.dp))
+                            }
                         }
                     }
                 }
@@ -886,7 +954,7 @@ private fun TransportCircleButton(
         modifier = Modifier
             .size(48.dp)
             .clip(CircleShape)
-            .background(if (active) accent.copy(alpha = 0.24f) else IslandColors.ObsidianCard)
+            .background(if (active) accent.copy(alpha = 0.24f) else Color(0xD41B1D23))
             .border(1.dp, if (active) accent.copy(alpha = 0.72f) else Color.White.copy(alpha = 0.16f), CircleShape)
     ) {
         Icon(icon, contentDescription = contentDescription, tint = if (active) accent else Color.White, modifier = Modifier.size(22.dp))

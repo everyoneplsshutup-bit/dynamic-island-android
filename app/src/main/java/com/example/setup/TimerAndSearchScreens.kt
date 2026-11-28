@@ -1,7 +1,5 @@
 package com.example.setup
 
-import android.content.Intent
-import android.provider.Settings
 import android.widget.Toast
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
@@ -35,6 +33,10 @@ import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PushPin
@@ -45,6 +47,8 @@ import androidx.compose.material.icons.filled.TravelExplore
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -105,6 +109,8 @@ fun TimerTabScreen(
     var mode by remember(initialMode) { mutableIntStateOf(initialMode) }
     var selectedPresetMinutes by remember { mutableIntStateOf(5) }
     var showCustomDialog by remember { mutableStateOf(false) }
+    var showMenu by remember { mutableStateOf(false) }
+    val accent = MaterialTheme.colorScheme.primary
 
     val timerProgress = if (timerState.totalMs > 0L) {
         (timerState.remainingMs.toFloat() / timerState.totalMs.toFloat()).coerceIn(0f, 1f)
@@ -136,21 +142,44 @@ fun TimerTabScreen(
                 subtitle = "Set a timer for anything",
                 icon = Icons.Filled.Timer,
                 trailingAction = {
-                    IconButton(
-                        onClick = { showCustomDialog = true },
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(IslandColors.ObsidianCard)
-                            .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
-                    ) {
-                        Icon(Icons.Filled.Edit, contentDescription = "Custom duration", tint = Color.White)
+                    Box {
+                        IconButton(
+                            onClick = { showMenu = true },
+                            modifier = Modifier
+                                .size(46.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xD41B1D23))
+                                .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
+                        ) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = "Timer options", tint = Color.White)
+                        }
+                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Custom Duration") },
+                                leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) },
+                                onClick = {
+                                    showMenu = false
+                                    showCustomDialog = true
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Timer") },
+                                onClick = { showMenu = false; mode = 0 }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Sleep Timer") },
+                                onClick = { showMenu = false; mode = 1 }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Stopwatch") },
+                                onClick = { showMenu = false; mode = 2 }
+                            )
+                        }
                     }
                 }
             )
 
-            // Mode selector: Timer | Sleep | Stopwatch
-            val accent = MaterialTheme.colorScheme.primary
+            // Slim Mode Switcher (Timer | Sleep | Stopwatch)
             ObsidianGlassCard(
                 cornerRadius = 26.dp,
                 contentPadding = PaddingValues(4.dp),
@@ -165,10 +194,10 @@ fun TimerTabScreen(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(40.dp)
+                                .height(36.dp)
                                 .clip(CircleShape)
                                 .background(if (active) accent.copy(alpha = 0.24f) else Color.Transparent)
-                                .then(if (active) Modifier.border(1.dp, accent.copy(alpha = 0.68f), CircleShape) else Modifier)
+                                .then(if (active) Modifier.border(1.dp, accent.copy(alpha = 0.72f), CircleShape) else Modifier)
                                 .clickable { mode = idx }
                         ) {
                             Text(
@@ -184,16 +213,16 @@ fun TimerTabScreen(
 
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(16.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp),
                 modifier = Modifier
                     .weight(1f)
                     .verticalScroll(rememberScrollState())
-                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 104.dp)
+                    .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 16.dp)
             ) {
                 if (timerState.mirroredClockLabel != null && timerState.mirroredRemainingMs != null) {
-                    ObsidianGlassCard(highlighted = true) {
+                    ObsidianGlassCard(cornerRadius = 20.dp, highlighted = true) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                            Icon(Icons.Filled.Timer, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                            Icon(Icons.Filled.Timer, contentDescription = null, tint = accent)
                             Spacer(Modifier.width(8.dp))
                             Text(
                                 "Clock Timer: ${timerState.mirroredClockLabel} · ${TimerEngine.formatDuration(timerState.mirroredRemainingMs!!)}",
@@ -205,30 +234,34 @@ fun TimerTabScreen(
                     }
                 }
 
-                // Glowing Circular Arc Gauge
-                val dialColor = if (mode == 2) MaterialTheme.colorScheme.primary else IslandColors.AccentOrange
+                // Large Glowing Circular Arc Gauge matching youtubers742-timer.png
+                val dialColor = if (mode == 2) accent else accent
                 Box(
                     contentAlignment = Alignment.Center,
-                    modifier = Modifier.size(226.dp)
+                    modifier = Modifier
+                        .size(258.dp)
+                        .clickable(enabled = mode == 0 && !timerState.isActive) { showCustomDialog = true }
                 ) {
                     Canvas(modifier = Modifier.fillMaxSize()) {
-                        val strokePx = 11.dp.toPx()
-                        val pad = strokePx / 2f + 10.dp.toPx()
+                        val strokePx = 12.dp.toPx()
+                        val pad = strokePx / 2f + 12.dp.toPx()
                         val arcSize = Size(size.width - pad * 2f, size.height - pad * 2f)
                         val topLeft = Offset(pad, pad)
 
+                        // Soft radial outer halo behind ring
                         drawArc(
-                            color = dialColor.copy(alpha = 0.16f),
+                            color = dialColor.copy(alpha = 0.14f),
                             startAngle = -90f,
                             sweepAngle = 360f,
                             useCenter = false,
                             topLeft = topLeft,
                             size = arcSize,
-                            style = Stroke(width = strokePx + 8.dp.toPx())
+                            style = Stroke(width = strokePx + 12.dp.toPx())
                         )
 
+                        // Track ring
                         drawArc(
-                            color = IslandColors.ObsidianCardElevated,
+                            color = Color(0xFF20222A),
                             startAngle = -90f,
                             sweepAngle = 360f,
                             useCenter = false,
@@ -237,13 +270,13 @@ fun TimerTabScreen(
                             style = Stroke(width = strokePx, cap = StrokeCap.Round)
                         )
 
-                        val sweep = (ringFraction * 360f).coerceIn(4f, 360f)
+                        val sweep = (ringFraction * 360f).coerceIn(6f, 360f)
                         drawArc(
                             brush = Brush.sweepGradient(
                                 colors = listOf(
                                     dialColor,
-                                    dialColor.copy(alpha = 0.85f),
-                                    Color.White.copy(alpha = 0.85f),
+                                    dialColor.copy(alpha = 0.88f),
+                                    Color.White.copy(alpha = 0.78f),
                                     dialColor
                                 )
                             ),
@@ -259,47 +292,56 @@ fun TimerTabScreen(
                         val radius = arcSize.width / 2f
                         val cx = size.width / 2f + cos(tipAngleRad).toFloat() * radius
                         val cy = size.height / 2f + sin(tipAngleRad).toFloat() * radius
-                        drawCircle(color = dialColor.copy(alpha = 0.55f), radius = 9.dp.toPx(), center = Offset(cx, cy))
-                        drawCircle(color = Color.White, radius = 4.dp.toPx(), center = Offset(cx, cy))
+                        drawCircle(color = dialColor.copy(alpha = 0.50f), radius = 10.dp.toPx(), center = Offset(cx, cy))
+                        drawCircle(color = Color.White, radius = 5.dp.toPx(), center = Offset(cx, cy))
                     }
 
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
                             text = centerReadout,
                             color = Color.White,
-                            fontSize = if (mode == 2) 34.sp else 44.sp,
-                            fontWeight = FontWeight.Bold
+                            fontSize = if (mode == 2) 38.sp else 50.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.sp
                         )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = when (mode) {
-                                1 -> "Sleep Timer"
-                                2 -> if (timerState.isStopwatchRunning) "Running" else "Stopwatch"
-                                else -> if (timerState.isDone) "Completed!" else timerState.label
-                            },
-                            color = IslandColors.TextSecondary,
-                            fontSize = 13.sp
-                        )
+                        Spacer(Modifier.height(6.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = if (mode == 1) Icons.Filled.Bedtime else Icons.Filled.Notifications,
+                                contentDescription = null,
+                                tint = IslandColors.TextSecondary,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                text = when (mode) {
+                                    1 -> "Sleep Timer"
+                                    2 -> if (timerState.isStopwatchRunning) "Running" else "Stopwatch"
+                                    else -> if (timerState.isDone) "Completed!" else timerState.label
+                                },
+                                color = IslandColors.TextSecondary,
+                                fontSize = 13.5.sp
+                            )
+                        }
                     }
                 }
 
                 when (mode) {
                     0 -> {
-                        // Presets row (1 min, 5 min, 10 min, 30 min)
+                        // 4 Preset Pills matching youtubers742-timer.png
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            val accent = MaterialTheme.colorScheme.primary
                             listOf(1, 5, 10, 30).forEach { mins ->
                                 val selected = selectedPresetMinutes == mins && !timerState.isActive
                                 Box(
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(44.dp)
+                                        .height(42.dp)
                                         .clip(CircleShape)
-                                        .background(if (selected) accent.copy(alpha = 0.24f) else IslandColors.ObsidianCard)
+                                        .background(if (selected) accent.copy(alpha = 0.22f) else Color(0xD41B1D23))
                                         .border(
                                             1.dp,
-                                            if (selected) accent.copy(alpha = 0.70f) else Color.White.copy(alpha = 0.14f),
+                                            if (selected) accent.copy(alpha = 0.80f) else Color.White.copy(alpha = 0.14f),
                                             CircleShape
                                         )
                                         .clickable {
@@ -309,15 +351,16 @@ fun TimerTabScreen(
                                         }
                                 ) {
                                     Text(
-                                        "$mins min",
+                                        text = "$mins min",
                                         color = Color.White,
-                                        fontSize = 12.sp,
+                                        fontSize = 12.5.sp,
                                         fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
                                     )
                                 }
                             }
                         }
 
+                        // Large Dual Bottom Pill Buttons: [Start] + [Reset]
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                             CrimsonPillButton(
                                 text = when {
@@ -334,7 +377,7 @@ fun TimerTabScreen(
                                         else -> app.timerEngine.startTimer()
                                     }
                                 },
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f).height(54.dp)
                             )
                             ObsidianPillButton(
                                 text = "Reset",
@@ -343,23 +386,22 @@ fun TimerTabScreen(
                                     app.soundManager.playTap()
                                     app.timerEngine.cancelTimer()
                                 },
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f).height(54.dp)
                             )
                         }
                     }
 
                     1 -> {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                            val accent = MaterialTheme.colorScheme.primary
                             listOf(15, 30, 45, 60).forEach { mins ->
                                 Box(
                                     contentAlignment = Alignment.Center,
                                     modifier = Modifier
                                         .weight(1f)
-                                        .height(44.dp)
+                                        .height(42.dp)
                                         .clip(CircleShape)
-                                        .background(IslandColors.ObsidianCard)
-                                        .border(1.dp, accent.copy(alpha = 0.45f), CircleShape)
+                                        .background(Color(0xD41B1D23))
+                                        .border(1.dp, accent.copy(alpha = 0.48f), CircleShape)
                                         .clickable {
                                             app.soundManager.playTimerSet()
                                             app.timerEngine.startSleepTimer(mins * 60_000L)
@@ -377,13 +419,13 @@ fun TimerTabScreen(
                                     app.soundManager.playTimerSet()
                                     app.timerEngine.startSleepTimer(30 * 60_000L)
                                 },
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f).height(54.dp)
                             )
                             ObsidianPillButton(
                                 text = "Stop",
                                 icon = Icons.Filled.Refresh,
                                 onClick = { app.timerEngine.cancelTimer() },
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f).height(54.dp)
                             )
                         }
                     }
@@ -398,7 +440,7 @@ fun TimerTabScreen(
                                     if (timerState.isStopwatchRunning) app.timerEngine.pauseStopwatch()
                                     else app.timerEngine.startStopwatch()
                                 },
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f).height(54.dp)
                             )
                             ObsidianPillButton(
                                 text = if (timerState.isStopwatchRunning) "Lap" else "Reset",
@@ -408,12 +450,12 @@ fun TimerTabScreen(
                                     if (timerState.isStopwatchRunning) app.timerEngine.lapStopwatch()
                                     else app.timerEngine.resetStopwatch()
                                 },
-                                modifier = Modifier.weight(1f)
+                                modifier = Modifier.weight(1f).height(54.dp)
                             )
                         }
 
                         if (timerState.laps.isNotEmpty()) {
-                            ObsidianGlassCard(modifier = Modifier.fillMaxWidth()) {
+                            ObsidianGlassCard(cornerRadius = 22.dp, modifier = Modifier.fillMaxWidth()) {
                                 Text("Laps", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
                                 Spacer(Modifier.height(6.dp))
                                 timerState.laps.forEachIndexed { idx, lapMs ->
@@ -445,7 +487,6 @@ fun TimerTabScreen(
             textContentColor = Color.White,
             title = { Text("Custom Timer") },
             text = {
-                val accent = MaterialTheme.colorScheme.primary
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Hours: $h", color = Color.White)
                     Slider(
@@ -477,7 +518,7 @@ fun TimerTabScreen(
                         app.soundManager.playTimerSet()
                         showCustomDialog = false
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                    colors = ButtonDefaults.buttonColors(containerColor = accent)
                 ) { Text("Set") }
             },
             dismissButton = {
@@ -501,6 +542,7 @@ fun SearchTabScreen(
     var results by remember { mutableStateOf(SearchResults()) }
     var editPinned by remember { mutableStateOf(false) }
     var sortAscending by remember { mutableStateOf(true) }
+    val searchAccent = MaterialTheme.colorScheme.primary
 
     LaunchedEffect(query, appsVersion) {
         results = app.searchEngine.search(query)
@@ -538,9 +580,9 @@ fun SearchTabScreen(
                     IconButton(
                         onClick = { app.searchEngine.refreshApps() },
                         modifier = Modifier
-                            .size(44.dp)
+                            .size(46.dp)
                             .clip(CircleShape)
-                            .background(IslandColors.ObsidianCard)
+                            .background(Color(0xD41B1D23))
                             .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
                     ) {
                         Icon(Icons.Filled.Refresh, contentDescription = "Refresh installed apps", tint = Color.White)
@@ -548,11 +590,11 @@ fun SearchTabScreen(
                 }
             )
 
-            val searchAccent = MaterialTheme.colorScheme.primary
+            // Search Pill matching youtubers742-search.png
             OutlinedTextField(
                 value = query,
                 onValueChange = { query = it },
-                placeholder = { Text("Search apps, notes, math or Web", color = IslandColors.TextSecondary) },
+                placeholder = { Text("Search apps, notes, math or Web", color = IslandColors.TextSecondary, fontSize = 14.sp) },
                 leadingIcon = { Icon(Icons.Filled.Search, contentDescription = null, tint = searchAccent) },
                 trailingIcon = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -569,10 +611,10 @@ fun SearchTabScreen(
                 singleLine = true,
                 shape = CircleShape,
                 colors = OutlinedTextFieldDefaults.colors(
-                    focusedContainerColor = IslandColors.ObsidianCardElevated,
-                    unfocusedContainerColor = IslandColors.ObsidianCard,
+                    focusedContainerColor = Color(0xDD22252D),
+                    unfocusedContainerColor = Color(0xD41B1D23),
                     focusedBorderColor = searchAccent.copy(alpha = 0.72f),
-                    unfocusedBorderColor = Color.White.copy(alpha = 0.16f),
+                    unfocusedBorderColor = Color.White.copy(alpha = 0.14f),
                     focusedTextColor = Color.White,
                     unfocusedTextColor = Color.White
                 ),
@@ -581,16 +623,17 @@ fun SearchTabScreen(
                     .padding(horizontal = 16.dp)
             )
 
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
 
             LazyColumn(
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 104.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier.weight(1f)
             ) {
                 if (results.inlineMathResult != null) {
                     item {
                         ObsidianGlassCard(
+                            cornerRadius = 20.dp,
                             highlighted = true,
                             onClick = {
                                 app.clipboardMonitor.copyToClipboard(results.inlineMathResult!!)
@@ -616,12 +659,12 @@ fun SearchTabScreen(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.width(3.dp).height(14.dp).background(searchAccent, CircleShape))
+                            Box(Modifier.width(3.dp).height(15.dp).background(searchAccent, CircleShape))
                             Spacer(Modifier.width(8.dp))
-                            Text("PINNED APPS", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("PINNED APPS", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
                         }
                         TextButton(onClick = { editPinned = !editPinned }) {
-                            Text(if (editPinned) "Done" else "Edit", color = searchAccent, fontSize = 12.sp)
+                            Text(if (editPinned) "Done" else "Edit", color = searchAccent, fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold)
                             Spacer(Modifier.width(4.dp))
                             Icon(Icons.Filled.Edit, contentDescription = null, tint = searchAccent, modifier = Modifier.size(14.dp))
                         }
@@ -630,8 +673,12 @@ fun SearchTabScreen(
 
                 if (pinnedApps.isEmpty()) {
                     item {
-                        ObsidianGlassCard {
-                            Text("Tap the pin icon on any app below to pin your top apps here.", color = IslandColors.TextSecondary, fontSize = 12.sp)
+                        ObsidianGlassCard(cornerRadius = 18.dp, contentPadding = PaddingValues(14.dp)) {
+                            Text(
+                                "Tap the pin icon on any app below to keep your favourites at the top.",
+                                color = IslandColors.TextSecondary,
+                                fontSize = 12.5.sp
+                            )
                         }
                     }
                 } else {
@@ -658,20 +705,20 @@ fun SearchTabScreen(
                 if (query.isNotBlank() && results.notes.isNotEmpty()) {
                     item {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.width(3.dp).height(14.dp).background(searchAccent, CircleShape))
+                            Box(Modifier.width(3.dp).height(15.dp).background(searchAccent, CircleShape))
                             Spacer(Modifier.width(8.dp))
-                            Text("MATCHING NOTES", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("MATCHING NOTES", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
                         }
                     }
                     items(results.notes, key = { "note_${it.id}" }) { note ->
-                        ObsidianGlassCard(onClick = { app.clipboardMonitor.copyToClipboard(note.content) }) {
+                        ObsidianGlassCard(cornerRadius = 18.dp, onClick = { app.clipboardMonitor.copyToClipboard(note.content) }) {
                             Text(note.title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                             Text(note.content, color = IslandColors.TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
                         }
                     }
                 }
 
-                // ALL APPS header & A-Z sortable list
+                // ALL APPS header & A-Z sortable list matching youtubers742-search.png
                 item {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -679,12 +726,25 @@ fun SearchTabScreen(
                         modifier = Modifier.fillMaxWidth().padding(top = 4.dp)
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(Modifier.width(3.dp).height(14.dp).background(searchAccent, CircleShape))
+                            Box(Modifier.width(3.dp).height(15.dp).background(searchAccent, CircleShape))
                             Spacer(Modifier.width(8.dp))
-                            Text("ALL APPS (${allAppsSorted.size})", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("ALL APPS (${allAppsSorted.size})", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.5.sp)
                         }
-                        TextButton(onClick = { sortAscending = !sortAscending }) {
-                            Text(if (sortAscending) "A – Z" else "Z – A", color = IslandColors.TextSecondary, fontSize = 12.sp)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .clickable { sortAscending = !sortAscending }
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                        ) {
+                            Text(if (sortAscending) "A – Z" else "Z – A", color = IslandColors.TextSecondary, fontSize = 12.5.sp)
+                            Spacer(Modifier.width(4.dp))
+                            Icon(
+                                imageVector = if (sortAscending) Icons.Filled.KeyboardArrowDown else Icons.Filled.KeyboardArrowUp,
+                                contentDescription = "Toggle sort order",
+                                tint = IslandColors.TextSecondary,
+                                modifier = Modifier.size(16.dp)
+                            )
                         }
                     }
                 }
@@ -692,8 +752,8 @@ fun SearchTabScreen(
                 items(allAppsSorted, key = { it.packageName }) { appItem ->
                     val isPinned = appItem.packageName in settings.pinnedAppPackages
                     ObsidianGlassCard(
-                        cornerRadius = 18.dp,
-                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 10.dp),
+                        cornerRadius = 16.dp,
+                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 10.dp),
                         onClick = { app.searchEngine.launchApp(appItem.packageName) }
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
@@ -710,18 +770,21 @@ fun SearchTabScreen(
                             Text(
                                 text = appItem.label,
                                 color = Color.White,
-                                fontWeight = FontWeight.SemiBold,
-                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Medium,
+                                fontSize = 14.5.sp,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f)
                             )
-                            IconButton(onClick = { togglePin(appItem.packageName) }) {
+                            IconButton(
+                                onClick = { togglePin(appItem.packageName) },
+                                modifier = Modifier.size(36.dp)
+                            ) {
                                 Icon(
                                     imageVector = Icons.Filled.PushPin,
                                     contentDescription = if (isPinned) "Unpin" else "Pin",
                                     tint = if (isPinned) searchAccent else IslandColors.TextTertiary,
-                                    modifier = Modifier.size(18.dp)
+                                    modifier = Modifier.size(16.dp)
                                 )
                             }
                             Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = null, tint = IslandColors.TextSecondary)
@@ -753,10 +816,10 @@ private fun PinnedAppTile(
                     Image(
                         bitmap = item.iconBitmap,
                         contentDescription = item.label,
-                        modifier = Modifier.size(44.dp).clip(RoundedCornerShape(12.dp))
+                        modifier = Modifier.size(46.dp).clip(RoundedCornerShape(13.dp))
                     )
                 } else {
-                    CrimsonSquircleIcon(icon = Icons.Filled.Apps, size = 44.dp, iconSize = 22.dp)
+                    CrimsonSquircleIcon(icon = Icons.Filled.Apps, size = 46.dp, iconSize = 22.dp)
                 }
                 Spacer(Modifier.height(8.dp))
                 Text(

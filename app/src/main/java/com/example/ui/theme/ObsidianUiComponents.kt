@@ -76,7 +76,7 @@ enum class MainDockTab(
     MUSIC("Music", Icons.Filled.MusicNote),
     TIMER("Timer", Icons.Filled.Timer),
     SEARCH("Search", Icons.Filled.Search),
-    SETTINGS("Prefs", Icons.Filled.Settings)
+    SETTINGS("Settings", Icons.Filled.Settings)
 }
 
 @Composable
@@ -100,32 +100,93 @@ fun ObsidianCrimsonBackground(
             val w = size.width
             val h = size.height
 
-            // Subtle neutral-grey + user-accent ambient atmosphere over #121212
+            // Soft neutral + user-accent atmospheric glow
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        accent.copy(alpha = if (showHorizonPlanet) 0.14f else 0.10f),
-                        Color(0x0EFFFFFF),
+                        accent.copy(alpha = if (showHorizonPlanet) 0.16f else 0.10f),
+                        Color(0x0DFFFFFF),
                         Color.Transparent
                     ),
-                    center = Offset(w * 0.85f, h * 0.08f),
+                    center = Offset(w * 0.84f, h * 0.08f),
                     radius = w * 0.78f
                 ),
                 radius = w * 0.78f,
-                center = Offset(w * 0.85f, h * 0.08f)
+                center = Offset(w * 0.84f, h * 0.08f)
             )
+
+            if (showHorizonPlanet) {
+                // Curved planetary horizon arc matching youtubers742-home-hub.png
+                val planetCenter = Offset(w * 0.50f, h * 0.62f)
+                val planetRadius = w * 0.96f
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xFF0A0B0E),
+                            Color(0xFF101319),
+                            accent.copy(alpha = 0.24f),
+                            Color.Transparent
+                        ),
+                        center = Offset(w * 0.50f, h * 0.24f),
+                        radius = w * 0.82f
+                    ),
+                    radius = planetRadius,
+                    center = planetCenter
+                )
+                drawCircle(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            accent.copy(alpha = 0.55f),
+                            Color.White.copy(alpha = 0.20f),
+                            Color.Transparent
+                        ),
+                        startY = planetCenter.y - planetRadius,
+                        endY = planetCenter.y - planetRadius + 90f
+                    ),
+                    radius = planetRadius,
+                    center = planetCenter,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.2.dp.toPx())
+                )
+                // Small secondary orbital sphere upper-right
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(Color(0xFF1A1D24), Color(0xFF090A0D))
+                    ),
+                    radius = w * 0.068f,
+                    center = Offset(w * 0.85f, h * 0.14f)
+                )
+            } else {
+                // Subtle sweeping atmospheric horizon arc behind tab headers
+                drawArc(
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            accent.copy(alpha = 0.22f),
+                            Color.White.copy(alpha = 0.14f),
+                            accent.copy(alpha = 0.20f),
+                            Color.Transparent
+                        )
+                    ),
+                    startAngle = 195f,
+                    sweepAngle = 150f,
+                    useCenter = false,
+                    topLeft = Offset(-w * 0.25f, h * 0.10f),
+                    size = androidx.compose.ui.geometry.Size(w * 1.50f, h * 0.36f),
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = 2.5.dp.toPx())
+                )
+            }
 
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
-                        accent.copy(alpha = 0.07f),
+                        accent.copy(alpha = 0.06f),
                         Color.Transparent
                     ),
-                    center = Offset(w * 0.18f, h * 0.92f),
-                    radius = w * 0.72f
+                    center = Offset(w * 0.16f, h * 0.90f),
+                    radius = w * 0.68f
                 ),
-                radius = w * 0.72f,
-                center = Offset(w * 0.18f, h * 0.92f)
+                radius = w * 0.68f,
+                center = Offset(w * 0.16f, h * 0.90f)
             )
         }
 
@@ -148,19 +209,19 @@ fun ObsidianGlassCard(
     val shape = RoundedCornerShape(cornerRadius)
     val bgBrush = Brush.verticalGradient(
         colors = if (highlighted) {
-            listOf(Color(0xFF23252C), Color(0xFF1A1B20))
+            listOf(Color(0xDD22252D), Color(0xEB16181E))
         } else {
-            listOf(Color(0xFF1D1D21), Color(0xFF161619))
+            listOf(Color(0xD41B1D23), Color(0xE6141519))
         }
     )
     val borderBrush = if (highlighted) {
         Brush.linearGradient(
-            colors = listOf(accentColor.copy(alpha = 0.85f), accentColor.copy(alpha = 0.45f), accentColor.copy(alpha = 0.85f))
+            colors = listOf(accentColor.copy(alpha = 0.85f), Color.White.copy(alpha = 0.32f), accentColor.copy(alpha = 0.75f))
         )
     } else {
         Brush.linearGradient(
             colors = listOf(
-                Color.White.copy(alpha = 0.14f),
+                Color.White.copy(alpha = 0.18f),
                 Color.White.copy(alpha = 0.06f)
             )
         )
@@ -425,7 +486,7 @@ fun FloatingGlassPillDock(
         modifier = modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(horizontal = 10.dp, vertical = 8.dp)
+            .padding(horizontal = 6.dp, vertical = 6.dp)
             .islandGlassChrome(
                 shape = dockShape,
                 pillStyle = pillStyle,
@@ -442,7 +503,7 @@ fun FloatingGlassPillDock(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 6.dp, vertical = 6.dp)
+                .padding(horizontal = 4.dp, vertical = 5.dp)
         ) {
             // Sliding glowing liquid pill indicator underneath active tab
             Canvas(
@@ -522,7 +583,8 @@ fun FloatingGlassPillDock(
                         Text(
                             text = tab.label,
                             color = itemColor,
-                            fontSize = 11.sp,
+                            fontSize = 9.5.sp,
+                            letterSpacing = (-0.25).sp,
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                             maxLines = 1,
                             softWrap = false,

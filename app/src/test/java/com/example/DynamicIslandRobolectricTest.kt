@@ -667,20 +667,20 @@ class DynamicIslandRobolectricTest {
         composeRule.onNodeWithTag("chooser_tab_calc").assertDoesNotExist()
 
         // Switch sandbox tab to Tools: Screenshot->Vault exists and Floating Apps button does NOT exist
-        composeRule.onNodeWithTag("chooser_tab_tools").performClick()
+        composeRule.onNodeWithTag("chooser_tab_tools").performScrollTo().performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("tools_screenshot_vault_btn").performScrollTo().assertIsDisplayed()
         composeRule.onNodeWithTag("tools_floating_apps_btn").assertDoesNotExist()
 
         // Switch sandbox tab to Timer and verify Sleep Dial tab renders
-        composeRule.onNodeWithTag("chooser_tab_timer").performClick()
+        composeRule.onNodeWithTag("chooser_tab_timer").performScrollTo().performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("timer_mode_sleep").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("timer_mode_sleep").performScrollTo().assertIsDisplayed().performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("sleep_start_button").assertIsDisplayed()
+        composeRule.onNodeWithTag("sleep_start_button").performScrollTo().assertIsDisplayed()
 
         // Switch sandbox tab to Search, pin Calculator, and verify PINNED APPS section renders
-        composeRule.onNodeWithTag("chooser_tab_search").performClick()
+        composeRule.onNodeWithTag("chooser_tab_search").performScrollTo().performClick()
         composeRule.waitForIdle()
         composeRule.waitUntil(timeoutMillis = 5_000L) {
             runCatching {
@@ -698,12 +698,12 @@ class DynamicIslandRobolectricTest {
         composeRule.onNodeWithTag("search_pinned_chip_$calcPkg").assertIsDisplayed()
 
         // Verify Shelf tab is directly accessible in main chooser bar
-        composeRule.onNodeWithTag("chooser_tab_vault").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("chooser_tab_vault").performScrollTo().assertIsDisplayed().performClick()
         composeRule.waitForIdle()
-        composeRule.onNodeWithTag("vault_filter_all").assertIsDisplayed()
+        composeRule.onNodeWithTag("vault_filter_all").performScrollTo().assertIsDisplayed()
 
         // Open Settings and verify all 7 groups render
-        composeRule.onNodeWithTag("open_settings_button").performClick()
+        composeRule.onNodeWithTag("open_settings_button").performScrollTo().performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("settings_island_master_switch").assertIsDisplayed().assertIsOn()
         composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_look"))

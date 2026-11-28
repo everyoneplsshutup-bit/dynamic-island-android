@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Animation
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MusicNote
@@ -220,7 +221,7 @@ fun SettingsHomeScreen(
             }
 
             LazyColumn(
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 108.dp),
+                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier
                     .weight(1f)
@@ -292,7 +293,7 @@ fun SettingsHomeScreen(
                                 Spacer(Modifier.width(12.dp))
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text("Dynamic Island", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                                    Text("v${BuildConfig.VERSION_NAME} · On-Device + Optional LRCLIB", color = IslandColors.TextSecondary, fontSize = 12.sp)
+                                    Text("v${BuildConfig.VERSION_NAME} · Free & On-Device", color = IslandColors.TextSecondary, fontSize = 12.sp)
                                 }
                                 Switch(
                                     checked = settings.islandEnabled,
@@ -523,9 +524,14 @@ fun SettingsHomeScreen(
                                     Text("Control animations and sound effects", color = IslandColors.TextSecondary, fontSize = 12.sp)
                                 }
                             }
-                            Spacer(Modifier.height(10.dp))
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text("Animation Speed", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                            Spacer(Modifier.height(12.dp))
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                                CrimsonSquircleIcon(icon = Icons.Filled.Bolt, size = 34.dp, iconSize = 18.dp, tint = lookAccent)
+                                Spacer(Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Animation Speed", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 13.5.sp)
+                                    Text("Adjust the response speed", color = IslandColors.TextSecondary, fontSize = 11.sp)
+                                }
                                 Text("${String.format("%.1f", settings.animationSpeed)}x", color = lookAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                             }
                             Slider(
@@ -538,11 +544,20 @@ fun SettingsHomeScreen(
                                     inactiveTrackColor = IslandColors.ObsidianCardElevated
                                 )
                             )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Slow", color = IslandColors.TextSecondary, fontSize = 11.sp)
+                                Text("Normal", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+                                Text("Fast", color = IslandColors.TextSecondary, fontSize = 11.sp)
+                            }
+                            Spacer(Modifier.height(10.dp))
                             Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
                                 CrimsonSquircleIcon(icon = Icons.Filled.VolumeUp, size = 34.dp, iconSize = 17.dp, tint = lookAccent)
                                 Spacer(Modifier.width(10.dp))
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Sound Effects", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 13.sp)
+                                    Text("Sound Effects", color = Color.White, fontWeight = FontWeight.Medium, fontSize = 13.5.sp)
                                     Text("Play subtle chimes for actions", color = IslandColors.TextSecondary, fontSize = 11.sp)
                                 }
                                 Switch(
@@ -558,7 +573,7 @@ fun SettingsHomeScreen(
                         }
                     }
 
-                    // 7 Grouped Settings Sections (Look, Motion, Music/Lyrics/Mochi, Pill, Features, Privacy, About)
+                    // 7 Grouped Settings Sections (Look, Motion, Music & Lyrics, Pill, Features, Privacy, About)
                     items(SettingsGroup.entries) { group ->
                         ObsidianGlassCard(
                             highlighted = group == SettingsGroup.ABOUT,

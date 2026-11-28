@@ -18,13 +18,14 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.AspectRatio
 import androidx.compose.material.icons.filled.CenterFocusStrong
 import androidx.compose.material.icons.filled.CheckCircle
@@ -33,10 +34,12 @@ import androidx.compose.material.icons.filled.NotificationsActive
 import androidx.compose.material.icons.filled.OpenWith
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.SwapVert
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -66,6 +69,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.DynamicIslandApp
@@ -73,7 +78,6 @@ import com.example.system.IslandSettings
 import com.example.ui.theme.CrimsonPillButton
 import com.example.ui.theme.CrimsonSquircleIcon
 import com.example.ui.theme.IslandColors
-import com.example.ui.theme.MockupScreenHeader
 import com.example.ui.theme.ObsidianCrimsonBackground
 import com.example.ui.theme.ObsidianGlassCard
 import com.example.ui.theme.ObsidianPillButton
@@ -161,13 +165,40 @@ fun CalibrationScreen(
                 .widthIn(max = 600.dp)
                 .align(Alignment.TopCenter)
         ) {
-            MockupScreenHeader(
-                title = "Calibration",
-                subtitle = "Measure your camera cutout for perfect fit",
-                icon = Icons.Filled.CenterFocusStrong,
-                onBack = onBack,
-                backTestTag = "calibration_back"
-            )
+            // Centered Header matching everyoneplsshutup-calibration-v2.png (<- | Calibration | spacer)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding()
+                    .padding(horizontal = 16.dp, vertical = 10.dp)
+            ) {
+                IconButton(
+                    onClick = onBack,
+                    modifier = Modifier
+                        .size(46.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xD41B1D23))
+                        .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape)
+                        .testTag("calibration_back")
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Text("Calibration", color = Color.White, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        text = "Measure your camera cutout for perfect fit",
+                        color = IslandColors.TextSecondary,
+                        fontSize = 12.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Spacer(Modifier.size(46.dp))
+            }
 
             Column(
                 modifier = Modifier
@@ -177,145 +208,163 @@ fun CalibrationScreen(
                     .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Radar Crosshair Cutout Preview Card matching everyoneplsshutup-calibration.png
-                ObsidianGlassCard(
-                    highlighted = true,
-                    cornerRadius = 24.dp,
-                    contentPadding = PaddingValues(0.dp),
+                // Full-bleed Radar Crosshair Preview matching everyoneplsshutup-calibration-v2.png (real measurements)
+                Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(200.dp)
+                        .height(210.dp),
+                    contentAlignment = Alignment.TopCenter
                 ) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
-                        Canvas(modifier = Modifier.fillMaxSize()) {
-                            val cx = size.width / 2f + settings.cutoutXOffsetDp.dp.toPx()
-                            val topY = (settings.cutoutYOffsetDp + 16f).dp.toPx()
-                            val holeW = previewZone.holeWidthDp.dp.toPx()
-                            val holeH = previewZone.holeHeightDp.dp.toPx()
-                            val holeCy = topY + holeH / 2f
-                            val marginPx = DeadZoneGeometry.REQUIRED_MARGIN_DP.dp.toPx()
-                            val centerPt = Offset(cx, holeCy)
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val cx = size.width / 2f + settings.cutoutXOffsetDp.dp.toPx()
+                        val topY = (settings.cutoutYOffsetDp + 18f).dp.toPx()
+                        val holeW = previewZone.holeWidthDp.dp.toPx()
+                        val holeH = previewZone.holeHeightDp.dp.toPx()
+                        val holeCy = topY + holeH / 2f
+                        val marginPx = DeadZoneGeometry.REQUIRED_MARGIN_DP.dp.toPx()
+                        val centerPt = Offset(cx, holeCy)
 
-                            // Concentric radar rings
-                            listOf(1.1f, 1.8f, 2.7f).forEachIndexed { idx, scale ->
-                                val rad = (maxOf(holeW, holeH) * scale).coerceAtLeast(24f)
-                                drawCircle(
-                                    color = accent.copy(alpha = (0.34f - idx * 0.09f).coerceAtLeast(0.08f)),
-                                    radius = rad,
-                                    center = centerPt,
-                                    style = Stroke(width = 1.4.dp.toPx())
-                                )
-                            }
-
-                            // Crosshair dashed lines
-                            drawLine(
-                                color = accent.copy(alpha = 0.45f),
-                                start = Offset(cx, 0f),
-                                end = Offset(cx, size.height),
-                                strokeWidth = 1.2.dp.toPx()
-                            )
-                            drawLine(
-                                color = accent.copy(alpha = 0.35f),
-                                start = Offset(0f, holeCy),
-                                end = Offset(size.width, holeCy),
-                                strokeWidth = 1.dp.toPx(),
-                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f)
-                            )
-
-                            // Punch-hole camera outline & +8dp dashed Safe Zone
-                            drawRoundRect(
-                                color = accent,
-                                topLeft = Offset(cx - holeW / 2f, topY),
-                                size = Size(holeW, holeH),
-                                cornerRadius = CornerRadius(settings.cutoutCornerRadiusDp.dp.toPx()),
-                                style = Stroke(width = 1.6.dp.toPx())
-                            )
-                            drawRoundRect(
-                                color = accent.copy(alpha = 0.72f),
-                                topLeft = Offset(cx - holeW / 2f - marginPx, (topY - marginPx).coerceAtLeast(2f)),
-                                size = Size(holeW + marginPx * 2f, holeH + marginPx * 2f),
-                                cornerRadius = CornerRadius((settings.cutoutCornerRadiusDp + 6f).dp.toPx()),
-                                style = Stroke(
-                                    width = 1.3.dp.toPx(),
-                                    pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f)
-                                )
+                        // Concentric glowing radar circles
+                        listOf(1.1f, 1.85f, 2.75f).forEachIndexed { idx, scale ->
+                            val rad = (maxOf(holeW, holeH) * scale).coerceAtLeast(26f)
+                            drawCircle(
+                                color = accent.copy(alpha = (0.36f - idx * 0.10f).coerceAtLeast(0.08f)),
+                                radius = rad,
+                                center = centerPt,
+                                style = Stroke(width = 1.4.dp.toPx())
                             )
                         }
 
-                        Box(
-                            modifier = Modifier.offset(
-                                x = settings.cutoutXOffsetDp.dp,
-                                y = (settings.cutoutYOffsetDp + 16f).dp
-                            )
-                        ) {
-                            if (!previewExpanded) {
-                                IdlePillView(
-                                    settings = settings,
-                                    state = previewState,
-                                    exclusionZone = previewZone,
-                                    accentColor = accent,
-                                    isCalibrationPreview = true,
-                                    isDragOverIsland = false,
-                                    isLowBatteryWarning = false
-                                )
-                            } else {
-                                CompactPillView(
-                                    state = previewState,
-                                    settings = settings,
-                                    exclusionZone = previewZone,
-                                    accentColor = accent
-                                )
-                            }
-                        }
-
-                        // Safe Zone pill toggle
-                        Button(
-                            onClick = { previewExpanded = !previewExpanded },
-                            shape = CircleShape,
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (previewExpanded) accent else IslandColors.ObsidianCard,
-                                contentColor = Color.White
+                        // Dashed horizontal & glowing vertical crosshairs
+                        drawLine(
+                            brush = Brush.verticalGradient(
+                                listOf(Color.Transparent, accent.copy(alpha = 0.72f), Color.Transparent)
                             ),
-                            border = BorderStroke(1.dp, accent.copy(alpha = 0.65f)),
-                            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(bottom = 12.dp)
-                                .height(34.dp)
-                                .testTag("calibration_preview_expand")
-                        ) {
-                            Text(
-                                text = if (previewExpanded) "Safe Zone · Live Pill" else "Safe Zone · Idle Ring",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold
+                            start = Offset(cx, 0f),
+                            end = Offset(cx, size.height),
+                            strokeWidth = 1.6.dp.toPx()
+                        )
+                        drawLine(
+                            color = accent.copy(alpha = 0.42f),
+                            start = Offset(0f, holeCy),
+                            end = Offset(size.width, holeCy),
+                            strokeWidth = 1.dp.toPx(),
+                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f)
+                        )
+
+                        // Cutout circle & dashed +8dp Safe Zone ring
+                        drawRoundRect(
+                            color = accent,
+                            topLeft = Offset(cx - holeW / 2f, topY),
+                            size = Size(holeW, holeH),
+                            cornerRadius = CornerRadius(settings.cutoutCornerRadiusDp.dp.toPx()),
+                            style = Stroke(width = 1.6.dp.toPx())
+                        )
+                        drawRoundRect(
+                            color = accent.copy(alpha = 0.78f),
+                            topLeft = Offset(cx - holeW / 2f - marginPx, (topY - marginPx).coerceAtLeast(2f)),
+                            size = Size(holeW + marginPx * 2f, holeH + marginPx * 2f),
+                            cornerRadius = CornerRadius((settings.cutoutCornerRadiusDp + 6f).dp.toPx()),
+                            style = Stroke(
+                                width = 1.4.dp.toPx(),
+                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(10f, 8f), 0f)
+                            )
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier.offset(
+                            x = settings.cutoutXOffsetDp.dp,
+                            y = (settings.cutoutYOffsetDp + 18f).dp
+                        )
+                    ) {
+                        if (!previewExpanded) {
+                            IdlePillView(
+                                settings = settings,
+                                state = previewState,
+                                exclusionZone = previewZone,
+                                accentColor = accent,
+                                isCalibrationPreview = true,
+                                isDragOverIsland = false,
+                                isLowBatteryWarning = false
+                            )
+                        } else {
+                            CompactPillView(
+                                state = previewState,
+                                settings = settings,
+                                exclusionZone = previewZone,
+                                accentColor = accent
                             )
                         }
                     }
+
+                    // Safe Zone badge toggle at bottom of radar zone
+                    Button(
+                        onClick = { previewExpanded = !previewExpanded },
+                        shape = CircleShape,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (previewExpanded) accent.copy(alpha = 0.85f) else Color(0xD41B1D23),
+                            contentColor = Color.White
+                        ),
+                        border = BorderStroke(1.dp, accent.copy(alpha = 0.75f)),
+                        contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp),
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(bottom = 6.dp)
+                            .height(34.dp)
+                            .testTag("calibration_preview_expand")
+                    ) {
+                        Text(
+                            text = if (previewExpanded) "Safe Zone · Live Pill" else "Safe Zone · Idle Ring",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
 
-                // 4-Column Telemetry Strip matching everyoneplsshutup-calibration.png
-                ObsidianGlassCard(contentPadding = PaddingValues(vertical = 14.dp, horizontal = 8.dp)) {
+                // 4-Column REAL Telemetry Card (never fake mockup numbers)
+                ObsidianGlassCard(cornerRadius = 22.dp, contentPadding = PaddingValues(vertical = 14.dp, horizontal = 8.dp)) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceEvenly
                     ) {
-                        TelemetryCell(Icons.Filled.AspectRatio, "Cutout Size", "${liveZone.cutoutRectPx.width()}×${liveZone.cutoutRectPx.height()}", Modifier.weight(1f))
-                        TelemetryCell(Icons.Filled.CenterFocusStrong, "X Offset", "${settings.cutoutXOffsetDp.toInt()} dp", Modifier.weight(1f))
-                        TelemetryCell(Icons.Filled.OpenWith, "Y Offset", "${settings.cutoutYOffsetDp.toInt()} dp", Modifier.weight(1f))
-                        TelemetryCell(Icons.Filled.Height, "Pill Slot", "${settings.pillSizePreset.slotWidthDp.toInt()} dp", Modifier.weight(1f))
+                        TelemetryCell(
+                            Icons.Filled.AspectRatio,
+                            "Cutout px",
+                            "${liveZone.cutoutRectPx.width()}×${liveZone.cutoutRectPx.height()}",
+                            Modifier.weight(1f)
+                        )
+                        TelemetryCell(
+                            Icons.Filled.CenterFocusStrong,
+                            "X Offset",
+                            "${settings.cutoutXOffsetDp.toInt()} dp",
+                            Modifier.weight(1f)
+                        )
+                        TelemetryCell(
+                            Icons.Filled.OpenWith,
+                            "Y Offset",
+                            "${settings.cutoutYOffsetDp.toInt()} dp",
+                            Modifier.weight(1f)
+                        )
+                        TelemetryCell(
+                            Icons.Filled.Height,
+                            "Hole dp",
+                            "${settings.cutoutWidthDp.toInt()}×${settings.cutoutHeightDp.toInt()}",
+                            Modifier.weight(1f)
+                        )
                     }
                 }
 
-                // Auto-Measure Alignment Arc Card matching everyoneplsshutup-calibration-v2.png
-                ObsidianGlassCard(contentPadding = PaddingValues(16.dp)) {
+                // Alignment Score + Auto-Measure / 74x93 px Preset Card
+                ObsidianGlassCard(cornerRadius = 22.dp, contentPadding = PaddingValues(16.dp)) {
                     Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(86.dp)) {
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(82.dp)) {
                             Canvas(modifier = Modifier.fillMaxSize()) {
                                 val sw = 7.dp.toPx()
                                 val pad = sw / 2f + 2.dp.toPx()
                                 val sz = Size(size.width - pad * 2f, size.height - pad * 2f)
                                 drawArc(
-                                    color = IslandColors.ObsidianCardElevated,
+                                    color = Color(0xFF23252D),
                                     startAngle = -90f,
                                     sweepAngle = 360f,
                                     useCenter = false,
@@ -335,7 +384,7 @@ fun CalibrationScreen(
                             }
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                 Text("$alignmentScore%", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                                Text("aligned", color = IslandColors.TextSecondary, fontSize = 11.sp)
+                                Text("aligned", color = IslandColors.TextSecondary, fontSize = 10.5.sp)
                             }
                         }
                         Spacer(Modifier.width(14.dp))
@@ -390,7 +439,7 @@ fun CalibrationScreen(
                                         }
                                     },
                                     shape = CircleShape,
-                                    colors = ButtonDefaults.buttonColors(containerColor = IslandColors.ObsidianCardElevated),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF23252D)),
                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
                                     modifier = Modifier.height(36.dp).testTag("calibration_reset")
                                 ) {
@@ -413,7 +462,7 @@ fun CalibrationScreen(
                                 .weight(1f)
                                 .height(36.dp)
                                 .clip(CircleShape)
-                                .background(if (active) accent.copy(alpha = 0.28f) else IslandColors.ObsidianCard)
+                                .background(if (active) accent.copy(alpha = 0.26f) else Color(0xD41B1D23))
                                 .border(1.dp, if (active) accent else Color.White.copy(alpha = 0.14f), CircleShape)
                                 .clickable { worstCaseFixture = idx }
                         ) {
@@ -422,8 +471,9 @@ fun CalibrationScreen(
                     }
                 }
 
-                // Crimson Glass Slider Cards
-                CrimsonSliderCard(
+                // Slider Cards matching everyoneplsshutup-calibration-v2.png
+                CalibrationSliderCard(
+                    icon = Icons.Filled.Tune,
                     title = "Horizontal X Offset",
                     subtitle = "Center or shift left/right of punch-hole.",
                     value = settings.cutoutXOffsetDp,
@@ -431,7 +481,8 @@ fun CalibrationScreen(
                     unit = "dp"
                 ) { v -> scope.launch { app.settingsRepository.update { it.copy(cutoutXOffsetDp = v) } } }
 
-                CrimsonSliderCard(
+                CalibrationSliderCard(
+                    icon = Icons.Filled.SwapVert,
                     title = "Vertical Y Offset",
                     subtitle = "Move the pill up or down around the camera.",
                     value = settings.cutoutYOffsetDp,
@@ -439,7 +490,8 @@ fun CalibrationScreen(
                     unit = "dp"
                 ) { v -> scope.launch { app.settingsRepository.update { it.copy(cutoutYOffsetDp = v) } } }
 
-                CrimsonSliderCard(
+                CalibrationSliderCard(
+                    icon = Icons.Filled.AspectRatio,
                     title = "Cutout Clearance Width",
                     subtitle = "Clearance gap spanned cleanly across the lens.",
                     value = settings.cutoutWidthDp,
@@ -447,7 +499,8 @@ fun CalibrationScreen(
                     unit = "dp"
                 ) { v -> scope.launch { app.settingsRepository.update { it.copy(cutoutWidthDp = v) } } }
 
-                CrimsonSliderCard(
+                CalibrationSliderCard(
+                    icon = Icons.Filled.Height,
                     title = "Cutout Clearance Height",
                     subtitle = "Minimum vertical clearance around cutout.",
                     value = settings.cutoutHeightDp,
@@ -455,7 +508,8 @@ fun CalibrationScreen(
                     unit = "dp"
                 ) { v -> scope.launch { app.settingsRepository.update { it.copy(cutoutHeightDp = v) } } }
 
-                CrimsonSliderCard(
+                CalibrationSliderCard(
+                    icon = Icons.Filled.CenterFocusStrong,
                     title = "Corner Radius",
                     subtitle = "Outer capsule curvature radius.",
                     value = settings.cutoutCornerRadiusDp,
@@ -481,7 +535,7 @@ fun CalibrationScreen(
                                 autoDismissMs = settings.alertsDwellMs
                             )
                         },
-                        modifier = Modifier.weight(0.85f)
+                        modifier = Modifier.weight(0.85f).height(52.dp)
                     )
                     CrimsonPillButton(
                         text = if (settings.calibrationConfirmed) "Save Calibration" else "Confirm Clear",
@@ -491,11 +545,17 @@ fun CalibrationScreen(
                             scope.launch { app.settingsRepository.update { it.copy(calibrationConfirmed = true) } }
                             onBack()
                         },
-                        modifier = Modifier.weight(1.15f).testTag("calibration_confirm_btn")
+                        modifier = Modifier.weight(1.15f).height(52.dp).testTag("calibration_confirm_btn")
                     )
                 }
 
-                Spacer(Modifier.height(20.dp))
+                Text(
+                    text = "You can re-calibrate anytime from Settings.",
+                    color = IslandColors.TextTertiary,
+                    fontSize = 11.5.sp,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 18.dp)
+                )
             }
         }
     }
@@ -510,14 +570,15 @@ private fun TelemetryCell(
 ) {
     Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = modifier) {
         Icon(icon, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(5.dp))
         Text(label, color = IslandColors.TextSecondary, fontSize = 11.sp)
-        Text(value, color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Text(value, color = Color.White, fontSize = 13.5.sp, fontWeight = FontWeight.Bold)
     }
 }
 
 @Composable
-private fun CrimsonSliderCard(
+private fun CalibrationSliderCard(
+    icon: ImageVector,
     title: String,
     subtitle: String,
     value: Float,
@@ -526,25 +587,25 @@ private fun CrimsonSliderCard(
     onValueChange: (Float) -> Unit
 ) {
     val accent = MaterialTheme.colorScheme.primary
-    ObsidianGlassCard(contentPadding = PaddingValues(14.dp), modifier = Modifier.fillMaxWidth()) {
+    ObsidianGlassCard(cornerRadius = 22.dp, contentPadding = PaddingValues(16.dp), modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-            CrimsonSquircleIcon(icon = Icons.Filled.Tune, size = 38.dp, iconSize = 19.dp)
+            CrimsonSquircleIcon(icon = icon, size = 40.dp, iconSize = 20.dp, tint = accent)
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
-                Text(subtitle, color = IslandColors.TextSecondary, fontSize = 11.sp)
+                Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.5.sp)
+                Text(subtitle, color = IslandColors.TextSecondary, fontSize = 11.5.sp)
             }
             Box(
                 modifier = Modifier
                     .clip(CircleShape)
-                    .background(IslandColors.ObsidianCardElevated)
+                    .background(Color(0xFF20222A))
                     .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape)
-                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                    .padding(horizontal = 11.dp, vertical = 5.dp)
             ) {
                 Text("${value.toInt()} $unit", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
             }
         }
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(6.dp))
         Slider(
             value = value.coerceIn(range.start, range.endInclusive),
             onValueChange = onValueChange,
@@ -552,7 +613,7 @@ private fun CrimsonSliderCard(
             colors = SliderDefaults.colors(
                 thumbColor = accent,
                 activeTrackColor = accent,
-                inactiveTrackColor = IslandColors.ObsidianCardElevated
+                inactiveTrackColor = Color(0xFF252831)
             )
         )
     }

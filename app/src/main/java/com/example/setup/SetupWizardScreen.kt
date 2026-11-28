@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
@@ -37,6 +38,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.AccessibilityNew
 import androidx.compose.material.icons.filled.Alarm
@@ -51,10 +53,10 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.collectAsState
@@ -86,7 +88,6 @@ import com.example.system.IslandSettings
 import com.example.ui.theme.CrimsonPillButton
 import com.example.ui.theme.CrimsonSquircleIcon
 import com.example.ui.theme.IslandColors
-import com.example.ui.theme.MockupScreenHeader
 import com.example.ui.theme.ObsidianCrimsonBackground
 import com.example.ui.theme.ObsidianGlassCard
 import kotlinx.coroutines.Dispatchers
@@ -187,174 +188,96 @@ fun SetupWizardScreen(
         }
     }
 
-    ObsidianCrimsonBackground {
+    val accent = MaterialTheme.colorScheme.primary
+    val coreGrantedCount = listOf(
+        status.accessibilityGranted,
+        status.notificationListenerGranted,
+        status.overlayGranted
+    ).count { it }
+
+    ObsidianCrimsonBackground(showHorizonPlanet = true) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .widthIn(max = 600.dp)
                 .align(Alignment.TopCenter)
+                .verticalScroll(rememberScrollState())
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .padding(horizontal = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            MockupScreenHeader(
-                title = "Setup Wizard",
-                subtitle = "Grant overlay & MIUI permissions",
-                icon = Icons.Filled.Layers,
-                onBack = onDone,
-                backTestTag = "wizard_back"
-            )
-
-            Column(
+            // Subtle top-left back button keeping first screen uncluttered like everyoneplsshutup-setup-wizard.png
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
-                    .weight(1f)
-                    .verticalScroll(rememberScrollState())
-                    .navigationBarsPadding()
-                    .padding(horizontal = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
             ) {
-                // Hero neutral capsule emblem
-                val accent = MaterialTheme.colorScheme.primary
-                var activeStep by remember(status) {
-                    mutableIntStateOf(
-                        when {
-                            !status.accessibilityGranted -> 0
-                            !status.notificationListenerGranted -> 1
-                            !status.overlayGranted -> 2
-                            !settings.calibrationConfirmed -> 3
-                            else -> 4
-                        }
-                    )
-                }
-                Box(
-                    contentAlignment = Alignment.Center,
+                IconButton(
+                    onClick = onDone,
                     modifier = Modifier
-                        .padding(top = 6.dp)
-                        .size(86.dp)
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(
-                            Brush.radialGradient(
-                                colors = listOf(
-                                    accent.copy(alpha = 0.34f),
-                                    IslandColors.ObsidianCardElevated,
-                                    IslandColors.ObsidianBg
-                                )
+                        .size(44.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xD41B1D23))
+                        .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape)
+                        .testTag("wizard_back")
+                ) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back", tint = Color.White)
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            // 96dp Glowing Squircle Capsule Emblem matching everyoneplsshutup-setup-wizard.png
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .size(96.dp)
+                    .clip(RoundedCornerShape(26.dp))
+                    .background(
+                        Brush.radialGradient(
+                            colors = listOf(
+                                accent.copy(alpha = 0.34f),
+                                Color(0xFF1E2028),
+                                Color(0xFF101116)
                             )
                         )
-                        .border(1.4.dp, accent.copy(alpha = 0.65f), RoundedCornerShape(24.dp))
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .width(56.dp)
-                            .height(22.dp)
-                            .clip(CircleShape)
-                            .background(Color.Black)
-                            .border(1.5.dp, accent, CircleShape)
                     )
-                }
-
-                Text(
-                    text = "Dynamic Island",
-                    color = Color.White,
-                    fontSize = 26.sp,
-                    fontWeight = FontWeight.Bold
+                    .border(1.5.dp, accent.copy(alpha = 0.68f), RoundedCornerShape(26.dp))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .width(62.dp)
+                        .height(26.dp)
+                        .clip(CircleShape)
+                        .background(Color.Black)
+                        .border(1.8.dp, accent, CircleShape)
                 )
-                Text(
-                    text = "Your phone, beautifully alive.",
-                    color = IslandColors.TextSecondary,
-                    fontSize = 14.sp
-                )
+            }
 
-                // 5-Step Guided Progress Indicator (Accessibility -> Notifications -> Overlay -> Cutout -> Done)
-                val stepLabels = listOf("Access", "Notifs", "Overlay", "Cutout", "Done")
-                ObsidianGlassCard(contentPadding = PaddingValues(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        stepLabels.forEachIndexed { idx, label ->
-                            val stepDone = when (idx) {
-                                0 -> status.accessibilityGranted
-                                1 -> status.notificationListenerGranted
-                                2 -> status.overlayGranted
-                                3 -> settings.calibrationConfirmed
-                                else -> settings.wizardCompleted
-                            }
-                            val current = activeStep == idx
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { activeStep = idx }
-                                    .padding(vertical = 4.dp)
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier
-                                        .size(26.dp)
-                                        .clip(CircleShape)
-                                        .background(
-                                            when {
-                                                stepDone -> IslandColors.AccentGreen.copy(alpha = 0.25f)
-                                                current -> accent.copy(alpha = 0.28f)
-                                                else -> Color.White.copy(alpha = 0.08f)
-                                            }
-                                        )
-                                        .border(
-                                            1.dp,
-                                            when {
-                                                stepDone -> IslandColors.AccentGreen
-                                                current -> accent
-                                                else -> Color.White.copy(alpha = 0.16f)
-                                            },
-                                            CircleShape
-                                        )
-                                ) {
-                                    if (stepDone) {
-                                        Icon(Icons.Filled.Check, contentDescription = null, tint = IslandColors.AccentGreen, modifier = Modifier.size(14.dp))
-                                    } else {
-                                        Text("${idx + 1}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                                    }
-                                }
-                                Spacer(Modifier.height(4.dp))
-                                Text(
-                                    text = label,
-                                    color = if (current) Color.White else IslandColors.TextSecondary,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (current) FontWeight.Bold else FontWeight.Normal,
-                                    maxLines = 1
-                                )
-                            }
-                        }
-                    }
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(top = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Step ${activeStep + 1} of 5 · ${stepLabels[activeStep]}",
-                            color = accent,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        TextButton(
-                            onClick = {
-                                if (activeStep < 4) activeStep++ else onDone()
-                            },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Text("Skip", color = IslandColors.TextSecondary, fontSize = 12.sp)
-                        }
-                    }
-                }
+            Spacer(Modifier.height(16.dp))
 
-                Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Dynamic Island",
+                color = Color.White,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Your phone, beautifully alive.",
+                color = IslandColors.TextSecondary,
+                fontSize = 14.5.sp
+            )
 
-                // 3 Primary Permission Cards matching setup-wizard mockup
+            Spacer(Modifier.height(22.dp))
+
+            // 3 Core Permission Cards matching everyoneplsshutup-setup-wizard.png
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
                 WizardPermissionRow(
                     title = "Accessibility",
-                    subtitle = "Let the island appear over lock screen & other apps.",
+                    subtitle = "Let the island appear over other apps.",
                     icon = Icons.Filled.AccessibilityNew,
                     granted = status.accessibilityGranted,
                     buttonLabel = "Grant",
@@ -380,7 +303,7 @@ fun SetupWizardScreen(
 
                 WizardPermissionRow(
                     title = "Draw Over Other Apps / Overlay",
-                    subtitle = "Show the island reliably on top of everything.",
+                    subtitle = "Show the island on top of everything.",
                     icon = Icons.Filled.Layers,
                     granted = status.overlayGranted,
                     buttonLabel = "Grant",
@@ -393,42 +316,66 @@ fun SetupWizardScreen(
                         refreshTick++
                     }
                 )
+            }
 
-                // Continue & Skip CTA matching setup-wizard mockup
-                CrimsonPillButton(
-                    text = if (status.accessibilityGranted || status.overlayGranted) "Continue & Activate" else "Finish Setup",
-                    onClick = {
-                        scope.launch {
-                            app.settingsRepository.update {
-                                it.copy(wizardCompleted = true, calibrationConfirmed = true)
-                            }
-                            withContext(Dispatchers.Main) {
-                                if (settings.islandEnabled && (status.accessibilityGranted || status.overlayGranted)) {
-                                    IslandKeepAliveService.start(context)
-                                }
-                                onDone()
-                            }
+            Spacer(Modifier.height(22.dp))
+
+            // Primary Continue Pill CTA + Skip for now + 3 Dots matching everyoneplsshutup-setup-wizard.png
+            CrimsonPillButton(
+                text = if (status.accessibilityGranted || status.overlayGranted) "Continue" else "Continue Setup",
+                onClick = {
+                    scope.launch {
+                        app.settingsRepository.update {
+                            it.copy(wizardCompleted = true, calibrationConfirmed = true)
                         }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("wizard_finish_btn")
-                )
+                        withContext(Dispatchers.Main) {
+                            if (settings.islandEnabled && (status.accessibilityGranted || status.overlayGranted)) {
+                                IslandKeepAliveService.start(context)
+                            }
+                            onDone()
+                        }
+                    }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(54.dp)
+                    .testTag("wizard_finish_btn")
+            )
 
-                Text(
-                    text = "Skip for now",
-                    color = IslandColors.TextSecondary,
-                    fontSize = 13.sp,
-                    textDecoration = TextDecoration.Underline,
-                    modifier = Modifier
-                        .clickable(onClick = onDone)
-                        .padding(vertical = 4.dp)
-                )
+            Spacer(Modifier.height(14.dp))
 
-                // Additional Feature Permissions
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    Text("Additional Permissions", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+            Text(
+                text = "Skip for now",
+                color = IslandColors.TextSecondary,
+                fontSize = 13.5.sp,
+                textDecoration = TextDecoration.Underline,
+                modifier = Modifier
+                    .clickable(onClick = onDone)
+                    .padding(vertical = 4.dp)
+            )
+
+            Spacer(Modifier.height(14.dp))
+
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                val activeDot = coreGrantedCount.coerceIn(0, 2)
+                repeat(3) { idx ->
+                    Box(
+                        modifier = Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(if (idx == activeDot) accent else Color.White.copy(alpha = 0.22f))
+                    )
                 }
+            }
+
+            Spacer(Modifier.height(28.dp))
+
+            // Below-the-fold Additional Permissions & MIUI 14 Checklist
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
+                Text("Additional Permissions", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
 
                 WizardPermissionRow(
                     title = "Post Notifications (Android 13)",
@@ -503,8 +450,7 @@ fun SetupWizardScreen(
                     }
                 )
 
-                // Android 13 Sideload & Restricted Settings Card
-                ObsidianGlassCard(highlighted = !status.accessibilityGranted) {
+                ObsidianGlassCard(cornerRadius = 20.dp, highlighted = !status.accessibilityGranted) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Filled.Warning, contentDescription = null, tint = IslandColors.AccentOrange)
                         Spacer(Modifier.width(8.dp))
@@ -524,17 +470,20 @@ fun SetupWizardScreen(
                             }
                             runCatching { context.startActivity(i) }
                         },
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.50f)),
+                        border = BorderStroke(1.dp, accent.copy(alpha = 0.50f)),
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color.White)
                     ) {
                         Text("Open App Info", fontSize = 12.sp)
                     }
                 }
 
-                // MIUI 14 Checklist
-                Row(modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
-                    Text("MIUI 14 Survival Checklist (Redmi Note 10 Pro)", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                }
+                Text(
+                    "MIUI 14 Survival Checklist (Redmi Note 10 Pro)",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 15.sp,
+                    modifier = Modifier.padding(top = 6.dp)
+                )
 
                 MiuiChecklistCard(
                     step = "1. Autostart — ON",
@@ -571,9 +520,9 @@ fun SetupWizardScreen(
                         runCatching { context.startActivity(i) }
                     }
                 )
-
-                Spacer(Modifier.height(24.dp))
             }
+
+            Spacer(Modifier.height(24.dp))
         }
     }
 }
@@ -590,6 +539,7 @@ private fun WizardPermissionRow(
 ) {
     val accent = MaterialTheme.colorScheme.primary
     ObsidianGlassCard(
+        cornerRadius = 20.dp,
         highlighted = !granted,
         contentPadding = PaddingValues(14.dp),
         modifier = Modifier.fillMaxWidth()
@@ -598,14 +548,16 @@ private fun WizardPermissionRow(
             CrimsonSquircleIcon(
                 icon = if (granted) Icons.Filled.Check else icon,
                 tint = if (granted) IslandColors.AccentGreen else accent,
-                size = 44.dp
+                size = 46.dp,
+                iconSize = 22.dp
             )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
+                Text(title, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.5.sp)
+                Spacer(Modifier.height(2.dp))
                 Text(subtitle, color = IslandColors.TextSecondary, fontSize = 12.sp)
             }
-            Spacer(Modifier.width(8.dp))
+            Spacer(Modifier.width(10.dp))
             Button(
                 onClick = onAction,
                 shape = CircleShape,
@@ -617,12 +569,12 @@ private fun WizardPermissionRow(
                     1.dp,
                     if (granted) IslandColors.AccentGreen.copy(alpha = 0.65f) else accent.copy(alpha = 0.72f)
                 ),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 6.dp),
                 modifier = Modifier.height(38.dp).testTag(testTag)
             ) {
                 Text(
                     text = if (granted) "Granted" else buttonLabel,
-                    fontSize = 12.sp,
+                    fontSize = 12.5.sp,
                     fontWeight = FontWeight.SemiBold
                 )
             }
@@ -638,7 +590,7 @@ private fun MiuiChecklistCard(
     onClick: () -> Unit
 ) {
     val accent = MaterialTheme.colorScheme.primary
-    ObsidianGlassCard(contentPadding = PaddingValues(14.dp), modifier = Modifier.fillMaxWidth()) {
+    ObsidianGlassCard(cornerRadius = 20.dp, contentPadding = PaddingValues(14.dp), modifier = Modifier.fillMaxWidth()) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(modifier = Modifier.weight(1f)) {
                 Text(step, color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
