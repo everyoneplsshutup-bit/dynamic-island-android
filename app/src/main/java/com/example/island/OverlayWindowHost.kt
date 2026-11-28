@@ -49,6 +49,7 @@ import com.example.system.HapticsStrength
 import com.example.system.IslandGesture
 import com.example.system.IslandSettings
 import com.example.system.IslandTab
+import com.example.system.LockScreenPreset
 import com.example.system.PillStyle
 import com.example.system.PillSwipeAction
 import com.example.system.WhenIdleMode
@@ -232,6 +233,9 @@ class OverlayWindowHost(
             y = 0
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 layoutInDisplayCutoutMode = cutoutMode
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                preferredRefreshRate = 120f
             }
         }
         drawingParams = dParams
@@ -533,6 +537,28 @@ class OverlayWindowHost(
         val wm = windowManager ?: return
         val view = drawingComposeView ?: return
         val params = drawingParams ?: return
+
+        val hideDrawingWindow = (!settings.islandEnabled && !state.isCalibrationPreview) ||
+            (state.mode == IslandMode.IDLE &&
+                !state.isCalibrationPreview &&
+                !state.isDragOverIsland &&
+                !state.privacyIndicator.anyActive &&
+                (settings.whenIdleMode == WhenIdleMode.HIDDEN ||
+                    (state.isLandscapeQuiet && settings.landscapeQuietMode) ||
+                    (state.isDeviceLocked && settings.lockScreenPreset == LockScreenPreset.HIDDEN)))
+        if (hideDrawingWindow) {
+            shrinkDrawingJob?.cancel()
+            shrinkDrawingJob = null
+            if (lastDrawingSignature != "GONE") {
+                lastDrawingSignature = "GONE"
+                view.visibility = View.GONE
+            }
+            return
+        }
+        if (view.visibility != View.VISIBLE) {
+            view.visibility = View.VISIBLE
+        }
+
         val zone = zoneInput ?: DeadZoneGeometry.measureLive(serviceContext, settings)
         val density = zone.density
 
@@ -610,14 +636,9 @@ class OverlayWindowHost(
             }
             val idleCameraMetrics = DeadZoneGeometry.idleCameraPillMetrics(
                 holeWidthDp = zone.holeWidthDp,
-                holeHeightDp = zone.holeHeightDp,
-                appleWidth = settings.appleWidthIdlePill
+                holeHeightDp = zone.holeHeightDp
             )
-            val idleWidthDp = when (settings.whenIdleMode) {
-                WhenIdleMode.INFO_PILL -> metrics.totalWidthDp
-                WhenIdleMode.CAMERA_ONLY -> idleCameraMetrics.widthDp
-                WhenIdleMode.HIDDEN -> idleCameraMetrics.widthDp
-            }
+            val idleWidthDp = idleCameraMetrics.widthDp
             val pillWidthDp = when (state.mode) {
                 IslandMode.IDLE -> idleWidthDp
                 IslandMode.COMPACT -> metrics.totalWidthDp
@@ -735,16 +756,11 @@ class OverlayWindowHost(
         }
         val idleCameraMetrics = DeadZoneGeometry.idleCameraPillMetrics(
             holeWidthDp = zone.holeWidthDp,
-            holeHeightDp = zone.holeHeightDp,
-            appleWidth = settings.appleWidthIdlePill
+            holeHeightDp = zone.holeHeightDp
         )
 
         if (!zone.isLandscape) {
-            val idleWidthDp = when (settings.whenIdleMode) {
-                WhenIdleMode.INFO_PILL -> metrics.totalWidthDp
-                WhenIdleMode.CAMERA_ONLY -> idleCameraMetrics.widthDp.coerceAtLeast(48f)
-                WhenIdleMode.HIDDEN -> 48f
-            }
+            val idleWidthDp = idleCameraMetrics.widthDp.coerceAtLeast(48f)
             val pillWidthDp = when (state.mode) {
                 IslandMode.IDLE -> idleWidthDp
                 IslandMode.COMPACT -> metrics.totalWidthDp

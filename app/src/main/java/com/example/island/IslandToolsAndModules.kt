@@ -61,7 +61,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
@@ -85,7 +84,6 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FlashlightOn
 import androidx.compose.material.icons.filled.FolderOpen
-import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
@@ -93,7 +91,6 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.PushPin
-import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Restore
 import androidx.compose.material.icons.filled.Screenshot
 import androidx.compose.material.icons.filled.Search
@@ -710,10 +707,6 @@ fun ToolsIslandPanel(
         mutableIntStateOf(audioManager?.getStreamVolume(AudioManager.STREAM_MUSIC) ?: (maxVolume / 2))
     }
     var installedApps by remember { mutableStateOf<List<LaunchableApp>>(emptyList()) }
-    var activeMiniTool by remember { mutableStateOf<String?>(null) }
-    var qrInput by remember { mutableStateOf("") }
-    val glyfStrokes = remember { mutableStateListOf<StrokePoint>() }
-    var glyfStatus by remember { mutableStateOf("Draw C, W, or O") }
 
     LaunchedEffect(Unit) {
         app.quickTogglesManager.refreshSystemStates()
@@ -736,10 +729,9 @@ fun ToolsIslandPanel(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(max = 240.dp)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+            .heightIn(max = 236.dp)
+            .padding(horizontal = 16.dp, vertical = 2.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp)
     ) {
         var tileSeq = 0
         gridToggles.chunked(3).forEach { rowItems ->
@@ -855,7 +847,7 @@ fun ToolsIslandPanel(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(26.dp)
+                .height(22.dp)
         ) {
             Icon(Icons.Filled.BrightnessHigh, contentDescription = "Brightness", tint = IslandColors.TextSecondary, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(8.dp))
@@ -926,7 +918,7 @@ fun ToolsIslandPanel(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
-                .height(26.dp)
+                .height(22.dp)
         ) {
             Icon(Icons.AutoMirrored.Filled.VolumeUp, contentDescription = "Media Volume", tint = IslandColors.TextSecondary, modifier = Modifier.size(16.dp))
             Spacer(Modifier.width(8.dp))
@@ -987,7 +979,7 @@ fun ToolsIslandPanel(
                     horizontalArrangement = Arrangement.Center,
                     modifier = Modifier
                         .weight(1f)
-                        .height(44.dp)
+                        .height(38.dp)
                         .clip(CircleShape)
                         .background(Color.White.copy(alpha = 0.14f))
                         .border(0.75.dp, Color.White.copy(alpha = 0.22f), CircleShape)
@@ -1000,9 +992,9 @@ fun ToolsIslandPanel(
                         .padding(horizontal = 8.dp)
                         .testTag("tools_screenshot_vault_btn")
                 ) {
-                    Icon(Icons.Filled.Screenshot, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Filled.Screenshot, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(5.dp))
-                    Text("Shelf Snap", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                    Text("Shelf Snap", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                 }
             }
             if (settings.ocrFeatureEnabled) {
@@ -1011,7 +1003,7 @@ fun ToolsIslandPanel(
                     horizontalArrangement = Arrangement.Center,
                     modifier = Modifier
                         .weight(1f)
-                        .height(44.dp)
+                        .height(38.dp)
                         .clip(CircleShape)
                         .background(if (settings.screenReadingEnabled) accentColor.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.10f))
                         .border(0.75.dp, if (settings.screenReadingEnabled) accentColor else Color.White.copy(alpha = 0.20f), CircleShape)
@@ -1028,9 +1020,9 @@ fun ToolsIslandPanel(
                         .padding(horizontal = 8.dp)
                         .testTag("tools_select_ocr_btn")
                 ) {
-                    Icon(Icons.Filled.SelectAll, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+                    Icon(Icons.Filled.SelectAll, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
                     Spacer(Modifier.width(5.dp))
-                    Text("OCR", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
+                    Text("OCR", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, softWrap = false)
                 }
             }
             Row(
@@ -1038,7 +1030,7 @@ fun ToolsIslandPanel(
                 horizontalArrangement = Arrangement.Center,
                 modifier = Modifier
                     .weight(1f)
-                    .height(44.dp)
+                    .height(38.dp)
                     .clip(CircleShape)
                     .background(if (isScreenRecording) IslandColors.AccentRed.copy(alpha = 0.30f) else Color.White.copy(alpha = 0.12f))
                     .border(0.75.dp, if (isScreenRecording) IslandColors.AccentRed else Color.White.copy(alpha = 0.20f), CircleShape)
@@ -1059,13 +1051,13 @@ fun ToolsIslandPanel(
                     imageVector = if (isScreenRecording) Icons.Filled.Stop else Icons.Filled.Videocam,
                     contentDescription = "Screen Record",
                     tint = if (isScreenRecording) IslandColors.AccentRed else Color.White,
-                    modifier = Modifier.size(16.dp)
+                    modifier = Modifier.size(15.dp)
                 )
                 Spacer(Modifier.width(5.dp))
                 Text(
                     text = if (isScreenRecording) "Stop Rec" else "Record",
                     color = Color.White,
-                    fontSize = 12.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
                     softWrap = false
@@ -1073,166 +1065,7 @@ fun ToolsIslandPanel(
             }
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(32.dp)
-                    .clip(CircleShape)
-                    .background(if (activeMiniTool == "QR") accentColor.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.09f))
-                    .border(0.75.dp, if (activeMiniTool == "QR") accentColor else Color.White.copy(alpha = 0.16f), CircleShape)
-                    .clickable {
-                        onHaptic()
-                        app.soundManager.playTap()
-                        activeMiniTool = if (activeMiniTool == "QR") null else "QR"
-                        app.islandController.setKeyboardFocusNeeded(activeMiniTool == "QR")
-                    }
-                    .testTag("tools_qr_btn")
-            ) {
-                Icon(Icons.Filled.QrCode2, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                Spacer(Modifier.width(5.dp))
-                Text("QR Gen", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-            }
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(32.dp)
-                    .clip(CircleShape)
-                    .background(if (activeMiniTool == "GLYF") accentColor.copy(alpha = 0.28f) else Color.White.copy(alpha = 0.09f))
-                    .border(0.75.dp, if (activeMiniTool == "GLYF") accentColor else Color.White.copy(alpha = 0.16f), CircleShape)
-                    .clickable {
-                        onHaptic()
-                        app.soundManager.playTap()
-                        activeMiniTool = if (activeMiniTool == "GLYF") null else "GLYF"
-                        app.islandController.setKeyboardFocusNeeded(false)
-                    }
-                    .testTag("tools_glyf_btn")
-            ) {
-                Icon(Icons.Filled.Gesture, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                Spacer(Modifier.width(5.dp))
-                Text("Glyf Pad", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-            }
-        }
-
-        if (activeMiniTool == "QR") {
-            val qrBmp = remember(qrInput) {
-                if (qrInput.isNotBlank()) QrCodeGenerator.generateBitmap(qrInput.trim(), 256) else null
-            }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.White.copy(alpha = 0.08f))
-                    .padding(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color.Black.copy(alpha = 0.35f))
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
-                    ) {
-                        if (qrInput.isEmpty()) {
-                            Text("URL or text for QR…", color = IslandColors.TextTertiary, fontSize = 11.sp)
-                        }
-                        BasicTextField(
-                            value = qrInput,
-                            onValueChange = { qrInput = it },
-                            singleLine = true,
-                            textStyle = TextStyle(color = Color.White, fontSize = 12.sp),
-                            cursorBrush = SolidColor(accentColor),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .onFocusChanged { if (it.isFocused) app.islandController.setKeyboardFocusNeeded(true) }
-                        )
-                    }
-                    Text("Offline ZXing QR · No network", color = IslandColors.TextTertiary, fontSize = 11.sp)
-                }
-                if (qrBmp != null) {
-                    Image(
-                        bitmap = qrBmp.asImageBitmap(),
-                        contentDescription = "Generated QR code",
-                        modifier = Modifier
-                            .size(56.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                            .background(Color.White)
-                    )
-                }
-            }
-        } else if (activeMiniTool == "GLYF") {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(Color.White.copy(alpha = 0.08f))
-                    .padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Text(glyfStatus, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Medium)
-                Canvas(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(74.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color.Black.copy(alpha = 0.45f))
-                        .pointerInput(settings.glyphCApp, settings.glyphWApp, settings.glyphOApp) {
-                            detectDragGestures(
-                                onDragStart = { p -> glyfStrokes.clear(); glyfStrokes.add(StrokePoint(p.x, p.y)) },
-                                onDrag = { c, _ -> c.consume(); glyfStrokes.add(StrokePoint(c.position.x, c.position.y)) },
-                                onDragEnd = {
-                                    val g = GlyfStrokeRecognizer.recognize(glyfStrokes.toList())
-                                    val pkg = when (g) {
-                                        GlyfGesture.C -> settings.glyphCApp
-                                        GlyfGesture.W -> settings.glyphWApp
-                                        GlyfGesture.O -> settings.glyphOApp
-                                        null -> ""
-                                    }
-                                    if (g != null && pkg.isNotBlank()) {
-                                        val li = context.packageManager.getLaunchIntentForPackage(pkg)?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                        if (li != null) {
-                                            runCatching { context.startActivity(li) }
-                                            onCollapse()
-                                        } else {
-                                            glyfStatus = "Cannot launch ${g.symbol}"
-                                        }
-                                    } else if (g != null) {
-                                        glyfStatus = "Assign '${g.symbol}' app in Settings → Features"
-                                    } else {
-                                        glyfStatus = "Try again: C, W, or O"
-                                    }
-                                }
-                            )
-                        }
-                ) {
-                    if (glyfStrokes.size > 1) {
-                        val path = Path().apply {
-                            moveTo(glyfStrokes.first().x, glyfStrokes.first().y)
-                            for (i in 1 until glyfStrokes.size) lineTo(glyfStrokes[i].x, glyfStrokes[i].y)
-                        }
-                        drawPath(path, accentColor, style = Stroke(width = 3.dp.toPx(), cap = StrokeCap.Round))
-                    }
-                }
-            }
-        }
-
-        Text(
-            text = "Protected / DRM apps appear black in recordings",
-            color = IslandColors.TextTertiary,
-            fontSize = 11.sp
-        )
-
-        // Pinned Quick-Launch Apps Strip
+        // Pinned Quick-Launch Apps Strip (replaces caption when pinned apps exist to guarantee zero dock overlap)
         if (pinnedQuickApps.isNotEmpty()) {
             LazyRow(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -1244,7 +1077,7 @@ fun ToolsIslandPanel(
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
-                            .height(44.dp)
+                            .height(32.dp)
                             .clip(CircleShape)
                             .background(Color.White.copy(alpha = 0.08f))
                             .border(0.75.dp, Color.White.copy(alpha = 0.14f), CircleShape)
@@ -1258,15 +1091,15 @@ fun ToolsIslandPanel(
                     ) {
                         val bmp = quickApp.iconBitmap
                         if (bmp != null) {
-                            Image(bitmap = bmp, contentDescription = quickApp.label, modifier = Modifier.size(22.dp).clip(CircleShape))
+                            Image(bitmap = bmp, contentDescription = quickApp.label, modifier = Modifier.size(18.dp).clip(CircleShape))
                         } else {
-                            Box(Modifier.size(22.dp).clip(CircleShape).background(accentColor.copy(alpha = 0.35f)))
+                            Box(Modifier.size(18.dp).clip(CircleShape).background(accentColor.copy(alpha = 0.35f)))
                         }
                         Spacer(Modifier.width(6.dp))
                         Text(
                             text = quickApp.label,
                             color = IslandColors.TextPrimary,
-                            fontSize = 12.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -1274,6 +1107,13 @@ fun ToolsIslandPanel(
                     }
                 }
             }
+        } else {
+            Text(
+                text = "Protected / DRM apps appear black in recordings",
+                color = IslandColors.TextTertiary,
+                fontSize = 11.sp,
+                maxLines = 1
+            )
         }
     }
 }
@@ -1463,7 +1303,7 @@ private fun ToggleTile(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
         modifier = modifier
-            .height(52.dp)
+            .height(44.dp)
             .graphicsLayer {
                 scaleX = popScaleState.value
                 scaleY = popScaleState.value
@@ -1487,15 +1327,15 @@ private fun ToggleTile(
                 indication = null,
                 onClick = onClick
             )
-            .padding(vertical = 4.dp, horizontal = 4.dp)
+            .padding(vertical = 3.dp, horizontal = 4.dp)
     ) {
         Icon(
             imageVector = icon,
             contentDescription = label,
             tint = if (isActive) Color.White else accentColor,
-            modifier = Modifier.size(18.dp)
+            modifier = Modifier.size(16.dp)
         )
-        Spacer(Modifier.height(3.dp))
+        Spacer(Modifier.height(2.dp))
         Text(
             text = label,
             color = IslandColors.TextPrimary,

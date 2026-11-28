@@ -1,6 +1,6 @@
 {
   "name": "Dynamic Island",
-  "description": "Camera-aware compact Dynamic Island overlay for Android with PixelMusic controls, attached pill timer, app search & pinned apps, notes, 10-minute photo shelf with cropping, opt-in on-device OCR, and floating windows.",
+  "description": "Camera-aware compact Dynamic Island overlay for Android with Apple Liquid Glass morphing, PixelMusic controls, attached pill timer, app search & pinned apps, notes, 10-minute photo shelf, and opt-in on-device OCR.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

@@ -407,7 +407,8 @@ class CameraDeadZoneTest {
         assertTrue("Rendered idle_camera_ring must be tight around camera (<65dp), got $idleWidthDp", idleWidthDp < 65f)
 
         val appleIdle = DeadZoneGeometry.idleCameraPillMetrics(zone.holeWidthDp, zone.holeHeightDp, appleWidth = true)
-        assertTrue("Apple-width idle pill must be 125dp, got ${appleIdle.widthDp}", kotlin.math.abs(appleIdle.widthDp - 125f) <= 0.5f)
+        assertTrue("Idle pill must stay a tight camera circle (32..44dp), got ${appleIdle.widthDp}", appleIdle.widthDp in 32f..44f)
+        org.junit.Assert.assertEquals(appleIdle.widthDp, appleIdle.heightDp, 0.01f)
     }
 
     @Test

@@ -721,13 +721,12 @@ class DynamicIslandRobolectricTest {
         composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_about"))
         composeRule.onNodeWithTag("settings_group_about").assertIsDisplayed()
 
-        // Open Settings > Look (Appearance) and tap all 3 live previews + size presets (must never crash)
+        // Open Settings > Look (Appearance) and tap both live previews + size presets (must never crash)
         composeRule.onNodeWithTag("settings_home_list").performScrollToNode(hasTestTag("settings_group_look"))
         composeRule.onNodeWithTag("settings_group_look").performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("look_preview_black").assertIsDisplayed().performClick()
-        composeRule.onNodeWithTag("look_preview_apple_glass").assertIsDisplayed().performClick()
-        composeRule.onNodeWithTag("look_preview_liquid_glass").assertIsDisplayed().performClick()
+        composeRule.onNodeWithTag("look_preview_apple_liquid").assertIsDisplayed().performClick()
         composeRule.onNodeWithTag("look_size_large").assertIsDisplayed().performClick()
         composeRule.waitForIdle()
         composeRule.onNodeWithTag("settings_detail_back").performClick()
@@ -819,22 +818,22 @@ class DynamicIslandRobolectricTest {
         repo.update {
             it.copy(
                 islandEnabled = false,
-                pillStyle = com.example.system.PillStyle.APPLE_GLASS,
+                pillStyle = com.example.system.PillStyle.APPLE_LIQUID,
                 pillSizePreset = com.example.system.PillSizePreset.LARGE
             )
         }
         val saved = repo.settingsFlow.first()
         assertFalse(saved.islandEnabled)
-        assertEquals(com.example.system.PillStyle.APPLE_GLASS, saved.pillStyle)
+        assertEquals(com.example.system.PillStyle.APPLE_LIQUID, saved.pillStyle)
         assertEquals(com.example.system.PillSizePreset.LARGE, saved.pillSizePreset)
         repo.resetSettings()
     }
 
     @Test
-    fun `round 3 defaults, shelf main dock, reels chip off, diagnostics, and approval prompt behave cleanly`() {
+    fun `round 5 defaults, shelf main dock, reels chip off, diagnostics, and approval prompt behave cleanly`() {
         val defaults = IslandSettings()
         assertEquals(2000L, defaults.alertsDwellMs)
-        assertEquals(com.example.system.PillStyle.LIQUID_GLASS, defaults.pillStyle)
+        assertEquals(com.example.system.PillStyle.APPLE_LIQUID, defaults.pillStyle)
         assertFalse(defaults.reelOverlayEnabled)
         assertFalse(defaults.appleWidthIdlePill)
         assertTrue(defaults.lyricsFromInternet)
@@ -943,49 +942,13 @@ class DynamicIslandRobolectricTest {
     }
 
     @Test
-    fun `round 4 glyf recognizer, reply safety guard, qr generator, room permanent vault and deadzone caps work`() = kotlinx.coroutines.runBlocking {
-        // 1. GlyfStrokeRecognizer: 'O', 'W', 'C' and noise rejection
-        val circlePoints = (0..24).map { i ->
-            val angle = (2.0 * Math.PI * i) / 24.0
-            com.example.island.StrokePoint(
-                x = (120f + 50f * kotlin.math.cos(angle)).toFloat(),
-                y = (120f + 50f * kotlin.math.sin(angle)).toFloat()
-            )
-        }
-        assertEquals(com.example.island.GlyfGesture.O, com.example.island.GlyfStrokeRecognizer.recognize(circlePoints))
-
-        val wRaw = listOf(
-            0f to 10f, 10f to 45f, 20f to 85f, 25f to 110f,
-            35f to 75f, 50f to 35f, 65f to 75f, 75f to 110f,
-            85f to 75f, 95f to 40f, 105f to 10f
-        ).map { (x, y) -> com.example.island.StrokePoint(x, y) }
-        assertEquals(com.example.island.GlyfGesture.W, com.example.island.GlyfStrokeRecognizer.recognize(wRaw))
-
-        val cPoints = (0..16).map { i ->
-            val t = i / 16f
-            val angle = (-Math.PI / 3.0) + t * (-4.0 * Math.PI / 3.0)
-            com.example.island.StrokePoint(
-                x = (100f + 60f * kotlin.math.cos(angle)).toFloat(),
-                y = (100f + 60f * kotlin.math.sin(angle)).toFloat()
-            )
-        }
-        assertEquals(com.example.island.GlyfGesture.C, com.example.island.GlyfStrokeRecognizer.recognize(cPoints))
-        assertNull(com.example.island.GlyfStrokeRecognizer.recognize(listOf(com.example.island.StrokePoint(0f, 0f), com.example.island.StrokePoint(5f, 5f))))
-
-        // 2. ReplySafetyGuard
+    fun `round 5 reply safety guard, room permanent vault and deadzone caps work`() = kotlinx.coroutines.runBlocking {
+        // 1. ReplySafetyGuard
         assertTrue(com.example.notifications.ReplySafetyGuard.isSensitiveContext("Bank Alert", "Approve UPI transfer"))
         assertTrue(com.example.notifications.ReplySafetyGuard.requiresDoubleConfirm("Auth", "Message", "Your password is 123"))
         assertFalse(com.example.notifications.ReplySafetyGuard.isSensitiveContext("Alex", "See you at lunch"))
 
-        // 3. QrCodeGenerator
-        assertNull(com.example.island.QrCodeGenerator.generateBitmap("   "))
-        val qrBmp = com.example.island.QrCodeGenerator.generateBitmap("https://example.com", sizePx = 128)
-        assertNotNull(qrBmp)
-        assertEquals(128, qrBmp!!.width)
-        assertEquals(128, qrBmp.height)
-        qrBmp.recycle()
-
-        // 4. Room TaskDao & VaultDao permanent exemption
+        // 2. Room TaskDao & VaultDao permanent exemption
         val app = composeRule.activity.application as DynamicIslandApp
         val taskDao = app.database.taskDao()
         val taskId = taskDao.upsert(com.example.notes.TaskEntity(title = "Buy milk"))
@@ -1012,12 +975,12 @@ class DynamicIslandRobolectricTest {
         assertEquals("Renamed_Rec", vaultDao.getById(permId)?.displayName)
         vaultDao.deleteById(permId)
 
-        // 5. DeadZoneGeometry & MotionTokens Round 4 invariants
+        // 3. DeadZoneGeometry & MotionTokens Round 5 invariants
         assertEquals(360f, com.example.island.DeadZoneGeometry.MEDIUM_MAX_WIDTH_DP, 0.01f)
         assertEquals(369f, com.example.island.DeadZoneGeometry.FULL_MAX_WIDTH_DP, 0.01f)
         assertTrue(com.example.island.DeadZoneGeometry.musicCompactPillMetrics(27f, 34f).totalWidthDp <= 210f)
-        assertTrue(com.example.island.DeadZoneGeometry.idleCameraPillMetrics(27f, 34f, false).widthDp in 48f..58f)
-        assertEquals(125f, com.example.island.DeadZoneGeometry.idleCameraPillMetrics(27f, 34f, true).widthDp, 0.01f)
+        assertTrue(com.example.island.DeadZoneGeometry.idleCameraPillMetrics(27f, 34f, false).widthDp in 32f..44f)
+        assertTrue(com.example.island.DeadZoneGeometry.idleCameraPillMetrics(27f, 34f, true).widthDp in 32f..44f)
         assertEquals(0.85f, MotionTokens.computeMorphFraction(85f, 0f, 100f), 0.001f)
     }
 

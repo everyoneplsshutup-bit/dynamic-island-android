@@ -45,12 +45,15 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -387,86 +390,160 @@ fun ObsidianPillButton(
 }
 
 @Composable
+fun FloatingGlassPillDock(
+    selectedTab: MainDockTab,
+    onSelectTab: (MainDockTab) -> Unit,
+    modifier: Modifier = Modifier,
+    pillStyle: com.example.system.PillStyle = com.example.system.PillStyle.APPLE_LIQUID,
+    glassDensity: Float = 0.65f,
+    reduceGlass: Boolean = false
+) {
+    val accent = MaterialTheme.colorScheme.primary
+    val backdrop = LocalAppBackdrop.current
+    val dockShape = RoundedCornerShape(28.dp)
+    val tabs = MainDockTab.entries
+    val selectedIndex = tabs.indexOf(selectedTab).coerceAtLeast(0)
+
+    var prevIndex by androidx.compose.runtime.remember { androidx.compose.runtime.mutableIntStateOf(selectedIndex) }
+    val movingRight = selectedIndex >= prevIndex
+    androidx.compose.runtime.LaunchedEffect(selectedIndex) {
+        prevIndex = selectedIndex
+    }
+
+    val leftFracState = androidx.compose.animation.core.animateFloatAsState(
+        targetValue = selectedIndex.toFloat(),
+        animationSpec = if (movingRight) MotionTokens.dockTrailingSpring() else MotionTokens.dockLeadingSpring(),
+        label = "dock_pill_left"
+    )
+    val rightFracState = androidx.compose.animation.core.animateFloatAsState(
+        targetValue = selectedIndex.toFloat(),
+        animationSpec = if (movingRight) MotionTokens.dockLeadingSpring() else MotionTokens.dockTrailingSpring(),
+        label = "dock_pill_right"
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .navigationBarsPadding()
+            .padding(horizontal = 10.dp, vertical = 8.dp)
+            .islandGlassChrome(
+                shape = dockShape,
+                pillStyle = pillStyle,
+                glassDensity = glassDensity,
+                reduceGlass = reduceGlass,
+                solidFallback = false,
+                accentColor = accent,
+                isHighlighted = false,
+                backdrop = backdrop,
+                isRegularCard = false
+            )
+            .testTag("floating_glass_bottom_dock")
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 6.dp, vertical = 6.dp)
+        ) {
+            // Sliding glowing liquid pill indicator underneath active tab
+            Canvas(
+                modifier = Modifier
+                    .matchParentSize()
+            ) {
+                val count = tabs.size.coerceAtLeast(1)
+                val slotW = size.width / count
+                val rawL = kotlin.math.min(leftFracState.value, rightFracState.value)
+                val rawR = kotlin.math.max(leftFracState.value, rightFracState.value)
+                val leftX = rawL * slotW + 2.dp.toPx()
+                val rightX = (rawR + 1f) * slotW - 2.dp.toPx()
+                val pillW = (rightX - leftX).coerceAtLeast(slotW * 0.72f)
+                val radiusPx = (size.height / 2f).coerceAtMost(20.dp.toPx())
+
+                drawRoundRect(
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(
+                            accent.copy(alpha = 0.24f),
+                            accent.copy(alpha = 0.36f),
+                            accent.copy(alpha = 0.24f)
+                        ),
+                        startX = leftX,
+                        endX = leftX + pillW
+                    ),
+                    topLeft = Offset(leftX, 1.dp.toPx()),
+                    size = androidx.compose.ui.geometry.Size(pillW, size.height - 2.dp.toPx()),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(radiusPx, radiusPx)
+                )
+                drawRoundRect(
+                    color = accent.copy(alpha = 0.75f),
+                    topLeft = Offset(leftX + pillW * 0.24f, size.height - 3.dp.toPx()),
+                    size = androidx.compose.ui.geometry.Size(pillW * 0.52f, 2.5.dp.toPx()),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(4f, 4f)
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                tabs.forEach { tab ->
+                    val isSelected = tab == selectedTab
+                    val iconScaleState = androidx.compose.animation.core.animateFloatAsState(
+                        targetValue = if (isSelected) MotionTokens.DOCK_ACTIVE_ICON_SCALE else 1f,
+                        animationSpec = MotionTokens.dockIconScaleSpring(),
+                        label = "dock_icon_scale_${tab.name}"
+                    )
+                    val itemColor = if (isSelected) Color.White else IslandColors.TextMuted
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center,
+                        modifier = Modifier
+                            .weight(1f)
+                            .minimumInteractiveComponentSize()
+                            .clip(RoundedCornerShape(16.dp))
+                            .clickable { onSelectTab(tab) }
+                            .padding(vertical = 4.dp)
+                            .graphicsLayer {
+                                alpha = if (isSelected) 1f else MotionTokens.DOCK_INACTIVE_ALPHA
+                            }
+                            .testTag("dock_tab_${tab.name.lowercase()}")
+                    ) {
+                        Icon(
+                            imageVector = tab.icon,
+                            contentDescription = tab.label,
+                            tint = if (isSelected) accent else itemColor,
+                            modifier = Modifier
+                                .size(20.dp)
+                                .graphicsLayer {
+                                    scaleX = iconScaleState.value
+                                    scaleY = iconScaleState.value
+                                }
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = tab.label,
+                            color = itemColor,
+                            fontSize = 11.sp,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                            maxLines = 1,
+                            softWrap = false,
+                            overflow = TextOverflow.Clip
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 fun FloatingGlassBottomDock(
     selectedTab: MainDockTab,
     onSelectTab: (MainDockTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val accent = MaterialTheme.colorScheme.primary
-    val dockShape = RoundedCornerShape(26.dp)
-    Surface(
-        shape = dockShape,
-        color = Color.Transparent,
+    FloatingGlassPillDock(
+        selectedTab = selectedTab,
+        onSelectTab = onSelectTab,
         modifier = modifier
-            .fillMaxWidth()
-            .navigationBarsPadding()
-            .padding(horizontal = 10.dp, vertical = 8.dp)
-            .clip(dockShape)
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(Color(0xF21E1E22), Color(0xF8151518))
-                )
-            )
-            .border(
-                width = 1.dp,
-                brush = Brush.linearGradient(
-                    colors = listOf(
-                        Color.White.copy(alpha = 0.16f),
-                        accent.copy(alpha = 0.35f),
-                        Color.White.copy(alpha = 0.08f)
-                    )
-                ),
-                shape = dockShape
-            )
-            .testTag("floating_glass_bottom_dock")
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            MainDockTab.entries.forEach { tab ->
-                val isSelected = tab == selectedTab
-                val itemColor = if (isSelected) accent else IslandColors.TextMuted
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.Center,
-                    modifier = Modifier
-                        .weight(1f)
-                        .minimumInteractiveComponentSize()
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable { onSelectTab(tab) }
-                        .padding(vertical = 4.dp)
-                        .testTag("dock_tab_${tab.name.lowercase()}")
-                ) {
-                    Icon(
-                        imageVector = tab.icon,
-                        contentDescription = tab.label,
-                        tint = itemColor,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = tab.label,
-                        color = itemColor,
-                        fontSize = 11.sp,
-                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                        maxLines = 1,
-                        softWrap = false,
-                        overflow = TextOverflow.Clip
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Box(
-                        modifier = Modifier
-                            .width(16.dp)
-                            .height(2.5.dp)
-                            .clip(CircleShape)
-                            .background(if (isSelected) accent else Color.Transparent)
-                    )
-                }
-            }
-        }
-    }
+    )
 }

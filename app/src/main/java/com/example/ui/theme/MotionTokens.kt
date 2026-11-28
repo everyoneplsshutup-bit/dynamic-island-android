@@ -68,6 +68,79 @@ object MotionTokens {
     val ContentCrossfadeEasing = CubicBezierEasing(0.16f, 1.0f, 0.30f, 1.0f)
     val AppleEase = CubicBezierEasing(0.32f, 0.72f, 0f, 1f)
 
+    // Round 5 §10 single-p morph choreography & dock asymmetric springs
+    const val ROUND5_HANDOVER_THRESHOLD = 0.85f
+    const val ROUND5_OPEN_DAMPING = 0.74f
+    const val ROUND5_OPEN_STIFFNESS = 247f
+    const val ROUND5_CLOSE_DAMPING = 0.80f
+    const val ROUND5_CLOSE_STIFFNESS = 341f
+    const val ROUND5_REDUCED_DAMPING = 1.0f
+    const val ROUND5_REDUCED_STIFFNESS = 438f
+    const val ROUND5_HEIGHT_LAG_DELAY_MS = 60
+
+    const val DOCK_LEAD_DAMPING = 1.0f
+    const val DOCK_LEAD_STIFFNESS = 1000f
+    const val DOCK_TRAIL_DAMPING = 1.0f
+    const val DOCK_TRAIL_STIFFNESS = 50f
+    const val DOCK_ICON_SCALE_DAMPING = 0.68f
+    const val DOCK_ICON_SCALE_STIFFNESS = 300f
+    const val DOCK_ACTIVE_ICON_SCALE = 1.12f
+    const val DOCK_INACTIVE_ALPHA = 0.60f
+
+    fun round5MorphSpec(
+        expanding: Boolean,
+        reducedMotion: Boolean = false,
+        style: AnimationStyle = AnimationStyle.SPRING,
+        durationScale: Float = 1.0f
+    ): FiniteAnimationSpec<Float> {
+        if (style == AnimationStyle.NONE) return snap()
+        val scale = durationScale.coerceIn(0.5f, 1.8f)
+        return when {
+            reducedMotion || style == AnimationStyle.SMOOTH -> spring(
+                dampingRatio = ROUND5_REDUCED_DAMPING,
+                stiffness = ROUND5_REDUCED_STIFFNESS * scale
+            )
+            expanding -> spring(
+                dampingRatio = ROUND5_OPEN_DAMPING,
+                stiffness = ROUND5_OPEN_STIFFNESS * scale
+            )
+            else -> spring(
+                dampingRatio = ROUND5_CLOSE_DAMPING,
+                stiffness = ROUND5_CLOSE_STIFFNESS * scale
+            )
+        }
+    }
+
+    fun round5HeightSpec(
+        expanding: Boolean,
+        reducedMotion: Boolean = false,
+        style: AnimationStyle = AnimationStyle.SPRING,
+        durationScale: Float = 1.0f
+    ): FiniteAnimationSpec<Float> {
+        if (style == AnimationStyle.NONE) return snap()
+        val scale = durationScale.coerceIn(0.5f, 1.8f)
+        val baseStiffness = if (expanding) ROUND5_OPEN_STIFFNESS else ROUND5_CLOSE_STIFFNESS
+        return spring(
+            dampingRatio = Spring.DampingRatioNoBouncy,
+            stiffness = (if (reducedMotion) ROUND5_REDUCED_STIFFNESS else baseStiffness) * scale
+        )
+    }
+
+    fun dockLeadingSpring(): SpringSpec<Float> = spring(
+        dampingRatio = DOCK_LEAD_DAMPING,
+        stiffness = DOCK_LEAD_STIFFNESS
+    )
+
+    fun dockTrailingSpring(): SpringSpec<Float> = spring(
+        dampingRatio = DOCK_TRAIL_DAMPING,
+        stiffness = DOCK_TRAIL_STIFFNESS
+    )
+
+    fun dockIconScaleSpring(): SpringSpec<Float> = spring(
+        dampingRatio = DOCK_ICON_SCALE_DAMPING,
+        stiffness = DOCK_ICON_SCALE_STIFFNESS
+    )
+
     // Round 3 Apple / per-feature spring constants
     const val APPLE_EXPAND_DAMPING = 0.75f
     const val APPLE_EXPAND_STIFFNESS = 400f

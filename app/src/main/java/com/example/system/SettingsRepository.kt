@@ -21,8 +21,7 @@ private val Context.settingsDataStore: DataStore<Preferences> by preferencesData
 
 enum class PillStyle(val label: String) {
     BLACK("Dark"),
-    APPLE_GLASS("Apple Glass"),
-    LIQUID_GLASS("Liquid Glass")
+    APPLE_LIQUID("Apple Liquid")
 }
 
 enum class PillSizePreset(val label: String, val slotWidthDp: Float) {
@@ -32,8 +31,7 @@ enum class PillSizePreset(val label: String, val slotWidthDp: Float) {
 }
 
 enum class WhenIdleMode(val label: String, val subtitle: String) {
-    CAMERA_ONLY("Camera Only", "Compact pure-black pill hugging the front camera"),
-    INFO_PILL("Info Pill", "Show quiet offline widgets left & right of the camera"),
+    CAMERA_ONLY("Circle Ring", "Thin circular ring around the front camera"),
     HIDDEN("Hidden", "Completely invisible until an activity or alert arrives")
 }
 
@@ -171,7 +169,7 @@ data class IslandSettings(
     val islandEnabled: Boolean = true,
 
     // 1. Look
-    val pillStyle: PillStyle = PillStyle.LIQUID_GLASS,
+    val pillStyle: PillStyle = PillStyle.APPLE_LIQUID,
     val pillSizePreset: PillSizePreset = PillSizePreset.MEDIUM,
     val glassDensity: Float = 0.65f,
     val reduceGlass: Boolean = false,
@@ -261,9 +259,6 @@ data class IslandSettings(
     val autoRotateSuggestionEnabled: Boolean = true,
     val calendarRemindersEnabled: Boolean = true,
     val mutedNotificationChannels: Set<String> = emptySet(),
-    val glyphCApp: String = "",
-    val glyphWApp: String = "",
-    val glyphOApp: String = "",
     val includedQuickToggles: List<QuickToggleType> = listOf(
         QuickToggleType.FLASHLIGHT,
         QuickToggleType.DND,
@@ -404,9 +399,6 @@ class SettingsRepository(private val context: Context) {
         val AUTO_ROTATE_SUGGESTION = booleanPreferencesKey("auto_rotate_suggestion")
         val CALENDAR_REMINDERS = booleanPreferencesKey("calendar_reminders")
         val MUTED_CHANNELS = stringPreferencesKey("muted_channels_json")
-        val GLYPH_C_APP = stringPreferencesKey("glyph_c_app")
-        val GLYPH_W_APP = stringPreferencesKey("glyph_w_app")
-        val GLYPH_O_APP = stringPreferencesKey("glyph_o_app")
         val QUICK_TOGGLES = stringPreferencesKey("quick_toggles_json")
         val ALLOWED_MUSIC_PACKAGES = stringPreferencesKey("allowed_music_packages_json")
         val PINNED_APPS = stringPreferencesKey("pinned_apps_json")
@@ -427,7 +419,7 @@ class SettingsRepository(private val context: Context) {
     val settingsFlow: Flow<IslandSettings> = context.settingsDataStore.data.map { prefs ->
         val default = IslandSettings()
         val parsedPillStyle = when (val raw = prefs[Keys.PILL_STYLE]) {
-            "GLASS" -> PillStyle.APPLE_GLASS
+            "GLASS", "APPLE_GLASS", "LIQUID_GLASS" -> PillStyle.APPLE_LIQUID
             null -> default.pillStyle
             else -> runCatching { PillStyle.valueOf(raw) }.getOrNull() ?: default.pillStyle
         }
@@ -488,7 +480,10 @@ class SettingsRepository(private val context: Context) {
             calibrationConfirmed = prefs[Keys.CALIBRATION_CONFIRMED] ?: default.calibrationConfirmed,
             compactPreference = prefs[Keys.COMPACT_PREF]?.let { runCatching { CompactPreference.valueOf(it) }.getOrNull() } ?: default.compactPreference,
             companionPosition = prefs[Keys.COMPANION_POSITION]?.let { runCatching { CompanionPosition.valueOf(it) }.getOrNull() } ?: default.companionPosition,
-            whenIdleMode = prefs[Keys.WHEN_IDLE_MODE]?.let { runCatching { WhenIdleMode.valueOf(it) }.getOrNull() } ?: default.whenIdleMode,
+            whenIdleMode = when (val raw = prefs[Keys.WHEN_IDLE_MODE]) {
+                "INFO_PILL", null -> default.whenIdleMode
+                else -> runCatching { WhenIdleMode.valueOf(raw) }.getOrNull() ?: default.whenIdleMode
+            },
             idleWidget = prefs[Keys.IDLE_WIDGET]?.let { runCatching { IdleWidgetType.valueOf(it) }.getOrNull() } ?: default.idleWidget,
             idleLeftWidget = parsedLeftWidget,
             idleRightWidget = parsedRightWidget,
@@ -528,9 +523,6 @@ class SettingsRepository(private val context: Context) {
             mutedNotificationChannels = prefs[Keys.MUTED_CHANNELS]?.let {
                 runCatching { json.decodeFromString<Set<String>>(it) }.getOrNull()
             } ?: default.mutedNotificationChannels,
-            glyphCApp = prefs[Keys.GLYPH_C_APP] ?: default.glyphCApp,
-            glyphWApp = prefs[Keys.GLYPH_W_APP] ?: default.glyphWApp,
-            glyphOApp = prefs[Keys.GLYPH_O_APP] ?: default.glyphOApp,
             includedQuickToggles = prefs[Keys.QUICK_TOGGLES]?.let {
                 runCatching { json.decodeFromString<List<QuickToggleType>>(it) }.getOrNull()
             } ?: default.includedQuickToggles,
@@ -646,9 +638,6 @@ class SettingsRepository(private val context: Context) {
             prefs[Keys.AUTO_ROTATE_SUGGESTION] = s.autoRotateSuggestionEnabled
             prefs[Keys.CALENDAR_REMINDERS] = s.calendarRemindersEnabled
             prefs[Keys.MUTED_CHANNELS] = json.encodeToString(s.mutedNotificationChannels)
-            prefs[Keys.GLYPH_C_APP] = s.glyphCApp
-            prefs[Keys.GLYPH_W_APP] = s.glyphWApp
-            prefs[Keys.GLYPH_O_APP] = s.glyphOApp
             prefs[Keys.QUICK_TOGGLES] = json.encodeToString(s.includedQuickToggles)
             prefs[Keys.ALLOWED_MUSIC_PACKAGES] = json.encodeToString(s.allowedMusicPackages)
             prefs[Keys.PINNED_APPS] = json.encodeToString(s.pinnedAppPackages)

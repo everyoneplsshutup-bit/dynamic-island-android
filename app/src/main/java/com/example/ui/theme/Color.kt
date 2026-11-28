@@ -113,42 +113,44 @@ object IslandColors {
         }.getOrDefault(fallback)
     }
 
-    fun glassAlphaRange(pillStyle: PillStyle, density: Float, reduceGlass: Boolean): Pair<Float, Float> {
+    fun glassAlphaRange(
+        pillStyle: PillStyle,
+        density: Float,
+        reduceGlass: Boolean,
+        isRegularCard: Boolean = false
+    ): Pair<Float, Float> {
         val d = density.coerceIn(0f, 1f)
         if (pillStyle == PillStyle.BLACK) return 1f to 1f
         if (reduceGlass) {
             val top = (0.78f + d * 0.14f).coerceIn(0.76f, 0.94f)
             return top to (top + 0.04f).coerceAtMost(0.96f)
         }
-        return when (pillStyle) {
-            PillStyle.APPLE_GLASS -> {
-                val top = (0.56f + d * 0.24f).coerceIn(0.50f, 0.82f)
-                val bot = (top + 0.08f).coerceAtMost(0.88f)
-                top to bot
-            }
-            PillStyle.LIQUID_GLASS -> {
-                val top = (0.16f + d * 0.16f).coerceIn(0.14f, 0.34f)
-                val bot = (top + 0.06f).coerceAtMost(0.40f)
-                top to bot
-            }
-            PillStyle.BLACK -> 1f to 1f
+        return if (isRegularCard) {
+            val top = (0.48f + d * 0.24f).coerceIn(0.42f, 0.78f)
+            val bot = (top + 0.10f).coerceAtMost(0.86f)
+            top to bot
+        } else {
+            val top = (0.16f + d * 0.16f).coerceIn(0.14f, 0.34f)
+            val bot = (top + 0.06f).coerceAtMost(0.40f)
+            top to bot
         }
     }
 
     fun blendGlassBase(
         materialYouColor: Color,
         density: Float,
-        pillStyle: PillStyle = PillStyle.LIQUID_GLASS,
-        reduceGlass: Boolean = false
+        pillStyle: PillStyle = PillStyle.APPLE_LIQUID,
+        reduceGlass: Boolean = false,
+        isRegularCard: Boolean = false
     ): Brush {
         if (pillStyle == PillStyle.BLACK) {
             return Brush.verticalGradient(colors = listOf(Color(0xFF141416), Color(0xFF101012)))
         }
-        val (alphaTop, alphaBot) = glassAlphaRange(pillStyle, density, reduceGlass)
-        val tintStrengthTop = if (pillStyle == PillStyle.LIQUID_GLASS) 0.14f else 0.08f
-        val tintStrengthBot = if (pillStyle == PillStyle.LIQUID_GLASS) 0.06f else 0.03f
-        val baseTopArgb = if (pillStyle == PillStyle.LIQUID_GLASS) 0xFF161B24.toInt() else 0xFF18181C.toInt()
-        val baseBotArgb = if (pillStyle == PillStyle.LIQUID_GLASS) 0xFF101218.toInt() else 0xFF121215.toInt()
+        val (alphaTop, alphaBot) = glassAlphaRange(pillStyle, density, reduceGlass, isRegularCard)
+        val tintStrengthTop = if (isRegularCard) 0.10f else 0.14f
+        val tintStrengthBot = if (isRegularCard) 0.05f else 0.06f
+        val baseTopArgb = if (isRegularCard) 0xFF171A22.toInt() else 0xFF161B24.toInt()
+        val baseBotArgb = if (isRegularCard) 0xFF11131A.toInt() else 0xFF101218.toInt()
         val tintedTop = Color(
             ColorUtils.blendARGB(baseTopArgb, materialYouColor.toArgb(), tintStrengthTop)
         ).copy(alpha = alphaTop)
@@ -159,7 +161,7 @@ object IslandColors {
     }
 
     fun blendGlassBase(materialYouColor: Color, density: Float): Brush =
-        blendGlassBase(materialYouColor, density, PillStyle.LIQUID_GLASS, reduceGlass = false)
+        blendGlassBase(materialYouColor, density, PillStyle.APPLE_LIQUID, reduceGlass = false)
 
     fun pressTint(base: Color, pressed: Boolean): Color =
         if (!pressed) base else lerp(base, Color.White, 0.22f)

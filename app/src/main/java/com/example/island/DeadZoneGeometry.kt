@@ -7,6 +7,7 @@ import android.os.Build
 import android.view.DisplayCutout
 import android.view.Surface
 import android.view.WindowManager
+import androidx.compose.ui.unit.dp
 import com.example.system.IslandSettings
 import kotlin.math.abs
 
@@ -95,29 +96,96 @@ object DeadZoneGeometry {
     }
 
     /**
-     * Idle camera-only pill tightly hugs the front camera punch-hole (48–58 dp x 32 dp)
-     * or optional Apple-width (125 dp x 36 dp) when [appleWidth] is enabled.
-     * Pure black #000000, zero shadow/border, never stretches into a wide full-top line while idle.
+     * Round 5 §0 Idle pill = THIN CIRCLE around the camera punch-hole ONLY.
+     * Follows the real cutout (e.g. 26x33 dp + 2-3 dp gap -> ~36-39 dp diameter circle).
+     * NEVER renders a wide capsule or black bar.
      */
     fun idleCameraPillMetrics(
         holeWidthDp: Float,
         holeHeightDp: Float,
-        appleWidth: Boolean = false
+        @Suppress("UNUSED_PARAMETER") appleWidth: Boolean = false
     ): IdleCameraPillMetrics {
-        if (appleWidth) {
-            return IdleCameraPillMetrics(
-                widthDp = 125f,
-                heightDp = 36f,
-                cornerRadiusDp = 18f
-            )
-        }
-        val w = (holeWidthDp.coerceAtLeast(18f) + 22f).coerceIn(48f, 58f)
-        val h = (holeHeightDp.coerceAtLeast(24f) - 2f).coerceIn(30f, 33f)
+        val diameter = (maxOf(holeWidthDp.coerceAtLeast(20f), holeHeightDp.coerceAtLeast(24f)) + 5f)
+            .coerceIn(32f, 44f)
         return IdleCameraPillMetrics(
-            widthDp = w,
-            heightDp = h,
-            cornerRadiusDp = h / 2f
+            widthDp = diameter,
+            heightDp = diameter,
+            cornerRadiusDp = diameter / 2f
         )
+    }
+
+    /**
+     * Concave-collar card silhouette (`sb-01`, `batch6-16v5`, `new-13`) that rises smoothly up at
+     * top-center to hug the front camera cutout instead of floating detached mid-screen.
+     */
+    class CameraCollarCardShape(
+        private val holeWidthDp: Float,
+        private val holeHeightDp: Float,
+        private val cornerRadiusDp: Float = 32f,
+        private val collarBlend: Float = 1f,
+        private val cutoutCenterOffsetDp: Float = 0f
+    ) : androidx.compose.ui.graphics.Shape {
+        override fun createOutline(
+            size: androidx.compose.ui.geometry.Size,
+            layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+            density: androidx.compose.ui.unit.Density
+        ): androidx.compose.ui.graphics.Outline {
+            val w = size.width
+            val h = size.height
+            if (w <= 8f || h <= 8f) {
+                return androidx.compose.ui.graphics.Outline.Rectangle(
+                    androidx.compose.ui.geometry.Rect(0f, 0f, w, h)
+                )
+            }
+            val blend = collarBlend.coerceIn(0f, 1f)
+            val r = with(density) { cornerRadiusDp.dp.toPx() }.coerceAtMost(minOf(w, h) * 0.45f)
+            val cx = (w / 2f + with(density) { cutoutCenterOffsetDp.dp.toPx() }).coerceIn(r + 24f, w - r - 24f)
+            val holeW = with(density) { (holeWidthDp + 10f).dp.toPx() }.coerceIn(28f, w * 0.35f)
+            val neckDrop = with(density) { (holeHeightDp * 0.56f).dp.toPx() * blend }
+            val shoulderSpan = holeW * 0.85f
+
+            val path = androidx.compose.ui.graphics.Path()
+            if (neckDrop < 2f || w < holeW + r * 2.2f) {
+                path.addRoundRect(
+                    androidx.compose.ui.geometry.RoundRect(
+                        left = 0f,
+                        top = 0f,
+                        right = w,
+                        bottom = h,
+                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(r, r)
+                    )
+                )
+            } else {
+                val bodyTop = neckDrop
+                val neckLeftX = (cx - holeW * 0.5f - shoulderSpan).coerceAtLeast(r + 4f)
+                val neckRightX = (cx + holeW * 0.5f + shoulderSpan).coerceAtMost(w - r - 4f)
+                val collarLeftX = cx - holeW * 0.44f
+                val collarRightX = cx + holeW * 0.44f
+
+                path.moveTo(0f, bodyTop + r)
+                path.quadraticTo(0f, bodyTop, r, bodyTop)
+                path.lineTo(neckLeftX, bodyTop)
+                path.cubicTo(
+                    neckLeftX + shoulderSpan * 0.55f, bodyTop,
+                    collarLeftX - shoulderSpan * 0.25f, 0f,
+                    collarLeftX, 0f
+                )
+                path.lineTo(collarRightX, 0f)
+                path.cubicTo(
+                    collarRightX + shoulderSpan * 0.25f, 0f,
+                    neckRightX - shoulderSpan * 0.55f, bodyTop,
+                    neckRightX, bodyTop
+                )
+                path.lineTo(w - r, bodyTop)
+                path.quadraticTo(w, bodyTop, w, bodyTop + r)
+                path.lineTo(w, h - r)
+                path.quadraticTo(w, h, w - r, h)
+                path.lineTo(r, h)
+                path.quadraticTo(0f, h, 0f, h - r)
+                path.close()
+            }
+            return androidx.compose.ui.graphics.Outline.Generic(path)
+        }
     }
 
     /**

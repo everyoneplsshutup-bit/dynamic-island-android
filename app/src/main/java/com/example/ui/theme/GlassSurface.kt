@@ -48,6 +48,7 @@ private const val LIQUID_EDGE_AGSL = """
     uniform float2 iResolution;
     uniform float2 iLightPos;
     uniform float iRefractStrength;
+    uniform float iBendScale;
 
     float sdSuperellipse(float2 p, float2 b) {
         float2 d = abs(p) / max(b, float2(1.0));
@@ -59,15 +60,16 @@ private const val LIQUID_EDGE_AGSL = """
         float2 center = iResolution * 0.5;
         float2 p = fragCoord - center;
         float dist = sdSuperellipse(p, center * 0.96);
-        float edgeNorm = clamp((dist + 22.0) / 22.0, 0.0, 1.0);
-        float edgeMask = pow(edgeNorm, 2.4);
+        float edgeNorm = clamp((dist + 24.0) / 24.0, 0.0, 1.0);
+        float edgeMask = pow(edgeNorm, 2.3);
         float2 dir = normalize(p + float2(0.001));
-        float2 disp = dir * edgeMask * iRefractStrength;
+        float bendMag = clamp(-iBendScale / 112.0, 0.5, 1.8);
+        float2 disp = dir * edgeMask * iRefractStrength * bendMag;
 
-        // Chromatic RGB dispersion stronger at optical rim, zero distortion in flat center
+        // Chromatic RGB dispersion confined to optical rim; flat center remains undistorted
         half4 baseCol = content.eval(fragCoord - disp);
-        half4 redCol = content.eval(fragCoord - disp * 1.22);
-        half4 blueCol = content.eval(fragCoord - disp * 0.78);
+        half4 redCol = content.eval(fragCoord - disp * 1.24);
+        half4 blueCol = content.eval(fragCoord - disp * 0.76);
         half3 refracted = half3(redCol.r, baseCol.g, blueCol.b);
 
         // Dual opposed specular caustic rim oriented to primary and counter light
@@ -113,11 +115,10 @@ fun Modifier.metaballParentLayer(enabled: Boolean): Modifier {
 }
 
 /**
- * Optical Liquid Glass chrome modifier:
- * - When a sibling [LayerBackdrop] is provided (inside ObsidianCrimsonBackground), applies real
- *   Kyant backdrop blur + optical lens distortion over live background graphics.
- * - On Android 13+ (API 33), chains a superellipse SDF AGSL RuntimeShader for curved edge refraction,
- *   dispersion, and specular Fresnel highlights, with zero-crash fallbacks on older devices/Robolectric.
+ * Optical Liquid Glass chrome modifier (§9 Two Looks ONLY: Dark vs Apple Liquid):
+ * - Clear Glass on compact pills / chips / dock (`isRegularCard = false`)
+ * - Regular Glass on expanded cards (`isRegularCard = true`) for crisp text legibility
+ * - Cached AGSL RuntimeShader uniforms updated ONLY when size changes (zero idle invalidations)
  */
 fun Modifier.islandGlassChrome(
     shape: Shape,
@@ -130,7 +131,9 @@ fun Modifier.islandGlassChrome(
     backdrop: LayerBackdrop? = null,
     crossWindowBlurActive: Boolean = false,
     allowDarkBorder: Boolean = true,
-    performanceMode: Boolean = false
+    performanceMode: Boolean = false,
+    isRegularCard: Boolean = false,
+    bendScale: Float = -112f
 ): Modifier {
     val effectiveStyle = if (solidFallback) PillStyle.BLACK else pillStyle
     if (effectiveStyle == PillStyle.BLACK) {
@@ -148,12 +151,13 @@ fun Modifier.islandGlassChrome(
     }
 
     val density = glassDensity.coerceIn(0f, 1f)
-    val isLiquid = effectiveStyle == PillStyle.LIQUID_GLASS
+    val isLiquid = effectiveStyle == PillStyle.APPLE_LIQUID
     val glassBrush = IslandColors.blendGlassBase(
         materialYouColor = accentColor,
         density = density,
         pillStyle = effectiveStyle,
-        reduceGlass = reduceGlass || performanceMode
+        reduceGlass = reduceGlass || performanceMode,
+        isRegularCard = isRegularCard
     )
     val borderBrush = IslandColors.liquidBorderBrush(
         useGlass = true,
@@ -167,16 +171,14 @@ fun Modifier.islandGlassChrome(
             backdrop = backdrop,
             shape = { shape },
             effects = {
-                if (!isLiquid) {
-                    backdropBlur(radius = 22.dp.toPx())
+                if (isRegularCard) {
+                    backdropBlur(radius = 20.dp.toPx())
                 }
-                if (isLiquid) {
-                    lens(
-                        refractionHeight = 18.dp.toPx(),
-                        refractionAmount = 32.dp.toPx(),
-                        depthEffect = true
-                    )
-                }
+                lens(
+                    refractionHeight = if (isRegularCard) 14.dp.toPx() else 18.dp.toPx(),
+                    refractionAmount = if (isRegularCard) 24.dp.toPx() else 32.dp.toPx(),
+                    depthEffect = true
+                )
             }
         )
     } else {
@@ -186,16 +188,25 @@ fun Modifier.islandGlassChrome(
     val agslRefractMod = if (isLiquid && !reduceGlass && !performanceMode && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         val shader = runCatching { RuntimeShader(LIQUID_EDGE_AGSL) }.getOrNull()
         if (shader != null) {
+            var cachedW = -1f
+            var cachedH = -1f
+            var cachedEffect: androidx.compose.ui.graphics.RenderEffect? = null
             Modifier.graphicsLayer {
                 if (size.width >= 8f && size.height >= 8f) {
-                    runCatching {
-                        shader.setFloatUniform("iResolution", size.width, size.height)
-                        shader.setFloatUniform("iLightPos", size.width * 0.25f, size.height * 0.12f)
-                        shader.setFloatUniform("iRefractStrength", 5.5f)
-                        renderEffect = AndroidRenderEffect
-                            .createRuntimeShaderEffect(shader, "content")
-                            .asComposeRenderEffect()
+                    if (size.width != cachedW || size.height != cachedH || cachedEffect == null) {
+                        cachedW = size.width
+                        cachedH = size.height
+                        runCatching {
+                            shader.setFloatUniform("iResolution", size.width, size.height)
+                            shader.setFloatUniform("iLightPos", size.width * 0.25f, size.height * 0.12f)
+                            shader.setFloatUniform("iRefractStrength", if (isRegularCard) 4.2f else 5.5f)
+                            shader.setFloatUniform("iBendScale", bendScale.coerceIn(-180f, -60f))
+                            cachedEffect = AndroidRenderEffect
+                                .createRuntimeShaderEffect(shader, "content")
+                                .asComposeRenderEffect()
+                        }
                     }
+                    renderEffect = cachedEffect
                 }
             }
         } else {
@@ -213,12 +224,11 @@ fun Modifier.islandGlassChrome(
         .drawWithContent {
             drawContent()
             if (isLiquid && !reduceGlass && !performanceMode) {
-                // Curved internal dome caustic + opposite chromatic shimmer
                 drawRect(
                     brush = Brush.radialGradient(
                         colors = listOf(
                             Color.White.copy(alpha = if (crossWindowBlurActive) 0.18f else 0.14f),
-                            accentColor.copy(alpha = 0.15f),
+                            accentColor.copy(alpha = 0.14f),
                             Color.Transparent
                         ),
                         center = Offset(size.width * 0.22f, size.height * 0.14f),

@@ -100,7 +100,6 @@ import com.example.system.EventGroup
 import com.example.system.EventKind
 import com.example.system.ExpandedSwipeAction
 import com.example.system.HapticsStrength
-import com.example.system.IdleWidgetType
 import com.example.system.IslandGesture
 import com.example.system.IslandSettings
 import com.example.system.LockScreenPreset
@@ -142,7 +141,6 @@ fun SettingsGroupDetailScreen(
     var motionSubSection by remember { mutableIntStateOf(0) }
     var backupText by remember { mutableStateOf("") }
     var showAppMultiPickerFor by remember { mutableStateOf<String?>(null) }
-    var showGlyphPickerFor by remember { mutableStateOf<String?>(null) }
 
     val calendarPermissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         scope.launch { app.settingsRepository.update { it.copy(calendarRemindersEnabled = granted) } }
@@ -408,14 +406,6 @@ fun SettingsGroupDetailScreen(
                                     }
                                 }
                             }
-                        }
-                        item {
-                            SwitchRow(
-                                title = "Apple-width idle pill (125 dp)",
-                                helper = "Use 125 dp Apple capsule width when idle instead of compact 56 dp camera-hug pill.",
-                                checked = settings.appleWidthIdlePill,
-                                onCheckedChange = { c -> scope.launch { app.settingsRepository.update { it.copy(appleWidthIdlePill = c) } } }
-                            )
                         }
                         item {
                             SwitchRow(
@@ -945,26 +935,6 @@ fun SettingsGroupDetailScreen(
                                 }
                             }
                         }
-                        if (settings.whenIdleMode == WhenIdleMode.INFO_PILL) {
-                            item {
-                                EnumPickerRow(
-                                    title = "Left Idle Slot Widget",
-                                    helper = "Quiet readout left of the camera in Info Pill mode.",
-                                    selectedLabel = settings.idleLeftWidget.label,
-                                    options = IdleWidgetType.entries.map { it.label to it },
-                                    onSelect = { w -> scope.launch { app.settingsRepository.update { it.copy(idleLeftWidget = w) } } }
-                                )
-                            }
-                            item {
-                                EnumPickerRow(
-                                    title = "Right Idle Slot Widget",
-                                    helper = "Quiet readout right of the camera in Info Pill mode.",
-                                    selectedLabel = settings.idleRightWidget.label,
-                                    options = IdleWidgetType.entries.map { it.label to it },
-                                    onSelect = { w -> scope.launch { app.settingsRepository.update { it.copy(idleRightWidget = w) } } }
-                                )
-                            }
-                        }
                         item {
                             ObsidianGlassCard {
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -1150,27 +1120,6 @@ fun SettingsGroupDetailScreen(
                         }
                         item {
                             ActionRow(
-                                title = "Glyf Gesture 'C'",
-                                helper = settings.glyphCApp.ifBlank { "Not assigned · Tap to pick app" },
-                                onClick = { showGlyphPickerFor = "C" }
-                            )
-                        }
-                        item {
-                            ActionRow(
-                                title = "Glyf Gesture 'W'",
-                                helper = settings.glyphWApp.ifBlank { "Not assigned · Tap to pick app" },
-                                onClick = { showGlyphPickerFor = "W" }
-                            )
-                        }
-                        item {
-                            ActionRow(
-                                title = "Glyf Gesture 'O'",
-                                helper = settings.glyphOApp.ifBlank { "Not assigned · Tap to pick app" },
-                                onClick = { showGlyphPickerFor = "O" }
-                            )
-                        }
-                        item {
-                            ActionRow(
                                 title = "Reset Muted Channels (${settings.mutedNotificationChannels.size})",
                                 helper = "Clear notification channels muted directly from the island.",
                                 onClick = {
@@ -1208,7 +1157,7 @@ fun SettingsGroupDetailScreen(
                             }
                         }
                         item {
-                            SwitchRow("Quick Toggles & Tools", "Torch, DND, brightness, Wi-Fi/BT panels, QR & Glyf", settings.togglesEnabled) { c ->
+                            SwitchRow("Quick Toggles & Tools", "Torch, DND, brightness, Wi-Fi/BT panels, Shelf Snap & OCR", settings.togglesEnabled) { c ->
                                 scope.launch { app.settingsRepository.update { it.copy(togglesEnabled = c) } }
                             }
                         }
@@ -1603,78 +1552,6 @@ fun SettingsGroupDetailScreen(
                     onClick = { showAppMultiPickerFor = null },
                     colors = ButtonDefaults.buttonColors(containerColor = IslandColors.CrimsonPrimary)
                 ) { Text("Done") }
-            }
-        )
-    }
-
-    if (showGlyphPickerFor != null) {
-        val glyphKey = showGlyphPickerFor!!
-        var allApps by remember { mutableStateOf<List<LaunchableApp>>(emptyList()) }
-        LaunchedEffect(Unit) { allApps = app.searchEngine.getInstalledApps() }
-        val currentPkg = when (glyphKey) {
-            "C" -> settings.glyphCApp
-            "W" -> settings.glyphWApp
-            else -> settings.glyphOApp
-        }
-        AlertDialog(
-            onDismissRequest = { showGlyphPickerFor = null },
-            containerColor = IslandColors.ObsidianCardElevated,
-            titleContentColor = Color.White,
-            textContentColor = Color.White,
-            title = { Text("Assign Glyf Gesture '$glyphKey'") },
-            text = {
-                LazyColumn(modifier = Modifier.height(300.dp)) {
-                    item {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    scope.launch {
-                                        app.settingsRepository.update { s ->
-                                            when (glyphKey) {
-                                                "C" -> s.copy(glyphCApp = "")
-                                                "W" -> s.copy(glyphWApp = "")
-                                                else -> s.copy(glyphOApp = "")
-                                            }
-                                        }
-                                    }
-                                    showGlyphPickerFor = null
-                                }
-                                .padding(vertical = 10.dp)
-                        ) {
-                            Text("None (Unassigned)", color = IslandColors.TextSecondary, modifier = Modifier.weight(1f))
-                        }
-                    }
-                    items(allApps, key = { it.packageName }) { item ->
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clickable {
-                                    scope.launch {
-                                        app.settingsRepository.update { s ->
-                                            when (glyphKey) {
-                                                "C" -> s.copy(glyphCApp = item.packageName)
-                                                "W" -> s.copy(glyphWApp = item.packageName)
-                                                else -> s.copy(glyphOApp = item.packageName)
-                                            }
-                                        }
-                                    }
-                                    showGlyphPickerFor = null
-                                }
-                                .padding(vertical = 10.dp)
-                        ) {
-                            Text(item.label, color = Color.White, modifier = Modifier.weight(1f))
-                            if (item.packageName == currentPkg) {
-                                Icon(Icons.Filled.Check, contentDescription = "Selected", tint = IslandColors.CrimsonBright)
-                            }
-                        }
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showGlyphPickerFor = null }) { Text("Close") }
             }
         )
     }

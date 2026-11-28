@@ -28,8 +28,8 @@ object Build4Checklist {
         ),
         ChecklistEntry(
             id = 3,
-            area = "Compact Expansion Hard Caps & Three-Way Glass",
-            summary = "Dark, Apple Glass, and real Kyant Backdrop Liquid Glass chrome with strict 320x120 dp Medium and 360x160 dp Full hard caps keeping the screen behind visible.",
+            area = "Camera-Collar Expansion & Two-Way Liquid Glass",
+            summary = "Dark and Apple Liquid (AGSL + Kyant Backdrop) chrome with concave camera-collar cards capped at 360x240 dp Medium and 369x340 dp Full.",
             implementationRef = "DeadZoneGeometry.kt, GlassSurface.kt, Color.kt, IslandOverlayRoot.kt"
         ),
         ChecklistEntry(
@@ -58,8 +58,8 @@ object Build4Checklist {
         ),
         ChecklistEntry(
             id = 8,
-            area = "Quick Toggles, Keep Awake & Uncapped Sidebar",
-            summary = "Keep Awake toggle wiring FLAG_KEEP_SCREEN_ON, compact Torch Beam card, Screenshot -> Shelf action, and uncapped curved 56/280 dp Floating Sidebar with unread badges.",
+            area = "Quick Toggles, Keep Awake & Non-Scrolling Tools",
+            summary = "Keep Awake toggle wiring FLAG_KEEP_SCREEN_ON, compact Torch Beam card, Screenshot -> Shelf action, Screen Recorder, and zero-scroll 236 dp Tools panel.",
             implementationRef = "QuickTogglesManager.kt, IslandToolsAndModules.kt (ToolsIslandPanel)"
         ),
         ChecklistEntry(
@@ -76,8 +76,8 @@ object Build4Checklist {
         ),
         ChecklistEntry(
             id = 11,
-            area = "When Idle Modes, Mini Capsule & Event Groups",
-            summary = "Camera Only / Dual-Slot Info Pill (12 widgets) / Hidden idle modes, Mini Capsule Compact/Standard & duration controls, Lock-screen privacy presets, and grouped Event Switches.",
+            area = "Circle Ring Idle Mode, Mini Capsule & Event Groups",
+            summary = "Circle Ring (cutout-only) / Hidden idle modes, Mini Capsule Compact/Standard & duration controls, Lock-screen privacy presets, and grouped Event Switches.",
             implementationRef = "SettingsRepository.kt, IslandOverlayRoot.kt, SettingsScreens.kt"
         ),
         ChecklistEntry(

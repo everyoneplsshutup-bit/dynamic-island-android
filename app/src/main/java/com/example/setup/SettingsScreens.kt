@@ -84,7 +84,7 @@ enum class SettingsGroup(val title: String, val subtitle: String, val icon: Imag
     MOTION("Motion", "Animation speed, 4-way gestures, haptics & sound", Icons.Filled.Animation),
     MEDIA("Music & Lyrics", "LRCLIB lyrics, timing offset & expanded marquee", Icons.Filled.MusicNote),
     PILL("Pill", "Camera calibration, idle mode, dwell time & lock screen", Icons.Filled.RadioButtonChecked),
-    FEATURES("Features", "Master toggles, Customise Island, Glyf, Calendar & channels", Icons.Filled.Tune),
+    FEATURES("Features", "Master toggles, Customise Island, Calendar & channels", Icons.Filled.Tune),
     PRIVACY("Privacy", "Screen reading / OCR (off by default), Shelf & clipboard", Icons.Filled.Security),
     ABOUT("About / Danger Zone", "Diagnostics, permissions status, backup & reset", Icons.Filled.Info)
 }
@@ -97,9 +97,8 @@ private data class SettingsSearchEntry(
 )
 
 private val settingsIndex = listOf(
-    SettingsSearchEntry("Pill Style", "Dark, Apple Glass, or Liquid Glass", "Look > Style", SettingsGroup.LOOK),
+    SettingsSearchEntry("Pill Style", "Dark or Apple Liquid", "Look > Style", SettingsGroup.LOOK),
     SettingsSearchEntry("Pill Size", "Small, Medium, or Large slot width", "Look > Size", SettingsGroup.LOOK),
-    SettingsSearchEntry("Apple-width idle pill (125 dp)", "Switch between camera-hug (56dp) and 125dp idle capsule", "Look > Idle Pill", SettingsGroup.LOOK),
     SettingsSearchEntry("Energy Ring", "Arc battery indicator hugging the punch-hole camera", "Look > Energy Ring", SettingsGroup.LOOK),
     SettingsSearchEntry("Privacy Dots", "Live Camera, Microphone & Location dots beside island", "Look > Privacy Dots", SettingsGroup.LOOK),
     SettingsSearchEntry("Glass Density", "Clear to Tinted density slider", "Look > Glass", SettingsGroup.LOOK),
@@ -127,10 +126,9 @@ private val settingsIndex = listOf(
     SettingsSearchEntry("Scroll Long Song Titles", "Opt-in marquee inside expanded music card", "Music & Lyrics > Music", SettingsGroup.MEDIA),
     SettingsSearchEntry("Camera Calibration", "Nudge X, Y, width, and height around punch-hole", "Pill > Calibration", SettingsGroup.PILL),
     SettingsSearchEntry("Companion Circle Side", "Place +1 split bubble on Left or Right", "Pill > Split", SettingsGroup.PILL),
-    SettingsSearchEntry("When Idle Mode", "Camera Only, Dual-Slot Info Pill, or Hidden", "Pill > Idle", SettingsGroup.PILL),
+    SettingsSearchEntry("When Idle Mode", "Circle Ring or Hidden", "Pill > Idle", SettingsGroup.PILL),
     SettingsSearchEntry("Alerts Dwell Timer", "Adjust compact notification dwell 1.5s to 10s", "Pill > Alerts", SettingsGroup.PILL),
     SettingsSearchEntry("Compact Pill Content", "Auto, Music, Timer, Battery, or Notifications", "Pill > Compact", SettingsGroup.PILL),
-    SettingsSearchEntry("Idle Widget", "12 left & right micro-widgets alongside camera", "Pill > Idle", SettingsGroup.PILL),
     SettingsSearchEntry("Lock-Screen Preset", "Minimal, Hide Message Text, or Hidden", "Pill > Lock Screen", SettingsGroup.PILL),
     SettingsSearchEntry("Per-Event Switches", "Group & per-event auto-expand behavior", "Features > Events", SettingsGroup.FEATURES),
     SettingsSearchEntry("Customise Island", "Pick & reorder up to 8 island features", "Features > Chooser", SettingsGroup.FEATURES),
@@ -138,7 +136,6 @@ private val settingsIndex = listOf(
     SettingsSearchEntry("Calendar Reminders", "Show next 12h meeting & Join link in expanded island", "Features > Calendar", SettingsGroup.FEATURES),
     SettingsSearchEntry("Landscape Quiet Mode", "Silence island notifications during full-screen landscape", "Features > Orientation", SettingsGroup.FEATURES),
     SettingsSearchEntry("Auto-Rotate Suggestion", "Show rotate pill when rotating device with rotation locked", "Features > Orientation", SettingsGroup.FEATURES),
-    SettingsSearchEntry("Glyf Shortcuts", "Assign C, W, and O gesture app launches", "Features > Glyf", SettingsGroup.FEATURES),
     SettingsSearchEntry("Reset Muted Channels", "Unmute notification channels muted from island actions", "Features > Notifications", SettingsGroup.FEATURES),
     SettingsSearchEntry("Pinned Quick Launch Apps", "Choose shortcuts shown in Tools & Search", "Features > Shortcuts", SettingsGroup.FEATURES),
     SettingsSearchEntry("Screen Reading / OCR", "Strictly opt-in, OFF by default", "Privacy > Screen Reading", SettingsGroup.PRIVACY),
@@ -310,7 +307,7 @@ fun SettingsHomeScreen(
                         }
                     }
 
-                    // Inline Look Quick-Card (Dark / Apple Glass / Liquid Glass + Accent Colour Swatches + Pill Size)
+                    // Inline Look Quick-Card (Two Looks ONLY: Dark / Apple Liquid + Accent Colour Swatches + Pill Size)
                     item {
                         ObsidianGlassCard(accentColor = lookAccent) {
                             Row(verticalAlignment = Alignment.CenterVertically) {

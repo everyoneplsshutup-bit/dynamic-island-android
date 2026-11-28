@@ -1,12 +1,9 @@
 package com.example.island
 
-import android.app.AlarmManager
-import android.app.NotificationManager
 import android.app.RemoteInput
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.net.TrafficStats
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -16,12 +13,13 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutLinearInEasing
-import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.Transition
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.updateTransition
 import androidx.compose.animation.fadeIn
@@ -38,7 +36,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -62,18 +59,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.BatteryChargingFull
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentPaste
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.DoNotDisturbOn
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Event
 import androidx.compose.material.icons.filled.FiberManualRecord
-import androidx.compose.material.icons.filled.Gesture
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MoreHoriz
@@ -82,6 +77,7 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PhotoLibrary
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
@@ -99,8 +95,6 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.mutableLongStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -124,6 +118,7 @@ import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -156,7 +151,6 @@ import com.example.system.AnimationStyle
 import com.example.system.CalendarReminderReader
 import com.example.system.CompanionPosition
 import com.example.system.ExpandedSwipeAction
-import com.example.system.IdleWidgetType
 import com.example.system.IslandSettings
 import com.example.system.IslandTab
 import com.example.system.LockScreenPreset
@@ -176,35 +170,112 @@ import com.example.ui.theme.metaballParentLayer
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
+private fun lerpF(start: Float, stop: Float, fraction: Float): Float =
+    start + (stop - start) * fraction.coerceIn(0f, 1f)
+
 private class DeadZoneGuardState(var violated: Boolean = false)
 
+private fun buildMorphCollarPath(
+    left: Float,
+    w: Float,
+    h: Float,
+    rPx: Float,
+    holeWPx: Float,
+    neckDropPx: Float,
+    collarBlend: Float,
+    cutoutOffsetPx: Float = 0f
+): Path {
+    val path = Path()
+    val blend = collarBlend.coerceIn(0f, 1f)
+    val drop = neckDropPx * blend
+    if (blend <= 0.02f || drop < 2f || w < holeWPx + rPx * 2.2f) {
+        path.addRoundRect(
+            RoundRect(
+                left = left,
+                top = 0f,
+                right = left + w,
+                bottom = h,
+                cornerRadius = CornerRadius(rPx, rPx)
+            )
+        )
+        return path
+    }
+    val bodyTop = drop
+    val cx = (left + w / 2f + cutoutOffsetPx).coerceIn(left + rPx + 24f, left + w - rPx - 24f)
+    val collarHoleW = holeWPx.coerceIn(28f, w * 0.35f)
+    val shoulderSpan = collarHoleW * 0.85f
+    val neckLeftX = (cx - collarHoleW * 0.5f - shoulderSpan).coerceAtLeast(left + rPx + 4f)
+    val neckRightX = (cx + collarHoleW * 0.5f + shoulderSpan).coerceAtMost(left + w - rPx - 4f)
+    val collarLeftX = cx - collarHoleW * 0.44f
+    val collarRightX = cx + collarHoleW * 0.44f
+
+    path.moveTo(left, bodyTop + rPx)
+    path.quadraticTo(left, bodyTop, left + rPx, bodyTop)
+    path.lineTo(neckLeftX, bodyTop)
+    path.cubicTo(
+        neckLeftX + shoulderSpan * 0.55f, bodyTop,
+        collarLeftX - shoulderSpan * 0.25f, 0f,
+        collarLeftX, 0f
+    )
+    path.lineTo(collarRightX, 0f)
+    path.cubicTo(
+        collarRightX + shoulderSpan * 0.25f, 0f,
+        neckRightX - shoulderSpan * 0.55f, bodyTop,
+        neckRightX, bodyTop
+    )
+    path.lineTo(left + w - rPx, bodyTop)
+    path.quadraticTo(left + w, bodyTop, left + w, bodyTop + rPx)
+    path.lineTo(left + w, h - rPx)
+    path.quadraticTo(left + w, h, left + w - rPx, h)
+    path.lineTo(left + rPx, h)
+    path.quadraticTo(left, h, left, h - rPx)
+    path.close()
+    return path
+}
+
 private class MorphCapsuleShape(
-    private val widthDpState: State<Float>,
-    private val heightDpState: State<Float>,
-    private val radiusDpState: State<Float>
+    private val holeWidthDp: Float,
+    private val holeHeightDp: Float,
+    private val widthDpProvider: () -> Float,
+    private val heightDpProvider: () -> Float,
+    private val radiusDpProvider: () -> Float,
+    private val collarBlendProvider: () -> Float
 ) : Shape {
     override fun createOutline(
         size: Size,
         layoutDirection: LayoutDirection,
         density: Density
     ): Outline {
-        val w = (widthDpState.value * density.density).coerceIn(1f, size.width.coerceAtLeast(1f))
-        val h = (heightDpState.value * density.density).coerceIn(1f, size.height.coerceAtLeast(1f))
-        val r = (radiusDpState.value * density.density).coerceIn(0f, minOf(w, h) / 2f)
+        val w = (widthDpProvider() * density.density).coerceIn(1f, size.width.coerceAtLeast(1f))
+        val h = (heightDpProvider() * density.density).coerceIn(1f, size.height.coerceAtLeast(1f))
+        val r = (radiusDpProvider() * density.density).coerceIn(0f, minOf(w, h) / 2f)
         val left = ((size.width - w) / 2f).coerceAtLeast(0f)
-        return Outline.Rounded(
-            RoundRect(
+        val collarBlend = collarBlendProvider().coerceIn(0f, 1f)
+        if (collarBlend <= 0.02f) {
+            return Outline.Rounded(
+                RoundRect(
+                    left = left,
+                    top = 0f,
+                    right = left + w,
+                    bottom = h,
+                    cornerRadius = CornerRadius(r, r)
+                )
+            )
+        }
+        val holeWPx = (holeWidthDp + 10f) * density.density
+        val neckDropPx = (holeHeightDp * 0.56f) * density.density
+        return Outline.Generic(
+            buildMorphCollarPath(
                 left = left,
-                top = 0f,
-                right = left + w,
-                bottom = h,
-                cornerRadius = CornerRadius(r, r)
+                w = w,
+                h = h,
+                rPx = r,
+                holeWPx = holeWPx,
+                neckDropPx = neckDropPx,
+                collarBlend = collarBlend
             )
         )
     }
@@ -214,6 +285,9 @@ private fun DrawScope.drawMorphCapsuleChrome(
     widthDp: Float,
     heightDp: Float,
     radiusDp: Float,
+    collarBlend: Float,
+    holeWidthDp: Float,
+    holeHeightDp: Float,
     glassAlpha: Float,
     pillStyle: PillStyle,
     glassDensity: Float,
@@ -227,87 +301,92 @@ private fun DrawScope.drawMorphCapsuleChrome(
     val h = (heightDp * density).coerceIn(1f, size.height.coerceAtLeast(1f))
     val r = (radiusDp * density).coerceIn(0f, minOf(w, h) / 2f)
     val left = ((size.width - w) / 2f).coerceAtLeast(0f)
-    val corner = CornerRadius(r, r)
+    val holeWPx = (holeWidthDp + 10f) * density
+    val neckDropPx = (holeHeightDp * 0.56f) * density
+    val path = buildMorphCollarPath(
+        left = left,
+        w = w,
+        h = h,
+        rPx = r,
+        holeWPx = holeWPx,
+        neckDropPx = neckDropPx,
+        collarBlend = collarBlend
+    )
 
     val effectiveStyle = if (solidFallback) PillStyle.BLACK else pillStyle
     val g = glassAlpha.coerceIn(0f, 1f)
 
     if (effectiveStyle == PillStyle.BLACK) {
-        drawRoundRect(
-            color = IslandColors.PillBlack,
-            topLeft = Offset(left, 0f),
-            size = Size(w, h),
-            cornerRadius = corner
-        )
-        drawRoundRect(
+        drawPath(path = path, color = IslandColors.PillBlack)
+        drawPath(
+            path = path,
             color = if (isHighlighted) accentColor.copy(alpha = 0.72f) else Color.White.copy(alpha = 0.16f),
-            topLeft = Offset(left, 0f),
-            size = Size(w, h),
-            cornerRadius = corner,
             style = Stroke(width = (if (isHighlighted) 1.4f else 1.0f).dp.toPx())
         )
         return
     }
 
-    val isLiquid = effectiveStyle == PillStyle.LIQUID_GLASS
+    val isLiquid = effectiveStyle == PillStyle.APPLE_LIQUID
+    val isRegularCard = collarBlend > 0.45f
     val d = glassDensity.coerceIn(0f, 1f)
-    val targetBaseAlpha = if (isLiquid) (0.76f - d * 0.44f).coerceIn(0.28f, 0.82f) else (0.88f - d * 0.36f).coerceIn(0.42f, 0.90f)
+    val targetBaseAlpha = when {
+        isLiquid && isRegularCard -> (0.86f - d * 0.16f).coerceIn(0.68f, 0.88f)
+        isLiquid -> (0.72f - d * 0.34f).coerceIn(0.32f, 0.78f)
+        else -> (0.90f - d * 0.28f).coerceIn(0.55f, 0.92f)
+    }
     val obsidianUnderlayAlpha = 0.96f * (1f - g) + targetBaseAlpha * g
 
-    // Continuous obsidian core smoothly liquefies into translucent glass so card never vanishes mid-morph
-    drawRoundRect(
-        color = IslandColors.PillBlack.copy(alpha = obsidianUnderlayAlpha),
-        topLeft = Offset(left, 0f),
-        size = Size(w, h),
-        cornerRadius = corner
+    // Continuous obsidian core smoothly liquefies into translucent glass along the camera-collar silhouette
+    drawPath(
+        path = path,
+        color = IslandColors.PillBlack.copy(alpha = obsidianUnderlayAlpha)
     )
 
     if (g > 0.01f) {
         val topTintAlpha = if (isLiquid) (0.16f + d * 0.08f) else 0.12f
         val botTintAlpha = if (isLiquid) (0.12f + d * 0.06f) else 0.07f
-        drawRoundRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(
-                    Color.White.copy(alpha = 0.14f * g),
-                    accentColor.copy(alpha = topTintAlpha * g),
-                    accentColor.copy(alpha = botTintAlpha * g)
-                ),
-                startY = 0f,
-                endY = h
-            ),
-            topLeft = Offset(left, 0f),
-            size = Size(w, h),
-            cornerRadius = corner
-        )
-        if (isLiquid && !reduceGlass && !performanceMode) {
-            drawRoundRect(
-                brush = Brush.radialGradient(
+        clipPath(path) {
+            drawRect(
+                brush = Brush.verticalGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = 0.16f * g),
-                        accentColor.copy(alpha = 0.14f * g),
-                        Color.Transparent
+                        Color.White.copy(alpha = 0.14f * g),
+                        accentColor.copy(alpha = topTintAlpha * g),
+                        accentColor.copy(alpha = botTintAlpha * g)
                     ),
-                    center = Offset(left + w * 0.24f, h * 0.14f),
-                    radius = (maxOf(w, h) * 0.88f).coerceAtLeast(1f)
+                    startY = 0f,
+                    endY = h
                 ),
                 topLeft = Offset(left, 0f),
-                size = Size(w, h),
-                cornerRadius = corner
+                size = Size(w, h)
             )
-            drawRoundRect(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color(0x2890E0FF).copy(alpha = 0.16f * g),
-                        accentColor.copy(alpha = 0.10f * g),
-                        Color.Transparent
+            if (isLiquid && !reduceGlass && !performanceMode) {
+                drawRect(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color.White.copy(alpha = 0.16f * g),
+                            accentColor.copy(alpha = 0.14f * g),
+                            Color.Transparent
+                        ),
+                        center = Offset(left + w * 0.24f, h * 0.14f),
+                        radius = (maxOf(w, h) * 0.88f).coerceAtLeast(1f)
                     ),
-                    center = Offset(left + w * 0.80f, h * 0.84f),
-                    radius = (maxOf(w, h) * 0.70f).coerceAtLeast(1f)
-                ),
-                topLeft = Offset(left, 0f),
-                size = Size(w, h),
-                cornerRadius = corner
-            )
+                    topLeft = Offset(left, 0f),
+                    size = Size(w, h)
+                )
+                drawRect(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color(0x2890E0FF).copy(alpha = 0.16f * g),
+                            accentColor.copy(alpha = 0.10f * g),
+                            Color.Transparent
+                        ),
+                        center = Offset(left + w * 0.80f, h * 0.84f),
+                        radius = (maxOf(w, h) * 0.70f).coerceAtLeast(1f)
+                    ),
+                    topLeft = Offset(left, 0f),
+                    size = Size(w, h)
+                )
+            }
         }
     }
 
@@ -324,11 +403,9 @@ private fun DrawScope.drawMorphCapsuleChrome(
             endY = h
         )
     }
-    drawRoundRect(
+    drawPath(
+        path = path,
         brush = borderBrush,
-        topLeft = Offset(left, 0f),
-        size = Size(w, h),
-        cornerRadius = corner,
         style = Stroke(width = (if (isHighlighted) 1.5f else if (isLiquid) 1.25f else 0.9f).dp.toPx())
     )
 }
@@ -441,21 +518,11 @@ fun IslandOverlayRoot(
             )
         }
     }
-    val idleMetrics = remember(holeW, holeH, settings.appleWidthIdlePill) {
-        DeadZoneGeometry.idleCameraPillMetrics(holeW, holeH, appleWidth = settings.appleWidthIdlePill)
+    val idleMetrics = remember(holeW, holeH) {
+        DeadZoneGeometry.idleCameraPillMetrics(holeW, holeH)
     }
-    val idleWidthDp = remember(settings.whenIdleMode, compactMetrics.totalWidthDp, idleMetrics.widthDp) {
-        when (settings.whenIdleMode) {
-            WhenIdleMode.INFO_PILL -> compactMetrics.totalWidthDp
-            WhenIdleMode.CAMERA_ONLY, WhenIdleMode.HIDDEN -> idleMetrics.widthDp
-        }
-    }
-    val idleHeightDp = remember(settings.whenIdleMode, compactMetrics.pillHeightDp, idleMetrics.heightDp) {
-        when (settings.whenIdleMode) {
-            WhenIdleMode.INFO_PILL -> compactMetrics.pillHeightDp
-            WhenIdleMode.CAMERA_ONLY, WhenIdleMode.HIDDEN -> idleMetrics.heightDp
-        }
-    }
+    val idleWidthDp = idleMetrics.widthDp
+    val idleHeightDp = idleMetrics.heightDp
     val mediumTargetWidthDp = remember(exclusionZone.screenWidthPx, exclusionZone.density) {
         DeadZoneGeometry.boundedCardWidthDp(
             screenWidthPx = exclusionZone.screenWidthPx,
@@ -471,144 +538,108 @@ fun IslandOverlayRoot(
         )
     }
     val cardTopClearanceDp = remember(exclusionZone) {
-        DeadZoneGeometry.cardTopAnchorDp(exclusionZone)
+        if (exclusionZone.isLandscape) DeadZoneGeometry.cardTopAnchorDp(exclusionZone) else 0f
     }
     var measuredMediumHeightDp by remember { mutableFloatStateOf(202f) }
     var measuredExpandedHeightDp by remember { mutableFloatStateOf(316f) }
     val densityPx = androidx.compose.ui.platform.LocalDensity.current.density
 
+    // Round 5 §10 single-p morph choreography: ONE normalized `p` (0f..1f) + critically-damped `heightP`
+    // drive width, height, cornerRadius, concave collar blend, posY, glassAlpha, and >=85% content handover.
     val morphTransition = updateTransition(targetState = state.mode, label = "island_morph")
-    val morphSpringSpec: @Composable Transition.Segment<IslandMode>.() -> FiniteAnimationSpec<Float> = {
-        when {
-            effectiveStyle == AnimationStyle.NONE -> snap()
-            targetState == IslandMode.IDLE || targetState == IslandMode.COMPACT || targetState == IslandMode.SPLIT -> {
-                if (initialState == IslandMode.EXPANDED || initialState == IslandMode.MEDIUM) {
-                    MotionTokens.collapseSpec(effectiveStyle, durationScale)
-                } else {
-                    MotionTokens.pillMorphSpec(effectiveStyle, durationScale)
-                }
-            }
-            targetState == IslandMode.MEDIUM -> {
-                if (initialState == IslandMode.EXPANDED) {
-                    MotionTokens.collapseSpec(effectiveStyle, durationScale)
-                } else {
-                    MotionTokens.idleToMediumSpec(effectiveStyle, elasticity, durationScale)
-                }
-            }
-            targetState == IslandMode.EXPANDED -> {
-                MotionTokens.openingEffectSpec(settings.openingEffect, effectiveStyle, elasticity, durationScale)
-            }
-            else -> MotionTokens.spatialDefault(effectiveStyle, elasticity, durationScale)
-        }
-    }
-
-    val morphWidthDpState = morphTransition.animateFloat(
-        transitionSpec = morphSpringSpec,
-        label = "morph_width"
-    ) { mode ->
-        when (mode) {
-            IslandMode.IDLE -> idleWidthDp
-            IslandMode.COMPACT -> compactMetrics.totalWidthDp
-            IslandMode.SPLIT -> compactMetrics.totalWidthDp + 44f
-            IslandMode.MEDIUM -> mediumTargetWidthDp
-            IslandMode.EXPANDED -> fullTargetWidthDp
-        }
-    }
-    val morphHeightDpState = morphTransition.animateFloat(
-        transitionSpec = morphSpringSpec,
-        label = "morph_height"
-    ) { mode ->
-        when (mode) {
-            IslandMode.IDLE -> idleHeightDp
-            IslandMode.COMPACT, IslandMode.SPLIT -> compactMetrics.pillHeightDp
-            IslandMode.MEDIUM -> measuredMediumHeightDp.coerceIn(DeadZoneGeometry.MEDIUM_MIN_HEIGHT_DP, DeadZoneGeometry.MEDIUM_MAX_HEIGHT_DP)
-            IslandMode.EXPANDED -> measuredExpandedHeightDp.coerceIn(220f, DeadZoneGeometry.FULL_MAX_HEIGHT_DP)
-        }
-    }
-    val morphRadiusDpState = morphTransition.animateFloat(
-        transitionSpec = morphSpringSpec,
-        label = "morph_radius"
-    ) { mode ->
-        when (mode) {
-            IslandMode.IDLE -> idleHeightDp * 0.5f
-            IslandMode.COMPACT, IslandMode.SPLIT -> compactMetrics.pillHeightDp * 0.5f
-            IslandMode.MEDIUM -> IslandColors.MediumOuterRadius.value
-            IslandMode.EXPANDED -> IslandColors.ExpandedOuterRadius.value
-        }
-    }
-    val morphPosYDpState = morphTransition.animateFloat(
-        transitionSpec = morphSpringSpec,
-        label = "morph_pos_y"
-    ) { mode ->
-        when (mode) {
-            IslandMode.IDLE, IslandMode.COMPACT, IslandMode.SPLIT -> 0f
-            IslandMode.MEDIUM, IslandMode.EXPANDED -> cardTopClearanceDp
-        }
-    }
-    val glassAlphaState = morphTransition.animateFloat(
+    val cardOpenPState = morphTransition.animateFloat(
         transitionSpec = {
-            if (effectiveStyle == AnimationStyle.NONE) snap()
-            else MotionTokens.effectsDefault(durationScale)
+            MotionTokens.round5MorphSpec(
+                expanding = targetState == IslandMode.MEDIUM || targetState == IslandMode.EXPANDED,
+                reducedMotion = reduceMotion,
+                style = effectiveStyle,
+                durationScale = durationScale
+            )
         },
-        label = "glass_alpha"
+        label = "round5_morph_p"
     ) { mode ->
         if (mode == IslandMode.MEDIUM || mode == IslandMode.EXPANDED) 1f else 0f
     }
-
-    // Staggered Apple choreography: Header -> Body -> Bottom Chooser (<=80 ms clear on collapse, >=85% morph handover on open)
-    val headerRevealState = morphTransition.animateFloat(
+    val heightPState = morphTransition.animateFloat(
         transitionSpec = {
-            when {
-                effectiveStyle == AnimationStyle.NONE -> snap()
-                targetState == IslandMode.EXPANDED || targetState == IslandMode.MEDIUM ->
-                    tween(durationMillis = (180 / durationScale).toInt().coerceIn(70, 280), delayMillis = 60, easing = FastOutSlowInEasing)
-                else -> tween(durationMillis = (70 / durationScale).toInt().coerceIn(30, 80), easing = FastOutLinearInEasing)
-            }
+            MotionTokens.round5HeightSpec(
+                expanding = targetState == IslandMode.MEDIUM || targetState == IslandMode.EXPANDED,
+                reducedMotion = reduceMotion,
+                style = effectiveStyle,
+                durationScale = durationScale
+            )
         },
-        label = "header_reveal"
+        label = "round5_height_p"
     ) { mode ->
         if (mode == IslandMode.MEDIUM || mode == IslandMode.EXPANDED) 1f else 0f
     }
-    val bodyRevealState = morphTransition.animateFloat(
+    val compactPState = morphTransition.animateFloat(
         transitionSpec = {
-            when {
-                effectiveStyle == AnimationStyle.NONE -> snap()
-                targetState == IslandMode.EXPANDED || targetState == IslandMode.MEDIUM ->
-                    tween(durationMillis = (220 / durationScale).toInt().coerceIn(90, 340), delayMillis = 120, easing = MotionTokens.ContentCrossfadeEasing)
-                else -> tween(durationMillis = (70 / durationScale).toInt().coerceIn(30, 80), easing = FastOutLinearInEasing)
-            }
+            MotionTokens.round5MorphSpec(
+                expanding = targetState != IslandMode.IDLE,
+                reducedMotion = reduceMotion,
+                style = effectiveStyle,
+                durationScale = durationScale
+            )
         },
-        label = "body_reveal"
+        label = "round5_compact_p"
     ) { mode ->
-        if (mode == IslandMode.MEDIUM || mode == IslandMode.EXPANDED) 1f else 0f
+        if (mode == IslandMode.IDLE) 0f else 1f
     }
-    val chooserRevealState = morphTransition.animateFloat(
+    val stageExpandPState = morphTransition.animateFloat(
         transitionSpec = {
-            when {
-                effectiveStyle == AnimationStyle.NONE -> snap()
-                targetState == IslandMode.EXPANDED ->
-                    tween(durationMillis = (210 / durationScale).toInt().coerceIn(80, 320), delayMillis = 170, easing = MotionTokens.ContentCrossfadeEasing)
-                else -> tween(durationMillis = (65 / durationScale).toInt().coerceIn(30, 80), easing = FastOutLinearInEasing)
-            }
+            MotionTokens.round5MorphSpec(
+                expanding = targetState == IslandMode.EXPANDED,
+                reducedMotion = reduceMotion,
+                style = effectiveStyle,
+                durationScale = durationScale
+            )
         },
-        label = "chooser_reveal"
+        label = "round5_stage_expand_p"
     ) { mode ->
         if (mode == IslandMode.EXPANDED) 1f else 0f
     }
 
-    val collapsedBaseW = if (state.mode == IslandMode.IDLE) idleWidthDp else compactMetrics.totalWidthDp
-    val morphStartW = if (morphTransition.currentState == IslandMode.MEDIUM && state.mode == IslandMode.EXPANDED) {
-        mediumTargetWidthDp
-    } else {
-        collapsedBaseW
+    val baseWidthDpProvider = {
+        val targetCompactW = if (state.mode == IslandMode.SPLIT) {
+            compactMetrics.totalWidthDp + 44f
+        } else {
+            compactMetrics.totalWidthDp
+        }
+        lerpF(idleWidthDp, targetCompactW, compactPState.value)
     }
-    val morphEndW = if (state.mode == IslandMode.EXPANDED) fullTargetWidthDp else mediumTargetWidthDp
-    val morphFrac = MotionTokens.computeMorphFraction(morphWidthDpState.value, morphStartW, morphEndW)
-    val handoverGate = when {
-        effectiveStyle == AnimationStyle.NONE -> 1f
-        state.mode == IslandMode.MEDIUM || state.mode == IslandMode.EXPANDED ->
-            ((morphFrac - 0.85f) / 0.15f).coerceIn(0f, 1f)
-        else -> 0f
+    val baseHeightDpProvider = {
+        lerpF(idleHeightDp, compactMetrics.pillHeightDp, compactPState.value)
+    }
+    val currentWidthDpProvider = {
+        val openW = lerpF(mediumTargetWidthDp, fullTargetWidthDp, stageExpandPState.value)
+        lerpF(baseWidthDpProvider(), openW, cardOpenPState.value)
+    }
+    val currentHeightDpProvider = {
+        val targetMedH = measuredMediumHeightDp.coerceIn(DeadZoneGeometry.MEDIUM_MIN_HEIGHT_DP, DeadZoneGeometry.MEDIUM_MAX_HEIGHT_DP)
+        val targetFullH = measuredExpandedHeightDp.coerceIn(220f, DeadZoneGeometry.FULL_MAX_HEIGHT_DP)
+        val openH = lerpF(targetMedH, targetFullH, stageExpandPState.value)
+        // Height lags slightly behind initial horizontal wing stretch (critically damped, zero height bounce)
+        val hp = ((heightPState.value - 0.08f) / 0.92f).coerceIn(0f, 1f)
+        lerpF(baseHeightDpProvider(), openH, if (effectiveStyle == AnimationStyle.NONE) cardOpenPState.value else hp)
+    }
+    val currentRadiusDpProvider = {
+        val openR = lerpF(IslandColors.MediumOuterRadius.value, IslandColors.ExpandedOuterRadius.value, stageExpandPState.value)
+        lerpF(baseHeightDpProvider() * 0.5f, openR, cardOpenPState.value)
+    }
+    val currentCollarBlendProvider = {
+        if (exclusionZone.isLandscape) 0f else cardOpenPState.value.coerceIn(0f, 1f)
+    }
+    val currentPosYDpProvider = {
+        lerpF(0f, cardTopClearanceDp, cardOpenPState.value)
+    }
+    val handoverGateProvider = {
+        if (effectiveStyle == AnimationStyle.NONE) {
+            if (state.mode == IslandMode.MEDIUM || state.mode == IslandMode.EXPANDED) 1f else 0f
+        } else {
+            ((cardOpenPState.value - MotionTokens.ROUND5_HANDOVER_THRESHOLD) /
+                (1f - MotionTokens.ROUND5_HANDOVER_THRESHOLD)).coerceIn(0f, 1f)
+        }
     }
 
     val isPressedNow = isPillPressedProvider()
@@ -618,11 +649,14 @@ fun IslandOverlayRoot(
         label = "press_squish"
     )
 
-    val morphCapsuleShape = remember(morphWidthDpState, morphHeightDpState, morphRadiusDpState) {
+    val morphCapsuleShape = remember(holeW, holeH, exclusionZone.isLandscape, compactMetrics, idleWidthDp, mediumTargetWidthDp, fullTargetWidthDp) {
         MorphCapsuleShape(
-            widthDpState = morphWidthDpState,
-            heightDpState = morphHeightDpState,
-            radiusDpState = morphRadiusDpState
+            holeWidthDp = holeW,
+            holeHeightDp = holeH,
+            widthDpProvider = currentWidthDpProvider,
+            heightDpProvider = currentHeightDpProvider,
+            radiusDpProvider = currentRadiusDpProvider,
+            collarBlendProvider = currentCollarBlendProvider
         )
     }
 
@@ -752,7 +786,7 @@ fun IslandOverlayRoot(
                 showExpandedCard -> {
                     Box(
                         modifier = Modifier
-                            .offset { IntOffset(0, (morphPosYDpState.value * densityPx).roundToInt()) }
+                            .offset { IntOffset(0, (currentPosYDpProvider() * densityPx).roundToInt()) }
                             .graphicsLayer {
                                 val pull = pullDownProgressProvider()
                                 val press = pressScaleState.value
@@ -766,10 +800,13 @@ fun IslandOverlayRoot(
                             }
                             .drawBehind {
                                 drawMorphCapsuleChrome(
-                                    widthDp = morphWidthDpState.value,
-                                    heightDp = morphHeightDpState.value,
-                                    radiusDp = morphRadiusDpState.value,
-                                    glassAlpha = glassAlphaState.value,
+                                    widthDp = currentWidthDpProvider(),
+                                    heightDp = currentHeightDpProvider(),
+                                    radiusDp = currentRadiusDpProvider(),
+                                    collarBlend = currentCollarBlendProvider(),
+                                    holeWidthDp = holeW,
+                                    holeHeightDp = holeH,
+                                    glassAlpha = cardOpenPState.value,
                                     pillStyle = effectivePillStyle,
                                     glassDensity = settings.glassDensity,
                                     reduceGlass = settings.reduceGlass,
@@ -799,10 +836,10 @@ fun IslandOverlayRoot(
                             elasticity = elasticity,
                             durationScale = durationScale,
                             drawOwnChrome = false,
-                            headerAlphaProvider = { (headerRevealState.value * handoverGate).coerceIn(0f, 1f) },
-                            contentAlphaProvider = { (bodyRevealState.value * handoverGate).coerceIn(0f, 1f) },
-                            contentOffsetYDProvider = { (1f - (bodyRevealState.value * handoverGate).coerceIn(0f, 1f)) * 10f },
-                            chooserAlphaProvider = { (chooserRevealState.value * handoverGate).coerceIn(0f, 1f) },
+                            headerAlphaProvider = handoverGateProvider,
+                            contentAlphaProvider = handoverGateProvider,
+                            contentOffsetYDProvider = { (1f - handoverGateProvider()) * 10f },
+                            chooserAlphaProvider = handoverGateProvider,
                             onRequestHaptic = onRequestHaptic,
                             onOpenAppSettings = onOpenAppSettings
                         )
@@ -812,7 +849,7 @@ fun IslandOverlayRoot(
                 showMediumStage -> {
                     Box(
                         modifier = Modifier
-                            .offset { IntOffset(0, (morphPosYDpState.value * densityPx).roundToInt()) }
+                            .offset { IntOffset(0, (currentPosYDpProvider() * densityPx).roundToInt()) }
                             .graphicsLayer {
                                 val pull = pullDownProgressProvider()
                                 val press = pressScaleState.value
@@ -826,10 +863,13 @@ fun IslandOverlayRoot(
                             }
                             .drawBehind {
                                 drawMorphCapsuleChrome(
-                                    widthDp = morphWidthDpState.value,
-                                    heightDp = morphHeightDpState.value,
-                                    radiusDp = morphRadiusDpState.value,
-                                    glassAlpha = glassAlphaState.value,
+                                    widthDp = currentWidthDpProvider(),
+                                    heightDp = currentHeightDpProvider(),
+                                    radiusDp = currentRadiusDpProvider(),
+                                    collarBlend = currentCollarBlendProvider(),
+                                    holeWidthDp = holeW,
+                                    holeHeightDp = holeH,
+                                    glassAlpha = cardOpenPState.value,
                                     pillStyle = effectivePillStyle,
                                     glassDensity = settings.glassDensity,
                                     reduceGlass = settings.reduceGlass,
@@ -858,8 +898,8 @@ fun IslandOverlayRoot(
                             mediaState = mediaState,
                             timerState = timerState,
                             drawOwnChrome = false,
-                            headerAlphaProvider = { (headerRevealState.value * handoverGate).coerceIn(0f, 1f) },
-                            bodyAlphaProvider = { (bodyRevealState.value * handoverGate).coerceIn(0f, 1f) },
+                            headerAlphaProvider = handoverGateProvider,
+                            bodyAlphaProvider = handoverGateProvider,
                             onRequestHaptic = onRequestHaptic
                         )
                     }
@@ -868,12 +908,12 @@ fun IslandOverlayRoot(
                 state.mode == IslandMode.IDLE -> {
                     Box(
                         modifier = Modifier
-                            .offset { IntOffset(0, (morphPosYDpState.value * densityPx).roundToInt()) }
+                            .offset { IntOffset(0, (currentPosYDpProvider() * densityPx).roundToInt()) }
                             .graphicsLayer {
                                 val pull = pullDownProgressProvider()
                                 val press = pressScaleState.value
                                 val boost = press * (1f + pull * 0.14f)
-                                val ratioX = (morphWidthDpState.value / idleWidthDp.coerceAtLeast(1f)).coerceIn(0.85f, 1.25f)
+                                val ratioX = (currentWidthDpProvider() / idleWidthDp.coerceAtLeast(1f)).coerceIn(0.85f, 1.25f)
                                 transformOrigin = TransformOrigin(0.5f, 0f)
                                 scaleX = ratioX * boost
                                 scaleY = boost
@@ -938,12 +978,12 @@ fun IslandOverlayRoot(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier
-                            .offset { IntOffset(0, (morphPosYDpState.value * densityPx).roundToInt()) }
+                            .offset { IntOffset(0, (currentPosYDpProvider() * densityPx).roundToInt()) }
                             .metaballParentLayer(settings.metaballRenderEffect && showCompanion && !reduceMotion)
                             .graphicsLayer {
                                 val pull = pullDownProgressProvider()
                                 val boost = pressScaleState.value * (1f + pull * 0.14f)
-                                val pillRatioX = (morphWidthDpState.value / compactMetrics.totalWidthDp.coerceAtLeast(1f)).coerceIn(0.84f, 1.24f)
+                                val pillRatioX = (currentWidthDpProvider() / compactMetrics.totalWidthDp.coerceAtLeast(1f)).coerceIn(0.84f, 1.24f)
                                 transformOrigin = TransformOrigin(0.5f, 0f)
                                 scaleX = (if (showCompanion) 1f else pillRatioX) * boost
                                 scaleY = boost
@@ -1298,7 +1338,7 @@ private fun activityAccent(
 }
 
 /**
- * WhenIdleMode: CAMERA_ONLY / INFO_PILL (dual symmetric 88dp slots supporting all 12 widgets) / HIDDEN.
+ * WhenIdleMode: CAMERA_ONLY (thin circle hugging the camera punch-hole ONLY) / HIDDEN.
  */
 @Composable
 fun IdlePillView(
@@ -1316,82 +1356,8 @@ fun IdlePillView(
 
     val holeW = exclusionZone.holeWidthDp.coerceAtLeast(settings.cutoutWidthDp)
     val holeH = exclusionZone.holeHeightDp.coerceAtLeast(settings.cutoutHeightDp)
-    val ringBorderColor = when {
-        isCalibrationPreview -> IslandColors.AccentRed
-        isDragOverIsland -> accentColor
-        isLowBatteryWarning -> IslandColors.AccentRed.copy(alpha = 0.78f)
-        else -> Color.White.copy(alpha = 0.24f)
-    }
-    val strokeWidth = if (isDragOverIsland || isCalibrationPreview || isLowBatteryWarning) 2.dp else 1.dp
-
-    if (settings.whenIdleMode == WhenIdleMode.INFO_PILL && !isCalibrationPreview) {
-        val metrics = DeadZoneGeometry.compactSlotMetrics(
-            holeWidthDp = holeW,
-            holeHeightDp = holeH,
-            isLandscape = exclusionZone.isLandscape,
-            slotWidthDp = settings.pillSizePreset.slotWidthDp
-        )
-        var minuteTick by remember { mutableLongStateOf(System.currentTimeMillis()) }
-        LaunchedEffect(Unit) {
-            while (isActive) {
-                minuteTick = System.currentTimeMillis()
-                delay(20_000L)
-            }
-        }
-        val effectivePillStyle = if (settings.solidFallback) PillStyle.BLACK else settings.pillStyle
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .height(metrics.pillHeightDp.dp)
-                .islandGlassChrome(
-                    shape = CircleShape,
-                    pillStyle = effectivePillStyle,
-                    glassDensity = settings.glassDensity,
-                    reduceGlass = settings.reduceGlass,
-                    solidFallback = settings.solidFallback,
-                    accentColor = accentColor,
-                    isHighlighted = isDragOverIsland || isLowBatteryWarning,
-                    backdrop = LocalAppBackdrop.current,
-                    performanceMode = settings.performanceMode
-                )
-                .padding(horizontal = metrics.outerPadDp.dp)
-                .testTag("idle_info_pill")
-        ) {
-            Box(
-                modifier = Modifier
-                    .width(metrics.leftSlotDp.dp)
-                    .debugCameraDeadZoneGuard(exclusionZone, "idle_left"),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                IdleWidgetSlot(
-                    type = settings.idleLeftWidget,
-                    state = state,
-                    nowMs = minuteTick,
-                    accentColor = accentColor,
-                    isLowBattery = isLowBatteryWarning
-                )
-            }
-            Spacer(Modifier.width(metrics.centerSpacerDp.dp))
-            Box(
-                modifier = Modifier
-                    .width(metrics.rightSlotDp.dp)
-                    .debugCameraDeadZoneGuard(exclusionZone, "idle_right"),
-                contentAlignment = Alignment.CenterEnd
-            ) {
-                IdleWidgetSlot(
-                    type = settings.idleRightWidget,
-                    state = state,
-                    nowMs = minuteTick,
-                    accentColor = accentColor,
-                    isLowBattery = isLowBatteryWarning
-                )
-            }
-        }
-        return
-    }
-
-    val idleMetrics = remember(holeW, holeH, settings.appleWidthIdlePill) {
-        DeadZoneGeometry.idleCameraPillMetrics(holeW, holeH, appleWidth = settings.appleWidthIdlePill)
+    val idleMetrics = remember(holeW, holeH) {
+        DeadZoneGeometry.idleCameraPillMetrics(holeW, holeH)
     }
     val hasExplicitBorder = isCalibrationPreview || isDragOverIsland || isLowBatteryWarning
     val idleBorder = when {
@@ -1400,12 +1366,11 @@ fun IdlePillView(
         else -> Color.Transparent
     }
 
-    // Idle CAMERA_ONLY state (§0): pure #000000 100% opacity, ZERO shadow, ZERO border, ZERO idle ring,
-    // hugging only the camera hole (48-58 dp) or optional Apple-width (125 dp).
+    // §0 Idle state: thin #000000 circle hugging ONLY the camera punch-hole (32-44 dp diameter),
+    // ZERO wide bar, ZERO sideways extension, ZERO idle ring when not charging.
     Box(
         modifier = Modifier
-            .width(idleMetrics.widthDp.dp)
-            .height(idleMetrics.heightDp.dp)
+            .size(idleMetrics.widthDp.dp)
             .clip(CircleShape)
             .background(IslandColors.PillBlack)
             .then(
@@ -1417,107 +1382,6 @@ fun IdlePillView(
             )
             .testTag("idle_camera_ring")
     )
-}
-
-@Composable
-private fun IdleWidgetSlot(
-    type: IdleWidgetType,
-    state: IslandState,
-    nowMs: Long,
-    accentColor: Color,
-    isLowBattery: Boolean
-) {
-    val context = LocalContext.current
-    val timeText = remember(nowMs) { SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(nowMs)) }
-    val dateText = remember(nowMs) { SimpleDateFormat("EEE d", Locale.getDefault()).format(Date(nowMs)) }
-
-    when (type) {
-        IdleWidgetType.NONE -> Spacer(Modifier.width(8.dp))
-        IdleWidgetType.TIME, IdleWidgetType.CLOCK -> Text(
-            text = timeText,
-            style = TextStyle(color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, fontFeatureSettings = "tnum"),
-            maxLines = 1
-        )
-        IdleWidgetType.DATE -> Text(
-            text = dateText,
-            color = IslandColors.TextSecondary,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Medium,
-            maxLines = 1
-        )
-        IdleWidgetType.BATTERY -> Text(
-            text = "${state.batteryLevelPercent}%",
-            color = if (isLowBattery) IslandColors.AccentRed else IslandColors.AccentGreen,
-            fontSize = 11.sp,
-            fontWeight = FontWeight.Bold,
-            maxLines = 1
-        )
-        IdleWidgetType.BATTERY_RING -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            val frac = (state.batteryLevelPercent / 100f).coerceIn(0.05f, 1f)
-            val color = if (isLowBattery) IslandColors.AccentRed else IslandColors.AccentGreen
-            Canvas(modifier = Modifier.size(12.dp)) {
-                drawArc(color = Color.White.copy(alpha = 0.2f), startAngle = -90f, sweepAngle = 360f, useCenter = false, style = Stroke(2.dp.toPx()))
-                drawArc(color = color, startAngle = -90f, sweepAngle = 360f * frac, useCenter = false, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
-            }
-            Text("${state.batteryLevelPercent}%", color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-        }
-        IdleWidgetType.NEXT_ALARM -> {
-            val nextAlarm = remember(nowMs) {
-                val am = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
-                val trigger = runCatching { am?.nextAlarmClock?.triggerTime }.getOrNull()
-                if (trigger != null && trigger > 0L) SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(trigger)) else "--:--"
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                Icon(Icons.Filled.Alarm, contentDescription = "Next alarm", tint = accentColor, modifier = Modifier.size(12.dp))
-                Text(nextAlarm, color = Color.White, fontSize = 11.sp, maxLines = 1)
-            }
-        }
-        IdleWidgetType.UNREAD_COUNT -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            Icon(Icons.Filled.Notifications, contentDescription = "Unread", tint = accentColor, modifier = Modifier.size(12.dp))
-            Text("${state.notificationsHistory.size}", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-        }
-        IdleWidgetType.DND_STATUS -> {
-            val isDndOn = remember(nowMs) {
-                runCatching {
-                    val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-                    val filter = nm?.currentInterruptionFilter
-                    filter != null && filter != NotificationManager.INTERRUPTION_FILTER_ALL
-                }.getOrDefault(false)
-            }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                Icon(
-                    Icons.Filled.DoNotDisturbOn,
-                    contentDescription = "Do Not Disturb",
-                    tint = if (isDndOn) IslandColors.AccentAmber else IslandColors.TextSecondary,
-                    modifier = Modifier.size(12.dp)
-                )
-                Text(
-                    text = if (isDndOn) "DND" else "Ring",
-                    color = if (isDndOn) IslandColors.AccentAmber else Color.White,
-                    fontSize = 11.sp,
-                    maxLines = 1
-                )
-            }
-        }
-        IdleWidgetType.NET_SPEED -> {
-            var prevBytes by remember { mutableLongStateOf(TrafficStats.getTotalRxBytes().coerceAtLeast(0L)) }
-            val speedLabel = remember(nowMs) {
-                val cur = TrafficStats.getTotalRxBytes().coerceAtLeast(0L)
-                val kbps = ((cur - prevBytes).coerceAtLeast(0L) / 20_480L).toInt()
-                prevBytes = cur
-                "${kbps}K/s"
-            }
-            Text(speedLabel, color = accentColor, fontSize = 11.sp, fontWeight = FontWeight.Medium, maxLines = 1)
-        }
-        IdleWidgetType.SEARCH_SHORTCUT -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            Icon(Icons.Filled.Search, contentDescription = "Search", tint = accentColor, modifier = Modifier.size(12.dp))
-            Text("Search", color = IslandColors.TextSecondary, fontSize = 11.sp, maxLines = 1)
-        }
-        IdleWidgetType.QUICK_NOTE -> Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            Icon(Icons.Filled.Edit, contentDescription = "Quick note", tint = IslandColors.AccentLime, modifier = Modifier.size(12.dp))
-            Text("Note", color = IslandColors.TextSecondary, fontSize = 11.sp, maxLines = 1)
-        }
-    }
 }
 
 @Composable
@@ -2041,7 +1905,18 @@ fun MediumPillView(
     val primary = state.primaryActivity
     val holeW = exclusionZone.holeWidthDp.coerceAtLeast(settings.cutoutWidthDp)
     val holeH = exclusionZone.holeHeightDp.coerceAtLeast(settings.cutoutHeightDp)
-    val shape = RoundedCornerShape(IslandColors.MediumOuterRadius)
+    val shape = remember(holeW, holeH, exclusionZone.isLandscape) {
+        if (exclusionZone.isLandscape) {
+            RoundedCornerShape(IslandColors.MediumOuterRadius)
+        } else {
+            DeadZoneGeometry.CameraCollarCardShape(
+                holeWidthDp = holeW,
+                holeHeightDp = holeH,
+                cornerRadiusDp = IslandColors.MediumOuterRadius.value,
+                collarBlend = 1f
+            )
+        }
+    }
     val boundedMaxW = remember(exclusionZone.screenWidthPx, exclusionZone.density) {
         DeadZoneGeometry.boundedCardWidthDp(
             screenWidthPx = exclusionZone.screenWidthPx,
@@ -2066,12 +1941,14 @@ fun MediumPillView(
             isHighlighted = state.isDragOverIsland,
             backdrop = LocalAppBackdrop.current,
             crossWindowBlurActive = crossWindowBlurSupported,
-            performanceMode = settings.performanceMode
+            performanceMode = settings.performanceMode,
+            isRegularCard = true
         )
     } else {
         Modifier
     }
 
+    val shoulderTopPad = if (exclusionZone.isLandscape) 10.dp else (holeH * 0.34f).coerceAtLeast(10f).dp
     Column(
         modifier = Modifier
             .padding(horizontal = if (drawOwnChrome) 12.dp else 0.dp)
@@ -2083,9 +1960,9 @@ fun MediumPillView(
                 onRequestHaptic()
                 app.islandController.expand()
             }
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .padding(start = 16.dp, end = 16.dp, top = shoulderTopPad, bottom = 12.dp)
             .testTag("medium_stage1_pill"),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         // Top header strictly clears punch-hole camera exclusion zone even in standalone tests
         Row(
@@ -2665,50 +2542,153 @@ fun MediumPillView(
                 val frac = if (primary.max > 0) (primary.progress.toFloat() / primary.max.toFloat()).coerceIn(0.04f, 1f) else 0.5f
                 Column(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f)) {
+                        Box(
+                            modifier = Modifier
+                                .size(38.dp)
+                                .clip(RoundedCornerShape(11.dp))
+                                .background(IslandColors.AccentCyan.copy(alpha = 0.22f))
+                                .border(0.8.dp, IslandColors.AccentCyan.copy(alpha = 0.55f), RoundedCornerShape(11.dp)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Filled.Download, contentDescription = null, tint = IslandColors.AccentCyan, modifier = Modifier.size(20.dp))
+                        }
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Text(
                                 text = primary.title.ifBlank { primary.appName },
                                 color = Color.White,
-                                fontSize = 16.sp,
+                                fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
                             )
                             Text(
-                                text = listOf(primary.appName, primary.speedText, primary.etaText).filter { it.isNotBlank() }.joinToString(" · "),
+                                text = listOf(primary.appName, if (primary.indeterminate) "Downloading" else "$pct%").filter { it.isNotBlank() }.joinToString(" · "),
                                 color = IslandColors.TextSecondary,
-                                fontSize = 13.sp,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Box(contentAlignment = Alignment.Center, modifier = Modifier.size(50.dp)) {
+                            Canvas(modifier = Modifier.matchParentSize()) {
+                                val sw = 4.2.dp.toPx()
+                                drawArc(
+                                    color = Color.White.copy(alpha = 0.14f),
+                                    startAngle = -90f,
+                                    sweepAngle = 360f,
+                                    useCenter = false,
+                                    style = Stroke(sw)
+                                )
+                                drawArc(
+                                    color = IslandColors.AccentCyan,
+                                    startAngle = -90f,
+                                    sweepAngle = 360f * frac,
+                                    useCenter = false,
+                                    style = Stroke(sw, cap = StrokeCap.Round)
+                                )
+                            }
+                            Text(
+                                text = if (primary.indeterminate) "…" else "$pct%",
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(Color.White.copy(alpha = 0.08f))
+                            .padding(horizontal = 12.dp, vertical = 7.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Icon(Icons.Filled.Download, contentDescription = null, tint = IslandColors.AccentCyan, modifier = Modifier.size(14.dp))
+                            Text(
+                                text = primary.speedText.ifBlank { primary.appName },
+                                color = IslandColors.TextPrimary,
+                                fontSize = 12.sp,
                                 maxLines = 1
                             )
                         }
-                        Text(
-                            text = if (primary.indeterminate) "..." else "$pct%",
-                            color = IslandColors.AccentCyan,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Icon(Icons.Filled.Schedule, contentDescription = null, tint = IslandColors.TextSecondary, modifier = Modifier.size(14.dp))
+                            Text(
+                                text = primary.etaText.ifBlank { if (primary.indeterminate) "In progress" else "$pct% complete" },
+                                color = IslandColors.TextSecondary,
+                                fontSize = 12.sp,
+                                maxLines = 1
+                            )
+                        }
                     }
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(6.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.14f))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Box(
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
                             modifier = Modifier
-                                .fillMaxWidth(frac)
-                                .height(6.dp)
+                                .weight(1f)
+                                .height(36.dp)
                                 .clip(CircleShape)
-                                .background(IslandColors.AccentCyan)
-                        )
+                                .background(IslandColors.AccentCyan.copy(alpha = 0.24f))
+                                .border(0.8.dp, IslandColors.AccentCyan.copy(alpha = 0.65f), CircleShape)
+                                .clickable {
+                                    onRequestHaptic()
+                                    app.soundManager.playTap()
+                                    val pi = NotificationMediaCache.getContentIntent(primary.id)
+                                    val launched = runCatching {
+                                        if (pi != null) {
+                                            pi.send()
+                                            true
+                                        } else {
+                                            val launch = context.packageManager.getLaunchIntentForPackage(primary.packageName)
+                                                ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                            if (launch != null) {
+                                                context.startActivity(launch)
+                                                true
+                                            } else false
+                                        }
+                                    }.getOrDefault(false)
+                                    if (launched) app.islandController.collapse()
+                                }
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.OpenInNew, contentDescription = "Open", tint = Color.White, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text("Open", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(36.dp)
+                                .clip(CircleShape)
+                                .background(Color.White.copy(alpha = 0.12f))
+                                .border(0.8.dp, Color.White.copy(alpha = 0.22f), CircleShape)
+                                .clickable {
+                                    onRequestHaptic()
+                                    app.soundManager.playTap()
+                                    app.islandController.dismissNotificationById(primary.id)
+                                    app.islandController.collapse()
+                                }
+                        ) {
+                            Icon(Icons.Filled.Close, contentDescription = "Dismiss", tint = Color.White, modifier = Modifier.size(15.dp))
+                            Spacer(Modifier.width(5.dp))
+                            Text("Dismiss", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        }
                     }
                 }
             }
@@ -2804,7 +2784,7 @@ fun MediumPillView(
 }
 
 private fun maxPanelHeightForTab(tab: IslandTab) =
-    if (tab == IslandTab.TOOLS) 240.dp else 234.dp
+    if (tab == IslandTab.TOOLS) 236.dp else 228.dp
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -2833,7 +2813,18 @@ fun ExpandedIslandCard(
 
     val holeW = exclusionZone.holeWidthDp.coerceAtLeast(settings.cutoutWidthDp)
     val holeH = exclusionZone.holeHeightDp.coerceAtLeast(settings.cutoutHeightDp)
-    val outerShape = RoundedCornerShape(IslandColors.ExpandedOuterRadius)
+    val outerShape = remember(holeW, holeH, exclusionZone.isLandscape) {
+        if (exclusionZone.isLandscape) {
+            RoundedCornerShape(IslandColors.ExpandedOuterRadius)
+        } else {
+            DeadZoneGeometry.CameraCollarCardShape(
+                holeWidthDp = holeW,
+                holeHeightDp = holeH,
+                cornerRadiusDp = IslandColors.ExpandedOuterRadius.value,
+                collarBlend = 1f
+            )
+        }
+    }
     val useGlass = effectivePillStyle != PillStyle.BLACK
     val boundedMaxW = remember(exclusionZone.screenWidthPx, exclusionZone.density) {
         DeadZoneGeometry.boundedCardWidthDp(
@@ -2842,8 +2833,6 @@ fun ExpandedIslandCard(
             desiredMaxDp = DeadZoneGeometry.FULL_MAX_WIDTH_DP
         )
     }
-
-    var showGlyfPad by remember { mutableStateOf(false) }
 
     val expandedNotifAccent = remember(state.primaryActivity, settings.matchAppColor, accentColor) {
         val np = state.primaryActivity as? IslandActivity.NotificationPreview
@@ -2860,12 +2849,14 @@ fun ExpandedIslandCard(
             isHighlighted = state.isDragOverIsland,
             backdrop = LocalAppBackdrop.current,
             crossWindowBlurActive = crossWindowBlurSupported,
-            performanceMode = settings.performanceMode
+            performanceMode = settings.performanceMode,
+            isRegularCard = true
         )
     } else {
         Modifier
     }
 
+    val collarTopPad = if (exclusionZone.isLandscape) 2.dp else (holeH * 0.30f).coerceAtLeast(8f).dp
     Column(
         modifier = Modifier
             .padding(horizontal = if (drawOwnChrome) 12.dp else 0.dp)
@@ -2887,7 +2878,7 @@ fun ExpandedIslandCard(
                     }
                 }
             )
-            .padding(bottom = 3.dp)
+            .padding(top = collarTopPad, bottom = 4.dp)
             .testTag("expanded_island_card")
     ) {
         // Camera-aware Top Header Row (43dp at 33dp cutout height, strictly clears exclusionRectDp.bottom = 41dp)
@@ -2983,20 +2974,6 @@ fun ExpandedIslandCard(
                         )
                     }
                     Spacer(Modifier.width(2.dp))
-                }
-                IconButton(
-                    onClick = {
-                        onRequestHaptic()
-                        showGlyfPad = !showGlyfPad
-                    },
-                    modifier = Modifier.size(28.dp).testTag("expanded_glyf_btn")
-                ) {
-                    Icon(
-                        Icons.Filled.Gesture,
-                        contentDescription = "Glyf gesture pad",
-                        tint = if (showGlyfPad) accentColor else IslandColors.TextSecondary,
-                        modifier = Modifier.size(15.dp)
-                    )
                 }
                 IconButton(
                     onClick = {
@@ -3127,25 +3104,14 @@ fun ExpandedIslandCard(
                 }
                 .then(expandedSwipeModifier)
         ) {
-            if (showGlyfPad) {
-                InlineGlyfPadOverlay(
-                    settings = settings,
-                    accentColor = accentColor,
-                    onLaunched = {
-                        showGlyfPad = false
-                        app.islandController.collapse()
-                    },
-                    onClose = { showGlyfPad = false }
-                )
-            } else {
-                AnimatedContent(
-                    targetState = state.activeTab,
-                    transitionSpec = {
-                        MotionTokens.tabSwitchEnterTransition(effectiveStyle) togetherWith
-                            MotionTokens.tabSwitchExitTransition(effectiveStyle)
-                    },
-                    label = "island_tab_content"
-                ) { tab ->
+            AnimatedContent(
+                targetState = state.activeTab,
+                transitionSpec = {
+                    MotionTokens.tabSwitchEnterTransition(effectiveStyle) togetherWith
+                        MotionTokens.tabSwitchExitTransition(effectiveStyle)
+                },
+                label = "island_tab_content"
+            ) { tab ->
                 when (tab) {
                     IslandTab.MUSIC -> MusicExpandedView(
                         state = mediaState,
@@ -3257,7 +3223,6 @@ fun ExpandedIslandCard(
                     )
                 }
             }
-            }
         }
 
         Spacer(Modifier.height(2.dp))
@@ -3292,96 +3257,6 @@ fun ExpandedIslandCard(
 }
 
 @Composable
-private fun InlineGlyfPadOverlay(
-    settings: IslandSettings,
-    accentColor: Color,
-    onLaunched: () -> Unit,
-    onClose: () -> Unit
-) {
-    val context = LocalContext.current
-    val strokePoints = remember { mutableStateListOf<StrokePoint>() }
-    var lastRecognized by remember { mutableStateOf("Draw C, W, or O to launch shortcut") }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 6.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(Color.White.copy(alpha = 0.08f))
-            .border(0.8.dp, accentColor.copy(alpha = 0.45f), RoundedCornerShape(16.dp))
-            .padding(10.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(lastRecognized, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium)
-            Text(
-                text = "Close",
-                color = accentColor,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.clickable(onClick = onClose)
-            )
-        }
-        Canvas(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(140.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(Color.Black.copy(alpha = 0.45f))
-                .pointerInput(settings.glyphCApp, settings.glyphWApp, settings.glyphOApp) {
-                    detectDragGestures(
-                        onDragStart = { start ->
-                            strokePoints.clear()
-                            strokePoints.add(StrokePoint(start.x, start.y))
-                        },
-                        onDrag = { change, _ ->
-                            change.consume()
-                            strokePoints.add(StrokePoint(change.position.x, change.position.y))
-                        },
-                        onDragEnd = {
-                            val match = GlyfStrokeRecognizer.recognize(strokePoints.toList())
-                            val targetPkg = when (match) {
-                                GlyfGesture.C -> settings.glyphCApp
-                                GlyfGesture.W -> settings.glyphWApp
-                                GlyfGesture.O -> settings.glyphOApp
-                                null -> ""
-                            }
-                            if (match != null && targetPkg.isNotBlank()) {
-                                val launch = context.packageManager.getLaunchIntentForPackage(targetPkg)
-                                    ?.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                                if (launch != null) {
-                                    runCatching { context.startActivity(launch) }
-                                    onLaunched()
-                                } else {
-                                    lastRecognized = "No launchable app for '${match.symbol}'"
-                                }
-                            } else if (match != null) {
-                                lastRecognized = "No app assigned for '${match.symbol}' (set in Features)"
-                            } else {
-                                lastRecognized = "Not recognized — draw C, W, or O"
-                            }
-                        }
-                    )
-                }
-        ) {
-            if (strokePoints.size > 1) {
-                val path = Path().apply {
-                    moveTo(strokePoints.first().x, strokePoints.first().y)
-                    for (i in 1 until strokePoints.size) {
-                        lineTo(strokePoints[i].x, strokePoints[i].y)
-                    }
-                }
-                drawPath(path = path, color = accentColor, style = Stroke(width = 4.dp.toPx(), cap = StrokeCap.Round))
-            }
-        }
-    }
-}
-
-@Composable
 fun BottomChooserBar(
     settings: IslandSettings,
     activeTab: IslandTab,
@@ -3395,11 +3270,11 @@ fun BottomChooserBar(
     val mainTabs = orderedActive.take(5)
     val moreTabs = orderedActive.drop(5)
 
-    // Translucent Liquid Glass chooser capsule so the background wallpaper clearly shines through the entire card
-    val chooserBg = if (!useLightGlass) {
-        Color(0x1EFFFFFF)
+    // Floating Glass Pill Dock (`bar-v2-01`) with crisp specular top edge
+    val chooserBrush = if (!useLightGlass) {
+        Brush.verticalGradient(listOf(Color(0x28FFFFFF), Color(0x16FFFFFF)))
     } else {
-        Color(0x320C1220)
+        Brush.verticalGradient(listOf(Color(0x46141C30), Color(0x2E0B101E)))
     }
 
     Box(
@@ -3408,19 +3283,19 @@ fun BottomChooserBar(
             .heightIn(min = 42.dp, max = 48.dp)
             .padding(horizontal = 12.dp)
             .clip(RoundedCornerShape(IslandColors.ExpandedInnerSheetRadius))
-            .background(chooserBg)
+            .background(chooserBrush)
             .border(
-                width = 0.85.dp,
-                brush = Brush.horizontalGradient(
+                width = 0.9.dp,
+                brush = Brush.verticalGradient(
                     colors = listOf(
-                        Color.White.copy(alpha = 0.28f),
-                        accentColor.copy(alpha = 0.55f),
-                        Color.White.copy(alpha = 0.20f)
+                        Color.White.copy(alpha = 0.42f),
+                        accentColor.copy(alpha = 0.34f),
+                        Color.White.copy(alpha = 0.14f)
                     )
                 ),
                 shape = RoundedCornerShape(IslandColors.ExpandedInnerSheetRadius)
             )
-            .padding(horizontal = 4.dp, vertical = 3.dp)
+            .padding(horizontal = 5.dp, vertical = 3.dp)
     ) {
         val showMore = isMoreOpen && moreTabs.isNotEmpty()
         AnimatedContent(
@@ -3452,8 +3327,8 @@ fun BottomChooserBar(
                         modifier = Modifier
                             .widthIn(min = 44.dp)
                             .heightIn(min = 36.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (morePage) accentColor.copy(alpha = 0.22f) else Color.Transparent)
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(if (morePage) accentColor.copy(alpha = 0.24f) else Color.Transparent)
                             .clickable(onClick = onToggleMore)
                             .padding(horizontal = 6.dp, vertical = 2.dp)
                             .testTag("chooser_more_button")
@@ -3461,14 +3336,14 @@ fun BottomChooserBar(
                         Icon(
                             imageVector = Icons.Filled.MoreHoriz,
                             contentDescription = if (morePage) "Main tabs" else "More tabs",
-                            tint = if (morePage) accentColor else IslandColors.TextSecondary,
+                            tint = if (morePage) accentColor else IslandColors.TextSecondary.copy(alpha = MotionTokens.DOCK_INACTIVE_ALPHA),
                             modifier = Modifier.size(16.dp)
                         )
                         Text(
                             text = if (morePage) "Back" else "More",
                             fontSize = 11.sp,
                             lineHeight = 12.sp,
-                            color = if (morePage) accentColor else IslandColors.TextSecondary
+                            color = if (morePage) accentColor else IslandColors.TextSecondary.copy(alpha = MotionTokens.DOCK_INACTIVE_ALPHA)
                         )
                     }
                 }
@@ -3489,10 +3364,10 @@ private fun ChooserChip(
     val scaleState = animateFloatAsState(
         targetValue = when {
             pressed -> MotionTokens.TAP_SQUISH_SCALE
-            selected -> 1.03f
+            selected -> MotionTokens.DOCK_ACTIVE_ICON_SCALE
             else -> 1.0f
         },
-        animationSpec = MotionTokens.spatialFast(),
+        animationSpec = MotionTokens.dockIconScaleSpring(),
         label = "chip_scale"
     )
     Column(
@@ -3506,8 +3381,26 @@ private fun ChooserChip(
                 scaleX = s
                 scaleY = s
             }
-            .clip(RoundedCornerShape(12.dp))
-            .background(if (selected) accentColor.copy(alpha = 0.26f) else Color.Transparent)
+            .clip(RoundedCornerShape(14.dp))
+            .background(
+                if (selected) {
+                    Brush.verticalGradient(
+                        listOf(
+                            Color.White.copy(alpha = 0.20f),
+                            accentColor.copy(alpha = 0.26f)
+                        )
+                    )
+                } else {
+                    SolidColor(Color.Transparent)
+                }
+            )
+            .then(
+                if (selected) {
+                    Modifier.border(0.75.dp, Color.White.copy(alpha = 0.28f), RoundedCornerShape(14.dp))
+                } else {
+                    Modifier
+                }
+            )
             .clickable(
                 interactionSource = interactionSource,
                 indication = null,
@@ -3519,7 +3412,7 @@ private fun ChooserChip(
         Icon(
             imageVector = tabIcon(tab),
             contentDescription = tab.title,
-            tint = if (selected) accentColor else IslandColors.TextSecondary,
+            tint = if (selected) accentColor else IslandColors.TextSecondary.copy(alpha = MotionTokens.DOCK_INACTIVE_ALPHA),
             modifier = Modifier.size(16.dp)
         )
         Text(
@@ -3527,9 +3420,19 @@ private fun ChooserChip(
             fontSize = 11.sp,
             lineHeight = 12.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = if (selected) accentColor else IslandColors.TextSecondary,
+            color = if (selected) Color.White else IslandColors.TextSecondary.copy(alpha = MotionTokens.DOCK_INACTIVE_ALPHA),
             maxLines = 1
         )
+        if (selected) {
+            Spacer(Modifier.height(1.dp))
+            Box(
+                modifier = Modifier
+                    .width(14.dp)
+                    .height(2.dp)
+                    .clip(CircleShape)
+                    .background(accentColor)
+            )
+        }
     }
 }
 
